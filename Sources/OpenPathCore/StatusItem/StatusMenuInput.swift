@@ -5,17 +5,21 @@ public struct StatusMenuInput: Sendable, Equatable {
     public var accessibilityPermission: AccessibilityPermissionStatus
     /// 設定ファイルの読み込み・生成の失敗（`ConfigStore.lastError`）
     public var configError: ConfigStoreError?
+    /// 自動確定の後にクリップボードを元へ戻せなかったことを、利用者がまだ確認していないか
+    public var hasClipboardRestoreFailure: Bool
     public var loginItemStatus: LoginItemStatus
 
     public init(
         isEnabled: Bool = true,
         accessibilityPermission: AccessibilityPermissionStatus,
         configError: ConfigStoreError? = nil,
+        hasClipboardRestoreFailure: Bool = false,
         loginItemStatus: LoginItemStatus
     ) {
         self.isEnabled = isEnabled
         self.accessibilityPermission = accessibilityPermission
         self.configError = configError
+        self.hasClipboardRestoreFailure = hasClipboardRestoreFailure
         self.loginItemStatus = loginItemStatus
     }
 }

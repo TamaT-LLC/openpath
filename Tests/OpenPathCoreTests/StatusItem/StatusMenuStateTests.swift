@@ -41,7 +41,7 @@ struct StatusMenuLayoutTests {
         let state = StatusMenuState(F.input(permission: .granted))
 
         #expect(state.item(for: .openAccessibilitySettings) == nil)
-        #expect(state.commandItems.count == StatusMenuCommand.allCases.count - 1)
+        #expect(state.commandItems.count == StatusMenuCommand.allCases.filter(\.appearsAsMenuItem).count - 1)
     }
 
     @Test("アクセシビリティ設定を開く…は権限が未付与なら出す")
@@ -172,6 +172,32 @@ struct StatusMenuNoticeTests {
 
         #expect(state.notices.map(\.kind) == [.accessibilityPermissionMissing, .configError])
         #expect(state.entries.prefix(3) == [.notice(state.notices[0]), .notice(state.notices[1]), .separator])
+    }
+
+    @Test("クリップボードを戻せなかったらバッジを付け、通知を選ぶと消せるようにする")
+    func clipboardRestoreFailure() throws {
+        let state = StatusMenuState(F.input(hasClipboardRestoreFailure: true))
+
+        #expect(state.icon.hasBadge)
+        let notice = try #require(state.notices.first)
+        #expect(state.notices.count == 1)
+        #expect(notice.kind == .clipboardRestoreFailed)
+        #expect(notice.title == "クリップボードを元に戻せませんでした")
+        #expect(notice.command == .dismissClipboardNotice)
+        #expect(state.item(for: .dismissClipboardNotice) == nil)
+    }
+
+    @Test("通知は権限 → 設定 → クリップボードの順に並べる")
+    func noticeOrder() {
+        let state = StatusMenuState(F.input(permission: .notGranted, configError: F.configError, hasClipboardRestoreFailure: true))
+
+        #expect(state.notices.map(\.kind) == [.accessibilityPermissionMissing, .configError, .clipboardRestoreFailed])
+    }
+
+    @Test("通知を消す操作はメニューの項目には並ばない")
+    func dismissIsNoticeOnly() {
+        #expect(StatusMenuCommand.dismissClipboardNotice.appearsAsMenuItem == false)
+        #expect(StatusMenuCommand.allCases.filter { !$0.appearsAsMenuItem } == [.dismissClipboardNotice])
     }
 
     @Test("ツールチップに理由を 1 行ずつ並べる")

@@ -19,6 +19,9 @@ enum StatusMenuText {
     static let permissionMissingTitle = "アクセシビリティ権限がありません"
     static let permissionMissingDetail = "パネルの検知とパスの入力に使います。システム設定で openpath を許可してください"
     static let configErrorTitle = "設定ファイルにエラーがあります"
+    static let clipboardRestoreFailedTitle = "クリップボードを元に戻せませんでした"
+    static let clipboardRestoreFailedDetail = "「開く」まで自動で押した後、コピーしていた内容を元に戻せませんでした。必要ならコピーし直してください。選ぶとこの通知を消します"
+    static let dismissNotice = "通知を消す"
 
     // MARK: - ログイン時に起動
 

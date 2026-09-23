@@ -16,6 +16,11 @@ public final class AppCoordinator {
     /// 通知の途中で状態が変わらないよう、この中から `handle(_:)` を同期的に呼ばないこと。
     public var onStateChange: (@MainActor (CoordinatorState) -> Void)?
 
+    /// パレットを閉じた後に分かった注入のエラーのうち、利用者が気づくべきものを伝える。
+    /// 自動確定では「開く」でパネルが閉じ、パレットも閉じるため、クリップボードを元に戻せなかったこと
+    /// （`InjectionError.pasteboardRestoreFailed`）をパレットでは伝えられない。メニューバーのバッジ等で知らせる。
+    public var onErrorOutsidePalette: (@MainActor (InjectionError) -> Void)?
+
     private let palette: any PaletteDisplaying
     private let injector: any PathInjecting
     private let history: any HistoryRecording
@@ -254,11 +259,15 @@ public final class AppCoordinator {
         state = .idle
         palette.setLocked(false)
         switch outcome {
-        case .succeeded, .failed(InjectionError.panelGone), .failed(InjectionError.pasteboardRestoreFailed):
+        case .succeeded, .failed(InjectionError.panelGone):
             // 「開く」の押下でパネルが閉じたとみなす。押下まで進んだかは Coordinator からは分からないため、
-            // injector がパネルの消滅（panelGone）で終えた場合と、元の結果より優先して伝えられる
-            // ペーストボードの復元失敗で終えた場合も、パネルの消滅を根拠に成功として扱う
+            // injector がパネルの消滅（panelGone）で終えた場合も、パネルの消滅を根拠に成功として扱う
             history.record(path: path)
+        case .failed(InjectionError.pasteboardRestoreFailed):
+            // 元の結果より優先して伝えられるペーストボードの復元失敗も、パネルの消滅を根拠に成功として扱う。
+            // クリップボードが失われたことはパレットで伝えられないため、外へ知らせる
+            history.record(path: path)
+            onErrorOutsidePalette?(.pasteboardRestoreFailed)
         case .failed, .timedOut:
             return
         }

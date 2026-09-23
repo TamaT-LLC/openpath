@@ -1,5 +1,5 @@
 /// メニューバーのメニューから実行できる操作（UX-001 §6, FR-CONFIG-02/03）。
-/// `allCases` の順がメニューでの並び順。
+/// `allCases` のうちメニューの項目に並ぶもの（`appearsAsMenuItem`）の順が、メニューでの並び順。
 public enum StatusMenuCommand: Sendable, Hashable, CaseIterable {
     /// 有効（チェック切替）
     case toggleEnabled
@@ -15,6 +15,13 @@ public enum StatusMenuCommand: Sendable, Hashable, CaseIterable {
     case openAccessibilitySettings
     /// 終了
     case quit
+    /// クリップボードの復元失敗の通知を消す。通知を選んだときだけ行い、メニューの項目には並ばない
+    case dismissClipboardNotice
+
+    /// メニューの項目として並ぶか。通知から選ぶだけの操作は false
+    public var appearsAsMenuItem: Bool {
+        self != .dismissClipboardNotice
+    }
 
     public var title: String {
         switch self {
@@ -25,6 +32,7 @@ public enum StatusMenuCommand: Sendable, Hashable, CaseIterable {
         case .toggleLaunchAtLogin: StatusMenuText.toggleLaunchAtLogin
         case .openAccessibilitySettings: StatusMenuText.openAccessibilitySettings
         case .quit: StatusMenuText.quit
+        case .dismissClipboardNotice: StatusMenuText.dismissNotice
         }
     }
 
@@ -33,7 +41,8 @@ public enum StatusMenuCommand: Sendable, Hashable, CaseIterable {
         switch self {
         case .openConfigFile: StatusMenuText.settingsKeyEquivalent
         case .quit: StatusMenuText.quitKeyEquivalent
-        case .toggleEnabled, .rebuildCandidates, .clearHistory, .toggleLaunchAtLogin, .openAccessibilitySettings: ""
+        case .toggleEnabled, .rebuildCandidates, .clearHistory, .toggleLaunchAtLogin, .openAccessibilitySettings,
+             .dismissClipboardNotice: ""
         }
     }
 }

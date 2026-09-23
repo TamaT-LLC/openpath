@@ -39,7 +39,7 @@ public struct StatusMenuActions {
         case .toggleEnabled: setEnabled != nil
         case .rebuildCandidates: rebuildCandidates != nil
         case .clearHistory: clearHistory != nil
-        case .openConfigFile, .toggleLaunchAtLogin, .openAccessibilitySettings, .quit: true
+        case .openConfigFile, .toggleLaunchAtLogin, .openAccessibilitySettings, .quit, .dismissClipboardNotice: true
         }
     }
 }

@@ -3,7 +3,7 @@
 /// `StatusMenuInput` から決まる純粋な値で、Mac 層は NSStatusItem / NSMenu へ反映するだけにする。
 /// メニューは次の順に並べる。
 ///
-/// 1. 通知（権限なし → 設定エラーの順）と区切り線。通知が無ければ省く
+/// 1. 通知（権限なし → 設定エラー → クリップボードの復元失敗の順）と区切り線。通知が無ければ省く
 /// 2. 有効
 /// 3. 候補を再構築 / 設定ファイルを開く… / 履歴をクリア…
 /// 4. ログイン時に起動 / アクセシビリティ設定を開く…（未付与時のみ）
@@ -48,6 +48,10 @@ public struct StatusMenuState: Sendable, Equatable {
         }
         if let configError = input.configError {
             notices.append(.configError(configError))
+        }
+        // 動作には影響しない事後の知らせのため最後に出す
+        if input.hasClipboardRestoreFailure {
+            notices.append(.clipboardRestoreFailed)
         }
         return notices
     }
