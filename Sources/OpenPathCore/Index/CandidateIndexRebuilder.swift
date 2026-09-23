@@ -11,7 +11,8 @@ import Observation
 ///   こうして同じソースの走査と差し替えを直列にする。
 /// - 再構築中に届いた契機は重ねて走らせず、終わった後に 1 回だけまとめて走査し直す。
 ///   設定の変更は走査中の結果を古くするため、走査を取り消してから新しい設定で走査し直す。
-/// - 周期の再構築は、再構築を終えてから `interval` 後に行う。走査中には周期の契機を積まない。
+/// - 周期の再構築は、全件の再構築を終えてから `interval` 後に行う。全件の走査中には周期の契機を積まず、
+///   履歴だけの取り直しでは数え直さない。
 @MainActor
 @Observable
 public final class CandidateIndexRebuilder {
@@ -158,8 +159,11 @@ public final class CandidateIndexRebuilder {
     }
 
     private func startCycle(_ scope: CandidateRebuildScope) {
-        periodicTask?.cancel()
-        periodicTask = nil
+        // 周期を数え直すのは全件の再構築のときだけ。確定のたびの履歴の取り直しで周期が延び続けないようにする
+        if scope == .all {
+            periodicTask?.cancel()
+            periodicTask = nil
+        }
         let (sources, staleKinds) = plan(scope)
         let task = Task.detached(priority: .utility) { [weak self, index] in
             let outcome = await CandidateRebuildCycle.run(sources: sources, removing: staleKinds, in: index)
@@ -195,7 +199,8 @@ public final class CandidateIndexRebuilder {
             return
         }
         updateIsRebuilding()
-        if lifecycle == .running {
+        // 履歴だけの取り直しを終えたときは、数えている途中の周期をそのまま続ける
+        if lifecycle == .running, periodicTask == nil {
             schedulePeriodicRebuild()
         }
         resumeIdleWaiters()

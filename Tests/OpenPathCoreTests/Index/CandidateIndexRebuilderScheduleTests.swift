@@ -80,6 +80,51 @@ struct CandidateIndexRebuilderScheduleTests {
         #expect(root.startedCount == 3)
     }
 
+    @Test("履歴だけの取り直しでは数え直さない（確定が 5 分より短い間隔で続いても、周期どおりに走査し直す）")
+    func refreshHistoryDoesNotResetInterval() async throws {
+        let harness = RebuilderHarness()
+        let root = harness.source(.root(F.firstRoot))
+        await harness.startAndWait()
+        await harness.scheduleClock.waitUntilSleeping(count: 1)
+        let half = F.interval / 2
+
+        harness.scheduleClock.advance(by: half)
+        harness.rebuilder.refreshHistory()
+        await harness.source(.history).waitUntilStarted(count: 2)
+        await harness.waitUntilIdle()
+        await harness.scheduleClock.waitUntilSleeping(count: 1)
+        harness.scheduleClock.advance(by: F.interval - half)
+
+        // 起動時の再構築を終えてから 5 分で周期の待ちが明ける
+        try #require(harness.scheduleClock.sleeperCount == 0)
+        await root.waitUntilStarted(count: 2)
+        await harness.waitUntilIdle()
+        #expect(root.startedCount == 2)
+    }
+
+    @Test("履歴の取り直し中に周期の期限が来たら、取り直しを終えた後に全件を走査し直し、周期を数え直す")
+    func periodDueDuringHistoryRefreshRebuildsAfterIt() async throws {
+        let harness = RebuilderHarness()
+        let root = harness.source(.root(F.firstRoot))
+        let history = harness.source(.history)
+        await harness.startAndWait()
+        await harness.scheduleClock.waitUntilSleeping(count: 1)
+        history.setGated(true)
+        harness.rebuilder.refreshHistory()
+        await history.waitUntilStarted(count: 2)
+
+        harness.scheduleClock.advance(by: F.interval)
+        try #require(await F.eventually { harness.rebuilder.isRebuilding })
+        history.release(items: [])
+        await history.waitUntilStarted(count: 3)
+        history.release(items: [])
+        await harness.waitUntilIdle()
+        await harness.scheduleClock.waitUntilSleeping(count: 1)
+
+        #expect(root.startedCount == 2)
+        #expect(!harness.rebuilder.isRebuilding)
+    }
+
     @Test("stop の後は周期の再構築を行わない")
     func stopCancelsSchedule() async {
         let harness = RebuilderHarness()
