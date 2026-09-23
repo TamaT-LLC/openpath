@@ -115,6 +115,30 @@ struct PanelWatchPolicySelectionModeTests {
         #expect(steps == [.send(.panelContextChanged(.movedFinderPanel))])
     }
 
+    @Test("位置を読めなかった走査（矩形が空）は移動とみなさず、直前の位置を保つ")
+    func unreadableFrameKeepsPreviousFrame() {
+        var driver = PolicyDriver()
+        driver.startWatching(initialPanels: [.finderPanel])
+        driver.send(.coordinatorStateChanged(.panelShown(.finderPanel, isPaletteVisible: true)))
+        driver.send(.axNotificationReceived(processID: finderPID))
+
+        let steps = driver.completeLatestScan(.found([PanelContext.finderPanel.withFrame(.zero)]))
+
+        #expect(steps.isEmpty)
+        #expect(driver.policy.trackedPanel == .finderPanel)
+    }
+
+    @Test("位置を読めなかった走査でも、フォルダのみと分かったら直前の位置のまま知らせる")
+    func unreadableFrameStillAnnouncesSelectionMode() {
+        var driver = PolicyDriver()
+        showProvisionalPanel(&driver)
+        driver.send(.pollTick)
+
+        let steps = driver.completeLatestScan(.found([Self.directoriesOnlyPanel.withFrame(.zero)]))
+
+        #expect(steps == [.send(.panelContextChanged(Self.directoriesOnlyPanel)), .stopPolling])
+    }
+
     @Test("推定が済んだパネルの PanelShown 中はポーリングを止める（従来どおり）")
     func settledPanelStopsPolling() {
         var driver = PolicyDriver()

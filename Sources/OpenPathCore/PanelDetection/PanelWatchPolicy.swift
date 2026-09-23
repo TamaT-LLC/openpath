@@ -211,7 +211,9 @@ public struct PanelWatchPolicy {
         // 追跡中のパネルの選択モードの推定し直しの予定が変われば、ポーリングの要否も変わる
         defer { updatePolling(effects: &effects) }
         if let tracked = trackedPanel {
-            if let current = panels.first(where: { $0.id == tracked.id }) {
+            if let scanned = panels.first(where: { $0.id == tracked.id }) {
+                // 位置を読めなかった走査（OpenPanelLocator は矩形を .zero にする）を移動とみなさず、直前の位置を保つ
+                let current = scanned.frame.isEmpty ? scanned.withFrame(tracked.frame) : scanned
                 trackedPanel = current
                 let hasChanged = current.isDirectoriesOnly != tracked.isDirectoriesOnly || current.frame != tracked.frame
                 if !reannounceIfNeeded(current, effects: &effects), hasChanged {
