@@ -1,0 +1,37 @@
+import Foundation
+import os
+import Testing
+
+@testable import OpenPathCore
+
+@Suite("OSLogSink")
+struct OSLogSinkTests {
+    @Test("LogLevel を統合ログのレベルに対応付ける")
+    func mapsLevelToOSLogType() {
+        #expect(OSLogSink.osLogType(for: .debug) == .debug)
+        #expect(OSLogSink.osLogType(for: .info) == .info)
+        #expect(OSLogSink.osLogType(for: .warning) == .default)
+        #expect(OSLogSink.osLogType(for: .error) == .error)
+    }
+
+    @Test("伏せ字処理をしない debug のメッセージは統合ログで非公開にする（CWE-532）")
+    func debugMessageIsPrivate() {
+        #expect(!OSLogSink.isMessagePublic(for: .debug))
+    }
+
+    @Test("統合ログで公開するのは、パスを伏せ字処理したレベルのメッセージだけ", arguments: LogLevel.allCases)
+    func publicOnlyWhenRedacted(level: LogLevel) {
+        #expect(OSLogSink.isMessagePublic(for: level) == level.redactsPaths)
+    }
+
+    @Test("全レベル・パス付きのエントリを書き込んでもクラッシュしない")
+    func writesAllKindsOfEntries() {
+        let sink = OSLogSink(subsystem: testOSLogSubsystem)
+
+        for level in LogLevel.allCases {
+            sink.write(LogEntry(date: fixedDate, level: level, message: "os log sink test"))
+        }
+        sink.write(LogEntry(date: fixedDate, level: .debug, message: "os log sink test", path: "/tmp/openpath-test"))
+        sink.flush()
+    }
+}

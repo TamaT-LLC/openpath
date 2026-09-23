@@ -5,6 +5,9 @@ public enum InjectionError: Error, Equatable, Sendable {
     case axError(code: Int32)
     /// 注入先のパネルが消えていた。
     case panelGone
+    /// 注入に使ったペーストボードを元の内容へ戻せなかった（FR-INJECT-04）。
+    /// パネルの移動自体は済んでいる場合があるが、ユーザーのクリップボードが失われたことを知らせるため失敗として扱う。
+    case pasteboardRestoreFailed
 }
 
 /// タイムアウトした注入ステップ（DSN-001 §3.1）。
@@ -31,6 +34,8 @@ extension InjectionError {
             PaletteMessage.injectionFailed(reason: "アクセシビリティ操作に失敗 (\(code))")
         case .panelGone:
             nil
+        case .pasteboardRestoreFailed:
+            PaletteMessage.pasteboardRestoreFailed
         }
     }
 }
