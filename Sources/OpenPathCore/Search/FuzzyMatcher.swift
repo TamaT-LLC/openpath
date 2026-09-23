@@ -24,14 +24,14 @@ public struct FuzzyMatcher: Sendable {
     }
 
     public func score(query: FuzzyQuery, in target: FuzzyTarget) -> FuzzyMatch? {
-        let queryLength = query.characters.count
+        let queryLength = query.codes.count
         guard queryLength > 0 else {
             return FuzzyMatch(score: FuzzyScoring.minimumMatchScore, positions: [])
         }
         guard let alignment = FuzzyAligner(query: query, target: target).bestAlignment() else {
             return nil
         }
-        let isExactMatch = queryLength == target.characters.count
+        let isExactMatch = queryLength == target.elements.count
         let score = alignment.score + (isExactMatch ? FuzzyScoring.exactMatchBonus : 0)
         return FuzzyMatch(
             score: max(score, FuzzyScoring.minimumMatchScore),
