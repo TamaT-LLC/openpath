@@ -113,7 +113,11 @@ struct ConfigDecodingErrorDescriptionTests {
             ),
             (
                 ConfigDecodingError(key: "roots", kind: .invalidRootPath("repos")),
-                "設定 'roots': 'repos' は絶対パスか ~ で始まるパスで指定してください"
+                "設定 'roots': 'repos' は / で始まる絶対パス、~、または ~/ で始まるパスで指定してください（~user 形式は使えません）"
+            ),
+            (
+                ConfigDecodingError(key: "roots", kind: .invalidRootPath("~other/src")),
+                "設定 'roots': '~other/src' は / で始まる絶対パス、~、または ~/ で始まるパスで指定してください（~user 形式は使えません）"
             ),
             (
                 ConfigDecodingError(key: "hotkey", kind: .invalidHotkey(.missingModifier)),

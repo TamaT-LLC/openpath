@@ -66,7 +66,8 @@ private extension ConfigDecodingError.Kind {
         case .belowMinimum(let value, let minimum):
             "\(minimum) 以上を指定してください（実際の値は \(value)）"
         case .invalidRootPath(let path):
-            "'\(path)' は絶対パスか ~ で始まるパスで指定してください"
+            // `~user` も ~ で始まるが展開しないため、受け付ける形を明示する
+            "'\(path)' は / で始まる絶対パス、~、または ~/ で始まるパスで指定してください（~user 形式は使えません）"
         case .invalidHotkey(let error):
             error.description
         }
