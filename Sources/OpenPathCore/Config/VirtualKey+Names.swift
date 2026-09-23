@@ -1,0 +1,83 @@
+public extension VirtualKey {
+    /// 設定ファイルでこのキーを表す名前（小文字）。先頭が正規の表記で、残りは別名
+    var names: [String] {
+        switch self {
+        case .a: ["a"]
+        case .b: ["b"]
+        case .c: ["c"]
+        case .d: ["d"]
+        case .e: ["e"]
+        case .f: ["f"]
+        case .g: ["g"]
+        case .h: ["h"]
+        case .i: ["i"]
+        case .j: ["j"]
+        case .k: ["k"]
+        case .l: ["l"]
+        case .m: ["m"]
+        case .n: ["n"]
+        case .o: ["o"]
+        case .p: ["p"]
+        case .q: ["q"]
+        case .r: ["r"]
+        case .s: ["s"]
+        case .t: ["t"]
+        case .u: ["u"]
+        case .v: ["v"]
+        case .w: ["w"]
+        case .x: ["x"]
+        case .y: ["y"]
+        case .z: ["z"]
+        case .digit0: ["0"]
+        case .digit1: ["1"]
+        case .digit2: ["2"]
+        case .digit3: ["3"]
+        case .digit4: ["4"]
+        case .digit5: ["5"]
+        case .digit6: ["6"]
+        case .digit7: ["7"]
+        case .digit8: ["8"]
+        case .digit9: ["9"]
+        case .minus: ["-", "minus"]
+        case .equal: ["=", "equal"]
+        case .leftBracket: ["[", "leftbracket"]
+        case .rightBracket: ["]", "rightbracket"]
+        case .backslash: ["\\", "backslash"]
+        case .semicolon: [";", "semicolon"]
+        case .quote: ["'", "quote"]
+        case .comma: [",", "comma"]
+        case .period: [".", "period"]
+        case .slash: ["/", "slash"]
+        case .grave: ["`", "grave"]
+        // テンキーの Enter（kVK_ANSI_KeypadEnter）は対象外とし、enter は Return の別名として扱う
+        case .return: ["return", "enter"]
+        case .tab: ["tab"]
+        case .space: ["space"]
+        case .delete: ["delete", "backspace"]
+        case .escape: ["escape", "esc"]
+        case .leftArrow: ["left"]
+        case .rightArrow: ["right"]
+        case .upArrow: ["up"]
+        case .downArrow: ["down"]
+        case .f1: ["f1"]
+        case .f2: ["f2"]
+        case .f3: ["f3"]
+        case .f4: ["f4"]
+        case .f5: ["f5"]
+        case .f6: ["f6"]
+        case .f7: ["f7"]
+        case .f8: ["f8"]
+        case .f9: ["f9"]
+        case .f10: ["f10"]
+        case .f11: ["f11"]
+        case .f12: ["f12"]
+        }
+    }
+}
+
+extension VirtualKey {
+    /// 正規の表記（`names` の先頭）。`names` は常に 1 つ以上の名前を持つ
+    var canonicalName: String {
+        names.first ?? ""
+    }
+}
