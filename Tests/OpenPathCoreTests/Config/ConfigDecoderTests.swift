@@ -51,7 +51,7 @@ struct ConfigDecoderTests {
         #expect(result.warnings.isEmpty)
     }
 
-    @Test("既定値は DSN-002 §6 のサンプルに従う（roots のみ空）")
+    @Test("既定値は DSN-002 §6 のサンプルに従う（記入例の roots と disabled_apps は空）")
     func defaultValues() {
         let config = Config.default
 
@@ -60,9 +60,17 @@ struct ConfigDecoderTests {
         #expect(config.includeFiles == false)
         #expect(config.autoConfirm == false)
         #expect(config.hotkey == Hotkey(key: .o, modifiers: [.control, .shift]))
-        #expect(config.disabledApps == ["com.apple.finder"])
+        #expect(config.disabledApps.isEmpty)
         #expect(config.ignore == ["node_modules", ".git", "target", "DerivedData", ".build"])
         #expect(config.ghq.enabled == true)
+    }
+
+    @Test("disabled_apps を省略すると全アプリで有効になる（REQ-001 FR-DETECT-04）")
+    func allAppsEnabledByDefault() throws {
+        let config = try S.decode("depth = 2").config
+
+        #expect(config.disabledApps.isEmpty)
+        #expect(!config.disabledApps.contains("com.apple.finder"))
     }
 
     @Test("空の TOML はすべて既定値になる")

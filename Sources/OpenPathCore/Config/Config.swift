@@ -37,7 +37,7 @@ public struct Config: Sendable, Equatable {
     }
 }
 
-// MARK: - 既定値（DSN-002 §6 のサンプルに従う）
+// MARK: - 既定値（DSN-002 §6 のサンプルに従う。記入例である roots と disabled_apps は空にする）
 
 public extension Config {
     /// サンプルの `~/repos` / `~/Documents` は環境によって存在しないため既定では空にする。
@@ -49,7 +49,9 @@ public extension Config {
     static let defaultAutoConfirm = false
     /// Ctrl+Shift+O（UX-001 §4, REQ-001 FR-PALETTE-05）
     static let defaultHotkey = Hotkey(key: .o, modifiers: [.control, .shift])
-    static let defaultDisabledApps: Set<String> = ["com.apple.finder"]
+    /// 既定は全アプリで有効（REQ-001 FR-DETECT-04）。サンプルの `com.apple.finder` は記入例で、
+    /// 既定で無効にすると Finder の「開く」を使う初回体験（UX-001 §7）と手動テスト S-01 が成り立たない
+    static let defaultDisabledApps: Set<String> = []
     static let defaultIgnore = ["node_modules", ".git", "target", "DerivedData", ".build"]
 
     /// すべてのキーが既定値の設定
