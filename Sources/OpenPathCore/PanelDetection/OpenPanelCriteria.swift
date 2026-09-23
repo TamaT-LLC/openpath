@@ -9,8 +9,13 @@ public enum OpenPanelCriteria {
     public static let sheetRole = "AXSheet"
     public static let buttonRole = "AXButton"
     public static let textFieldRole = "AXTextField"
-    /// ファイル一覧のロール（条件 3）。
+    /// ファイル一覧のロール（条件 3）。カラム表示（AXBrowser）とリスト表示（AXOutline / AXTable）。
     public static let fileListRoles: Set<String> = ["AXBrowser", "AXOutline", "AXTable"]
+    /// アイコン表示のファイル一覧（条件 3）のロールとサブロール。FinderKit のアイコン表示は NSCollectionView で、
+    /// ロールが AXList、サブロールが AXCollectionList になる。
+    /// AXList は設定のシートの一覧などにも使われるため、サブロールが AXCollectionList のものに限る。
+    public static let collectionListRole = "AXList"
+    public static let collectionListSubrole = "AXCollectionList"
     /// 確定ボタンのタイトル（条件 2）。前後の空白を除いて完全一致で比べる。
     /// Safari の `input[type=file]` は確定ボタンが「アップロード」になるため、DSN-001 の一覧に加えている。
     public static let confirmButtonTitles: Set<String> = [
@@ -23,7 +28,7 @@ public enum OpenPanelCriteria {
     ///   保存パネルの入力欄と誤認しないため。ファイル一覧は存在だけ分かればよい
     /// - シート: 候補に付いた別のウィンドウ（⌘⇧G の移動先シートや、ダイアログの上に出たパネル）。
     ///   中身を候補の判定に含めると、シートが閉じても候補がパネルのままキャッシュに残るため
-    static let prunedRoles: Set<String> = fileListRoles.union(["AXList", "AXWebArea", sheetRole])
+    static let prunedRoles: Set<String> = fileListRoles.union([collectionListRole, "AXWebArea", sheetRole])
 
     /// シートの入れ子を探す深さ。ウィンドウの子のシートを 1 段目と数える。
     /// 開くパネルと判定しなかったシート（リモートビューの外側のシートなど）の子のシートまで探す。
@@ -34,6 +39,11 @@ public enum OpenPanelCriteria {
     /// パネルの候補（条件 1）か。ダイアログのウィンドウとシートが対象。
     public static func isPanelCandidate(role: String?, subrole: String?) -> Bool {
         role == sheetRole || subrole == dialogSubrole || subrole == sheetRole
+    }
+
+    /// ファイル一覧か（条件 3）。サブロールは、ロールが `collectionListRole`（AXList）のときだけ見る。
+    public static func isFileList(role: String, subrole: String?) -> Bool {
+        fileListRoles.contains(role) || (role == collectionListRole && subrole == collectionListSubrole)
     }
 
     /// 確定ボタンのタイトルか（条件 2）。

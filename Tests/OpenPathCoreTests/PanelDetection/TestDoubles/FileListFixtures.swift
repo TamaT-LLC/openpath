@@ -9,9 +9,12 @@ struct FileListItem {
 
     let name: String
     let kind: Kind
+    /// パネルで選べる項目か。リスト表示・カラム表示では文字色（`textOpacity`）に、アイコン表示では AXEnabled に表れる
+    var isSelectable = true
     /// 名前の文字色の不透明度。nil なら読めない（属性付き文字列を持たない要素など）
     var textOpacity: Double?
-    /// 名前の要素の AXEnabled。FinderKit のリスト表示・カラム表示では、選べない行も true のまま
+    /// 名前の要素の AXEnabled。FinderKit のリスト表示・カラム表示では、選べない行も true のまま。
+    /// アイコン表示では、選べない項目（`isSelectable` が false）なら false にする。nil なら AXEnabled を持たない
     var isEnabled: Bool? = true
     /// 名前の要素が AXURL を持つか
     var hasURL = true
@@ -27,7 +30,7 @@ struct FileListItem {
 
     /// 選べないファイル（淡い文字色）。フォルダのみのパネルのファイル行。
     static func dimmedFile(_ name: String) -> FileListItem {
-        FileListItem(name: name, kind: .file, textOpacity: FileListFixtures.dimmedTextOpacity)
+        FileListItem(name: name, kind: .file, isSelectable: false, textOpacity: FileListFixtures.dimmedTextOpacity)
     }
 }
 
@@ -121,18 +124,47 @@ enum FileListFixtures {
         return StubNode(id: id, role: role, children: [headingRow] + rows + columns + [StubNode(role: "AXGroup")])
     }
 
+    // MARK: - アイコン表示
+
+    /// アイコン表示（NSCollectionView）。ロールが AXList でサブロールが AXCollectionList。
+    /// AXVisibleChildren はセクション（AXList / AXSectionList）で、セクションの AXVisibleChildren が項目（AXGroup）。
+    /// 「グループ分け」を使うと、セクションが複数になる。
+    static func iconView(id: String = fileListID, sections: [[FileListItem]]) -> StubNode {
+        StubNode(id: id, role: "AXList", subrole: "AXCollectionList", description: "icon view", children: sections.map { items in
+            StubNode(role: "AXList", subrole: "AXSectionList", children: items.map { iconItem($0, listID: id) })
+        })
+    }
+
+    static func iconView(id: String = fileListID, items: [FileListItem]) -> StubNode {
+        iconView(id: id, sections: [items])
+    }
+
+    /// アイコン表示の項目。AXGroup（AXTitleUIElement を持たない）の子の AXImage が、AXURL と AXEnabled を持つ。
+    /// AXImage は文字列を持たないため文字色は読めず、選べない項目は AXEnabled が false になる。
+    private static func iconItem(_ item: FileListItem, listID: String) -> StubNode {
+        StubNode(role: "AXGroup", children: [
+            StubNode(
+                id: nameID(item.name, in: listID),
+                role: "AXImage",
+                description: item.name,
+                url: item.hasURL ? url(for: item) : nil,
+                isEnabled: item.isEnabled.map { $0 && item.isSelectable }
+            ),
+        ])
+    }
+
     // MARK: - パネル
 
     /// FinderKit の開くパネルの中身。サイドバー（AXOutline）の後にファイル一覧が現れる。
+    /// - Parameter sidebar: nil ならサイドバーを隠したパネル（⌃⌘S）。
     static func openPanelBody(
         fileList: StubNode,
-        sidebar: StubNode = FileListFixtures.sidebar(),
+        sidebar: StubNode? = FileListFixtures.sidebar(),
         confirmTitle: String = "開く"
     ) -> [StubNode] {
-        [
-            StubNode(role: "AXSplitGroup", children: [
-                StubNode(role: "AXScrollArea", children: [sidebar]),
-                StubNode(role: "AXSplitter"),
+        let sidebarPane = sidebar.map { [StubNode(role: "AXScrollArea", children: [$0]), StubNode(role: "AXSplitter")] } ?? []
+        return [
+            StubNode(role: "AXSplitGroup", children: sidebarPane + [
                 StubNode(role: "AXSplitGroup", children: [
                     fileList.role == "AXBrowser" ? fileList : StubNode(role: "AXScrollArea", children: [fileList]),
                 ]),
