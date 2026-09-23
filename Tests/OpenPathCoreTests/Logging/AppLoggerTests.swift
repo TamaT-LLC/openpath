@@ -97,6 +97,16 @@ struct AppLoggerTests {
         #expect(spy.entries.map(\.message) == ["opened <path>"])
     }
 
+    @Test("空白を含むパスも断片を残さずにシンクへ渡す（NFR-05）", arguments: [LogLevel.info, .warning, .error])
+    func redactsPathsContainingSpaces(level: LogLevel) {
+        let spy = SpyLogSink()
+        let logger = Self.makeLogger(minimumLevel: .debug, sinks: [spy])
+
+        logger.log(level, "opened /Users/alice/My Documents/secret.txt")
+
+        #expect(spy.entries.map(\.message) == ["opened <path>"])
+    }
+
     @Test("debug のメッセージは伏せ字にしない")
     func keepsPathsAtDebug() {
         let spy = SpyLogSink()

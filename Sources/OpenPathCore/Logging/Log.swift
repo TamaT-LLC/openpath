@@ -5,8 +5,14 @@ import os
 /// 統合ログ（`os.Logger`）と `~/Library/Logs/openpath/openpath.log` の両方に出力する。
 /// どのスレッドからも呼び出せ、ファイルへの書き込みはバックグラウンドで行う。
 ///
-/// パスは NFR-05 に従い `debugPath(_:path:)` で記録すること。
-/// info 以上のメッセージに紛れ込んだパスは `<path>` に置き換えて出力する。
+/// ## パスの扱い（NFR-05）
+///
+/// - パス（ファイル・ディレクトリの場所や file URL）は必ず `debugPath(_:path:)` で記録する。
+/// - `info` / `warning` / `error` のメッセージにはパスを含めない。これらのメッセージは統合ログで公開扱いになる。
+///   ファイル名や、それを含み得る文字列（`Error.localizedDescription` など）も含めない。
+/// - 契約違反への安全網として、info 以上のメッセージでパスを検出すると、その位置から末尾まで
+///   （引用符・括弧で囲まれていれば閉じ記号の直前まで）を `<path>` に置き換える。
+///   検出はヒューリスティックで相対パスやファイル名は拾えないため、この安全網を前提にしないこと。
 public enum Log {
     private static let current = OSAllocatedUnfairLock(initialState: AppLogger(configuration: LogConfiguration()))
 
@@ -33,18 +39,26 @@ public enum Log {
         return previous
     }
 
+    /// 開発時の詳細を記録する。統合ログではメッセージを private として扱う。
     public static func debug(_ message: @autoclosure () -> String) {
         logger.debug(message())
     }
 
+    /// 運用上の出来事を記録する。
+    /// - Important: パスやファイル名を含めないこと。パスは `debugPath(_:path:)` で記録する。
     public static func info(_ message: @autoclosure () -> String) {
         logger.info(message())
     }
 
+    /// 回復可能な問題を記録する。
+    /// - Important: パスやファイル名を含めないこと。パスは `debugPath(_:path:)` で記録する。
     public static func warning(_ message: @autoclosure () -> String) {
         logger.warning(message())
     }
 
+    /// 失敗を記録する。
+    /// - Important: パスやファイル名を含めないこと。エラーはドメインとコードなどパスを含まない情報で記録し、
+    ///   詳細が必要なら `debugPath(_:path:)` を併用する。
     public static func error(_ message: @autoclosure () -> String) {
         logger.error(message())
     }
