@@ -17,7 +17,7 @@ updated: 2026-09-23
 
 ## 1. 方針
 
-- `OpenPathCore`（ファジーマッチ、frecency、設定パース、状態機械）は XCTest によるユニットテストで網羅する。
+- `OpenPathCore`（ファジーマッチ、frecency、設定パース、状態機械）は Swift Testing によるユニットテストで網羅する。XCTest と違い Xcode を必要とせず Command Line Tools だけで実行できるため、Swift Testing を採用する。
 - `OpenPathMac`（AX 観測、注入）は自動化が困難なため、手動シナリオテストと、Finder の「開く」ダイアログを使ったスモークスクリプト（AppleScript で `choose folder` を出す）で確認する。
 - CI（GitHub Actions, macOS runner）ではユニットテストと `swift build` のみ実行。AX を要するテストはローカル限定。
 
