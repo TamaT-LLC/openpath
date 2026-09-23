@@ -66,4 +66,32 @@ struct LogFacadeTests {
             #expect(line.hasSuffix(" [INFO] palette shown"))
         }
     }
+
+    @Test("同じ出力先のロガーに差し替えた後も、旧ロガー経由の書き込みと順序が保たれ、flush で書き切る")
+    func replacementKeepsOrderWithStaleLogger() throws {
+        let messages = (0..<100).map { String(format: "event-%03d", $0) }
+        try withTemporaryDirectory { directory in
+            let previous = Log.logger
+            defer { Log.install(previous) }
+            let configuration = LogConfiguration(directory: directory, minimumLevel: .info)
+            Log.install(AppLogger(minimumLevel: .info, sinks: [FileLogSink(configuration: configuration)]))
+            // 差し替えの直前に別スレッドが取得し、差し替え後も使い続ける参照に相当する
+            let staleLogger = Log.logger
+            Log.install(AppLogger(minimumLevel: .info, sinks: [FileLogSink(configuration: configuration)]))
+
+            for (index, message) in messages.enumerated() {
+                if index.isMultiple(of: 2) {
+                    staleLogger.info(message)
+                } else {
+                    Log.info(message)
+                }
+            }
+            Log.flush()
+
+            let written = try readLogLines(at: configuration.fileURL).compactMap { line in
+                line.split(separator: " ").last.map(String.init)
+            }
+            #expect(written == messages)
+        }
+    }
 }

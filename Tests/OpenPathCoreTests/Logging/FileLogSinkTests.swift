@@ -185,6 +185,38 @@ struct FileLogSinkTests {
         }
     }
 
+    @Test("同じファイルを指す複数のシンクに交互に書き込んでも、書き込み順とローテーションが崩れない")
+    func sinksSharingFileKeepOrder() throws {
+        let linesPerGeneration = 50
+        // 2 世代ちょうどの行数にし、1 回だけローテーションさせる
+        let messages = (0..<(linesPerGeneration * 2)).map { String(format: "line-%03d", $0) }
+        try withTemporaryDirectory { directory in
+            let configuration = LogConfiguration(
+                directory: directory,
+                maximumFileSize: Self.lineSize("line-000") * linesPerGeneration
+            )
+            let failures = FailureRecorder()
+            // Log.configure で同じ出力先のロガーに差し替えた前後のシンクに相当する
+            let sinks = [
+                Self.makeSink(configuration: configuration, failures: failures),
+                Self.makeSink(configuration: configuration, failures: failures),
+            ]
+
+            for (index, message) in messages.enumerated() {
+                sinks[index % sinks.count].write(Self.entry(message))
+            }
+            for sink in sinks {
+                sink.flush()
+            }
+
+            let rotated = try Self.messages(at: configuration.rotatedFileURL)
+            let current = try Self.messages(at: configuration.fileURL)
+            #expect(failures.count == 0)
+            #expect(rotated == Array(messages.prefix(linesPerGeneration)))
+            #expect(current == Array(messages.suffix(linesPerGeneration)))
+        }
+    }
+
     @Test("書き込めない場合はクラッシュせず失敗を通知する")
     func reportsFailure() throws {
         try withTemporaryDirectory { root in

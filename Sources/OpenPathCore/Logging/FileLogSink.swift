@@ -4,10 +4,13 @@ import os
 /// ログをファイルに追記するシンク。
 ///
 /// 書き込みはシリアルキューで非同期に行い、呼び出し元をファイル I/O でブロックしない。
-/// キューが書き込み順と排他を保証する。ファイルハンドルを保持せず書き込みごとに開閉するため可変状態を持たず、
-/// ログファイルやディレクトリが外部で削除・移動されても次の書き込みで復帰できる。
+/// キューは全インスタンスで共有し、書き込み順と排他を保証する。ファイルハンドルを保持せず書き込みごとに開閉するため
+/// 可変状態を持たず、ログファイルやディレクトリが外部で削除・移動されても次の書き込みで復帰できる。
 final class FileLogSink: LogSink {
     private static let queueLabel = "\(AppInfo.bundleIdentifier).logging.file"
+    /// `Log.configure` の前後のシンクや、差し替え前に取得された旧ロガーが同じファイルへ並行に追記・ローテーションすると、
+    /// 行の順序が崩れたり行が失われたりする。これを防ぐため、インスタンスごとではなくプロセスで 1 本のキューを使う。
+    private static let queue = DispatchQueue(label: queueLabel, qos: .utility)
     private static let failureLogCategory = "logging"
     private static let failureLogger = Logger(subsystem: AppInfo.bundleIdentifier, category: failureLogCategory)
 
@@ -16,7 +19,6 @@ final class FileLogSink: LogSink {
     private let maximumFileSize: Int
     private let formatter: LogLineFormatter
     private let onFailure: @Sendable (any Error) -> Void
-    private let queue = DispatchQueue(label: queueLabel, qos: .utility)
 
     init(
         configuration: LogConfiguration,
@@ -31,7 +33,7 @@ final class FileLogSink: LogSink {
     }
 
     func write(_ entry: LogEntry) {
-        queue.async { [self] in
+        Self.queue.async { [self] in
             let line = Data(formatter.format(entry).utf8)
             do {
                 try append(line)
@@ -41,8 +43,9 @@ final class FileLogSink: LogSink {
         }
     }
 
+    /// キューを共有しているため、他のインスタンスが受け付けた書き込みも含めて完了を待つ。
     func flush() {
-        queue.sync {}
+        Self.queue.sync {}
     }
 
     /// エラーの説明文にはログファイルのパスが含まれ得るため、ドメインとコードのみを記録する。

@@ -27,7 +27,8 @@ public enum Log {
             state = logger
             return previous
         }
-        // 差し替え前に受け付けたログを失わないよう書き出しておく
+        // 差し替え前に受け付けたログを書き終えてから戻る。
+        // 差し替え後に旧ロガーへ届いた書き込みも、FileLogSink の共有キューにより受け付け順で書き込まれる。
         previous.flush()
         return previous
     }
