@@ -8,15 +8,22 @@ import ApplicationServices
 /// 3. `unschedule()`（main）: RunLoop からソースを外す。以降コールバックは届かない
 /// 4. `unregister()`（axQueue）: 通知の登録を解除し、コールバック用の参照を解放する
 ///
+/// 1. から 4. の間は、`observeDestruction(of:)`（axQueue）でパネルの要素にも破棄の通知を追加できる。
+///
 /// C のコールバックは Swift のクロージャを捕捉できないため、ハンドラを持つ `CallbackTarget` を
 /// `Unmanaged` で retain したまま refcon として渡す。解放は 3. の後の 4. で行うので、
 /// 解放済みの refcon でコールバックが呼ばれることはない。
 ///
-/// `@unchecked Sendable` の根拠: 上記のとおり呼ぶスレッドを決めてあり、可変状態（`isUnregistered`）は axQueue でのみ触る。
+/// `@unchecked Sendable` の根拠: 上記のとおり呼ぶスレッドを決めてあり、可変状態（`isUnregistered` と
+/// `destructionObservedElements`）は axQueue でのみ触る。
 /// それ以外のプロパティは生成後に変わらない。
 final class AXApplicationObserver: @unchecked Sendable {
-    /// 通知名を受け取る。main スレッドで呼ばれる。
-    typealias Handler = @MainActor (_ notification: String) -> Void
+    /// 通知名と、通知の対象の要素を受け取る。main スレッドで呼ばれる。
+    typealias Handler = @MainActor (_ notification: String, _ element: AXUIElement) -> Void
+
+    /// `observeDestruction(of:)` で破棄の通知を登録しておく要素の数の上限。1 つのアプリを観測している間に
+    /// 開かれたパネルの数だけ増えるため、古いものから登録を外す（破棄済みの要素の登録が残り続けないようにする）。
+    private static let maxDestructionObservedElements = 8
 
     let processID: pid_t
     private let observer: AXObserver
@@ -24,6 +31,8 @@ final class AXApplicationObserver: @unchecked Sendable {
     private let registeredNotifications: [String]
     private let callbackTarget: Unmanaged<CallbackTarget>
     private var isUnregistered = false
+    /// `observeDestruction(of:)` で破棄の通知を登録した要素（古い順）
+    private var destructionObservedElements: [AXUIElement] = []
 
     private init(
         processID: pid_t,
@@ -93,6 +102,27 @@ final class AXApplicationObserver: @unchecked Sendable {
         CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
     }
 
+    /// パネルの要素（シートなど）にも `kAXUIElementDestroyedNotification` を登録する。axQueue で呼ぶこと。
+    ///
+    /// アプリ要素への登録でも子要素の破棄は届く想定だが、実機で確かめられていない。PanelShown 中は補助ポーリングを
+    /// 止めているため、パネルが閉じたこと（FR-DETECT-05）を確実に知るよう要素にも重ねて登録する。
+    /// 登録済みの要素や、登録できない要素（別プロセスで描画された要素など）は無視する。
+    func observeDestruction(of element: AXUIElement) {
+        guard !isUnregistered, !destructionObservedElements.contains(element) else { return }
+        let result = AXObserverAddNotification(
+            observer,
+            element,
+            kAXUIElementDestroyedNotification as CFString,
+            callbackTarget.toOpaque()
+        )
+        guard result == .success else { return }
+        destructionObservedElements.append(element)
+        if destructionObservedElements.count > Self.maxDestructionObservedElements {
+            let oldest = destructionObservedElements.removeFirst()
+            AXObserverRemoveNotification(observer, oldest, kAXUIElementDestroyedNotification as CFString)
+        }
+    }
+
     /// 通知の登録を解除し、コールバック用の参照を解放する。`unschedule()` の後に axQueue で 1 回だけ呼ぶこと。
     func unregister() {
         guard !isUnregistered else { return }
@@ -100,6 +130,11 @@ final class AXApplicationObserver: @unchecked Sendable {
         for notification in registeredNotifications {
             AXObserverRemoveNotification(observer, applicationElement, notification as CFString)
         }
+        // 破棄済みの要素では失敗するが、登録は要素とともに消えているため問題ない
+        for element in destructionObservedElements {
+            AXObserverRemoveNotification(observer, element, kAXUIElementDestroyedNotification as CFString)
+        }
+        destructionObservedElements = []
         callbackTarget.release()
     }
 }
@@ -124,6 +159,6 @@ private func axObserverCallback(
     let target = Unmanaged<CallbackTarget>.fromOpaque(refcon).takeUnretainedValue()
     let notificationName = notification as String
     MainActor.assumeIsolated {
-        target.handler(notificationName)
+        target.handler(notificationName, element)
     }
 }

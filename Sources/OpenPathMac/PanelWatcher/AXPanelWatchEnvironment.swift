@@ -18,13 +18,13 @@ final class AXPanelWatchEnvironment: PanelWatchEnvironment {
     /// AXObserver を張れなかったときに、そのプロセス ID を渡して呼ぶ。
     var onObservationFailure: ((pid_t) -> Void)?
 
-    private let detectPanel: PanelDetector
+    private let detector: any PanelDetecting
     private var observer: AXApplicationObserver?
     /// attach / detach のたびに増やす。axQueue での登録中に張り替えが起きた場合、古い登録を捨てるために使う
     private var attachGeneration = 0
 
-    init(detectPanel: @escaping PanelDetector) {
-        self.detectPanel = detectPanel
+    init(detector: any PanelDetecting) {
+        self.detector = detector
     }
 
     deinit {
@@ -40,7 +40,15 @@ final class AXPanelWatchEnvironment: PanelWatchEnvironment {
         detach()
         let generation = attachGeneration
         let notifications = Self.observedNotifications
-        let handler: AXApplicationObserver.Handler = { [weak self] _ in
+        let detector = detector
+        let handler: AXApplicationObserver.Handler = { [weak self] notification, element in
+            if notification == kAXUIElementDestroyedNotification {
+                // 判定のキャッシュを捨てる。この後の走査より先に axQueue で処理されるよう、走査の依頼より前に積む
+                let destroyed = DestroyedElement(element: element)
+                axQueue.async {
+                    detector.elementDestroyed(destroyed.element)
+                }
+            }
             self?.onNotification?(processID)
         }
         Task { [weak self] in
@@ -82,9 +90,22 @@ final class AXPanelWatchEnvironment: PanelWatchEnvironment {
     }
 
     func scanPanels(processID: Int32) async -> PanelScanOutcome {
-        let detectPanel = detectPanel
+        let detector = detector
+        // 張り替え中なら、別のアプリの observer にパネルの要素を登録しない
+        let observer = observer.flatMap { $0.processID == processID ? $0 : nil }
         return await onAXQueue {
-            PanelScanner.scan(processID: processID, detectPanel: detectPanel)
+            let scan = PanelScanner.scan(processID: processID, detector: detector)
+            for element in scan.panelElements {
+                observer?.observeDestruction(of: element)
+            }
+            return scan.outcome
         }
     }
+}
+
+/// 破棄された要素を axQueue へ渡すための入れ物。
+/// `@unchecked Sendable` の根拠: AXUIElement は生成後に変わらない参照で、参照カウントの操作はスレッドセーフ。
+/// 受け取った側（判定のキャッシュ）は要素を比較に使うだけで、AX の呼び出しはしない。
+private struct DestroyedElement: @unchecked Sendable {
+    let element: AXUIElement
 }
