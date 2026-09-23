@@ -7,7 +7,7 @@ public struct OpenPanelCacheConfiguration: Equatable, Sendable {
     /// 判定し直す回数の既定値。待ち時間は 1 回ごとに倍にする（250ms → 500ms → 1s → 2s）。
     public static let defaultMaxRechecks = 4
 
-    /// 覚えておく要素の数。超えたら最後に使ってから長いものから忘れる。
+    /// 覚えておく要素の数。超えたら最後に使ってから長いものから忘れる（パネルに関わる要素は後回しにする）。
     public let capacity: Int
     public let initialRecheckDelay: Duration
     /// この回数だけ判定し直しても見つからなければ、パネルではないと確定する。

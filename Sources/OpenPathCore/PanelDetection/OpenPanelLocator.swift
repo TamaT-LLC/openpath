@@ -18,7 +18,8 @@ import CoreGraphics
 /// - 確定ボタンかファイル一覧が欠けていた候補は、描画途中の可能性があるため間隔を倍々に空けて判定し直し、
 ///   `OpenPanelCacheConfiguration.maxRechecks` 回で確定する（アラートを 200ms ごとに判定し直さないため）
 /// - AX の読み取りに失敗した判定は覚えない。そのウィンドウで直前に見つけたパネルを引き継ぎ、一時的な失敗で消えたとみなさない
-/// - 覚えておく要素の数は `capacity` までとし、最後に使ってから長いものから忘れる
+/// - 覚えておく要素の数は `capacity` までとし、最後に使ってから長いものから忘れる。
+///   ただしパネルの判定と、ウィンドウで直前に見つけたパネルは後回しにする（1 回の走査で容量を超えても ID を保つため）
 public struct OpenPanelLocator<Node: Hashable> {
     public let configuration: OpenPanelCacheConfiguration
 
@@ -196,14 +197,27 @@ public struct OpenPanelLocator<Node: Hashable> {
     }
 
     /// 容量を超えていたら、最後に使ってから長い要素から忘れる。今回の locate で使った要素は忘れない
-    /// （1 つのウィンドウの子が容量より多くても、追跡中のパネルの ID を保つため）。
+    /// （1 つのウィンドウの子が容量より多い場合に備える）。
+    ///
+    /// パネルの判定や直前のパネルを持つ要素は、それだけで容量を超えたときに限って忘れる。1 回の走査ではウィンドウごとに
+    /// locate が呼ばれるため、ほかのウィンドウの子のロールで容量を超えても、パネルの ID と引き継ぎを失わないようにする。
+    /// これらはパネルの数だけあり、通常は破棄の通知（`forget`）で消える。上限は取りこぼし続けた場合の備え。
     private mutating func evictIfNeeded() {
-        let overflow = entries.count - configuration.capacity
-        guard overflow > 0 else { return }
-        let victims = entries
-            .filter { $0.value.lastUsedTick < tick }
+        guard entries.count > configuration.capacity else { return }
+        let evictable = entries.filter { $0.value.lastUsedTick < tick }
+        let others = evictable.filter { !$0.value.holdsPanel }
+        forgetLeastRecentlyUsed(others, count: entries.count - configuration.capacity)
+
+        let panelEntryCount = entries.values.count(where: \.holdsPanel)
+        let panelEntries = evictable.filter { $0.value.holdsPanel }
+        forgetLeastRecentlyUsed(panelEntries, count: panelEntryCount - configuration.capacity)
+    }
+
+    private mutating func forgetLeastRecentlyUsed(_ candidates: [Node: Entry], count: Int) {
+        guard count > 0 else { return }
+        let victims = candidates
             .sorted { $0.value.lastUsedTick < $1.value.lastUsedTick }
-            .prefix(overflow)
+            .prefix(count)
         for victim in victims {
             forget(victim.key)
         }
@@ -221,6 +235,14 @@ extension OpenPanelLocator {
         /// トップレベルのウィンドウで最後に見つけたパネル。読み取りに失敗したときに引き継ぐ
         var lastPanel: LocatedOpenPanel<Node>?
         var lastUsedTick: UInt64
+
+        /// パネルの ID（開くパネルの判定）か、ウィンドウで直前に見つけたパネルを持つか。容量を超えても後回しに忘れる。
+        var holdsPanel: Bool {
+            if case .openPanel = verdict {
+                return true
+            }
+            return lastPanel != nil
+        }
 
         init(lastUsedTick: UInt64) {
             self.lastUsedTick = lastUsedTick

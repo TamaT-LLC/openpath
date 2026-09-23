@@ -289,6 +289,46 @@ struct OpenPanelLocatorCacheTests {
         #expect(secondA.context.id == firstA.context.id)
     }
 
+    @Test(
+        "ほかのウィンドウの要素で容量を超えても、パネルの判定と直前のパネルは忘れない（1 回の走査でウィンドウごとに locate する）",
+        arguments: ["dialog", "sheet"]
+    )
+    func panelSurvivesOtherWindowsInSameScan(panelKind: String) throws {
+        let harness = OpenPanelLocatorHarness(configuration: OpenPanelCacheConfiguration(capacity: 3))
+        let body = Fixtures.openPanelBody(.japanese)
+        let panelWindow = harness.add(panelKind == "dialog"
+            ? Fixtures.dialog(id: "panel-window", body)
+            : Fixtures.documentWindow(id: "panel-window", sheets: [Fixtures.sheet(id: "sheet", body)]))
+        let otherWindows = ["other-1", "other-2"].map { harness.add(Fixtures.documentWindow(id: $0)) }
+        let first = try #require(harness.panel(in: panelWindow))
+
+        for scan in 1...3 {
+            let elapsed = Duration.milliseconds(200 * scan)
+            for window in otherWindows {
+                _ = harness.locate(window, at: elapsed)
+            }
+            harness.tree.failures[panelWindow] = .unavailable
+            #expect(harness.locate(panelWindow, at: elapsed).panel?.context.id == first.context.id, "走査 \(scan) の引き継ぎ")
+            harness.tree.failures[panelWindow] = nil
+            let current = try #require(harness.panel(in: panelWindow, at: elapsed))
+            #expect(current.context.id == first.context.id, "走査 \(scan)")
+            #expect(!current.isNewlyClassified)
+        }
+    }
+
+    @Test("パネルの判定も、それだけで容量を超えたら最後に使ってから長いものから忘れる（破棄の通知を取りこぼした場合）")
+    func panelVerdictsAreStillBounded() throws {
+        let harness = OpenPanelLocatorHarness(configuration: OpenPanelCacheConfiguration(capacity: 2))
+        let dialogs = ["a", "b", "c"].map { harness.add(Fixtures.dialog(id: $0, Fixtures.openPanelBody(.japanese))) }
+        for dialog in dialogs {
+            _ = harness.locate(dialog)
+        }
+
+        #expect(harness.locator.cachedElementCount == 2)
+        #expect(harness.panel(in: dialogs[2])?.isNewlyClassified == false)
+        #expect(harness.panel(in: dialogs[0])?.isNewlyClassified == true)
+    }
+
     @Test("1 回の走査で容量より多くの要素を使っても、その走査で使った要素は忘れない（パネルの ID を保つ）")
     func elementsUsedInCurrentScanAreKept() throws {
         let harness = OpenPanelLocatorHarness(configuration: OpenPanelCacheConfiguration(capacity: 1))
