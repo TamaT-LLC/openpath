@@ -44,9 +44,9 @@ final class PanelWatcher {
 - `attach(pid)`: 既存 observer を外し、新 PID に対して `AXObserverCreate` → `kAXWindowCreatedNotification`, `kAXUIElementDestroyedNotification`, `kAXFocusedWindowChangedNotification` を `AXObserverAddNotification` で登録。**登録・解除は `axQueue`、RunLoop ソースの追加・削除は `main` で行う**（`AXObserverAddNotification` はプロセス間通信で、応答しないアプリが相手だと呼び出しが main を止めうるため。main でソースを外してから axQueue で登録解除する。張り替え中の取り違えは世代番号で検出する。AXObserver の作成・登録に失敗しても観測は続け、`PanelShown` 中もポーリングを止めない、PR #46）。
 - 自プロセス（openpath）と `disabled_apps` に含まれる bundle id は張り付けない。**自プロセスがアクティブになった場合は観測対象を張り替えない**（メニューバー操作などで前面に来ただけで、追跡中のパネルを見失わないため、PR #46）。
 - **アプリを切り替えたら、追跡中のパネルについて `panelGone` を送る**（切替先のアプリでは消滅を検知できないため。パレットは閉じる）。元のアプリに戻ると、開いたままのパネルを通知し直す。アプリの終了（`NSWorkspace` の `didTerminate` 通知）も購読し、確実に観測を外す（PR #46）。
-- 補助ポーリング: 200ms 間隔でフロントアプリの `kAXWindowsAttribute` を列挙し、`isOpenPanel` を評価。**一時停止する条件は「AppCoordinator が Idle でない」（`PanelShown` / `Injecting`）の 1 つに一本化する**（AXObserver 通知そのものでは止めない。判定条件を 1 つにまとめるため）。`PanelShown` / `Injecting` 中もパネルの消滅（FR-DETECT-05）を検知するため、AX 通知による走査は続ける（止めるのはポーリングだけ、PR #46）。
+- 補助ポーリング: 200ms 間隔でフロントアプリの `kAXWindowsAttribute` を列挙し、`isOpenPanel` を評価。**一時停止する条件は「AppCoordinator が Idle でなく、AX 通知を受信でき、かつ追跡中のパネルに選択モードの推定し直しの予定（`PanelContext.isSelectionModeProvisional`、DSN-001 §2.3）が無い」（`PanelShown` / `Injecting`）に統一する**（AXObserver を張れなかったアプリでは、パネルの消滅を検知するため Idle 以外でもポーリングを続ける。判定条件を 1 つにまとめるため、PR #46）。`PanelShown` / `Injecting` 中もパネルの消滅（FR-DETECT-05）を検知するため、AX 通知による走査は続ける（止まり得るのはポーリングだけ、PR #46）。
 - 走査は同時に 1 つに絞り、走査中に届いた通知は 1 回の再走査にまとめる。走査中に来たポーリングの周期は捨てる（シリアルな `axQueue` を埋めて、注入の AX 呼び出しを遅らせないため、PR #46）。
-- 追跡中のパネルに選択モードの推定し直しの予定がある間（`PanelContext.isSelectionModeProvisional`、DSN-001 §2.3）は、`PanelShown` / `Injecting` 中もポーリングを止めない（推定し直す走査の機会を作るため。最大 4 回・約 4 秒で終わる）。推定し直す時刻を PanelWatchPolicy まで運んで一度だけの走査を予約する方式は、走査結果の型・engine・環境まで変更が広がり、並行するパネル判定の修正 PR と衝突しやすいため、ポーリングを続ける方式にした（走査はキャッシュ済みの判定と矩形の読み取りのみで AX 呼び出しは数回/回、PR #65）。
+- 選択モードの推定し直しの予定がある間もポーリングを続けるのは、推定し直す走査の機会を作るためで、最大 4 回・約 4 秒で終わる。推定し直す時刻を PanelWatchPolicy まで運んで一度だけの走査を予約する方式は、走査結果の型・engine・環境まで変更が広がり、並行するパネル判定の修正 PR と衝突しやすいため、ポーリングを続ける方式にした（走査はキャッシュ済みの判定と矩形の読み取りのみで AX 呼び出しは数回/回、PR #65）。
 - ウィンドウ一覧の取得に失敗した場合（`noValue` / `attributeUnsupported` / `cannotComplete` / `invalidUIElement` など）は一時的な失敗（`unavailable`）として扱い、パネルが消えたとはみなさない。有無は実際に一覧を取得できたときだけ判断する（PR #46、CodeRabbit 指摘対応）。
 - `disabledAppsDidChange()`: ConfigStore（PROJ-DSN-002 §6）の変更通知から呼び、最前面アプリの張り付け対象を判定し直す。
 
@@ -171,7 +171,7 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
 ## 5. スレッド・タイミング
 
 - AX 呼び出しはすべて `axQueue`（serial）で行い、結果を `MainActor` に戻す。要素参照には 1 回 0.25 秒のメッセージングタイムアウトを設定し、応答しないアプリで `axQueue` 全体が止まらないようにする（既定の約 6 秒のままだと注入の AX 呼び出しまで待たされる。PanelWatcher の走査・GoToSheetDetector・注入先ガードのいずれにも適用、PR #45 / #46 / #54）。
-- `PanelShown` 中の AX 呼び出し合計を 1 パネルあたり 50 回以下に抑える（判定キャッシュは 1 回。位置取得は 1 回に固定せず走査のたびに読み直す。パネルが動いたときに最新の位置で出し直すため、PR #56 / #60）。選択モード推定（§2.3）は最初の検知時のみ（最大 69 回）で、以降の走査では増えない。
+- `PanelShown` 中、選択モードの推定が確定した後の 1 回の走査あたりの AX 呼び出しを 50 回以下に抑える（判定キャッシュは 1 回。位置取得は 1 回に固定せず走査のたびに読み直す。パネルが動いたときに最新の位置で出し直すため、PR #56 / #60）。選択モード推定（§2.3）は、種類の分かる行を 1 行も読めない間だけ、最初の検知を含め最大 4 回、走査のたびに読み直す（1 回あたり最大 69 回）。`isSelectionModeProvisional` の間は `PanelShown` 中もこの読み直しが起こり得るため、上記の 50 回には含めない。行を読めて確定すれば、以降の走査では増えない（PR #60 / #65）。
 - 注入中は `PaletteWindow.isLocked = true`。ロック中のキー入力は捨てる。
 - 注入は `InjectionSerialGate` で 1 件ずつ直列に実行する（DSN-001 §3.1、PR #45）。
 
