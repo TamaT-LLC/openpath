@@ -21,6 +21,7 @@ public protocol PanelDetecting: Sendable {
 public struct DetectedPanel {
     /// パネルの要素（ダイアログのウィンドウ、またはシート）。PanelWatcher がこの要素にも破棄の通知を登録する。
     public let element: AXUIElement
+    /// `frame` は AX の座標系（左上原点）で返すこと。NSScreen の座標系への変換は PanelWatcher（PanelScanner）が行う。
     public let context: PanelContext
 
     public init(element: AXUIElement, context: PanelContext) {
