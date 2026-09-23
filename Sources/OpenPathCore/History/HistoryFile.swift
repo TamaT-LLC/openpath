@@ -81,7 +81,10 @@ public struct HistoryFile: Sendable {
             try FileManager.default.moveItem(at: fileURL, to: backupURL)
             return backupURL
         } catch {
-            // TODO(#3): Log.warning で退避の失敗を記録する
+            // localizedDescription はパスを含み得るため、FileLogSink.reportFailure と同じく domain と code だけを記録する
+            let nsError = error as NSError
+            Log.warning("破損した履歴ファイルの退避に失敗しました（\(nsError.domain) \(nsError.code)）")
+            Log.debugPath("破損した履歴ファイルの退避に失敗しました", path: fileURL.path(percentEncoded: false))
             return nil
         }
     }

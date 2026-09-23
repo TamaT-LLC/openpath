@@ -30,7 +30,10 @@ struct CarbonHotkeyRegistrar: HotkeyRegistering {
 
     func unregister(_ registration: EventHotKeyRef) {
         // 失敗するのは不正な参照を渡した場合のみで、Controller は登録済みの参照しか渡さない
-        // TODO(#3): Log が main に入ったら、noErr 以外を警告ログに出す
-        _ = UnregisterEventHotKey(registration)
+        let status = UnregisterEventHotKey(registration)
+        guard status == noErr else {
+            Log.warning("ホットキーの登録解除に失敗しました（status: \(status)）")
+            return
+        }
     }
 }

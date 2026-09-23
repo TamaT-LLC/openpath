@@ -93,7 +93,7 @@ public final class ConfigStore {
 
         if let generationError {
             // 読み込み直すとファイルが無いというエラーで上書きされるため、生成の失敗を公開したままにする
-            // TODO(#3): Log.warning(generationError.description)
+            logConfigError(generationError)
             lastError = generationError
             return
         }
@@ -106,10 +106,37 @@ public final class ConfigStore {
         do throws(ConfigStoreError) {
             apply(try loadFile())
         } catch {
-            // TODO(#3): Log.warning(error.description)
+            // 同じ理由での失敗が続く監視イベントのたびに重複して警告を出さないよう、変わったときだけ記録する
             if lastError != error {
+                logConfigError(error)
                 lastError = error
             }
+        }
+    }
+
+    /// `ConfigStoreError` を記録する。`description` は絶対パスを含むため、
+    /// warning にはパスを含まない説明だけを出し、パスは `debugPath` に分ける（NFR-05）。
+    private func logConfigError(_ error: ConfigStoreError) {
+        switch error {
+        case .fileNotFound(let path):
+            Log.warning("設定ファイルが見つかりません")
+            Log.debugPath("設定ファイルが見つかりません", path: path)
+        case .readFailed(let path, let reason):
+            Log.warning("設定ファイルを読み込めません")
+            Log.debugPath("設定ファイルを読み込めません（\(reason)）", path: path)
+        case .parseFailed(let path, let parseError):
+            // TOMLParseError.description は duplicateKey 等で引用キーの内容（任意の文字列）をそのまま含み得るため、
+            // PathRedactor が検出できない相対パス・ファイル名対策として warning には出さず debugPath 側にまとめる
+            Log.warning("設定ファイルの書式が誤っているため反映していません")
+            Log.debugPath("設定ファイルの書式が誤っているため反映していません（\(parseError.description)）", path: path)
+        case .decodeFailed(let path, let decodeError):
+            // ConfigDecodingError.description は invalidRootPath 等で利用者が入力した相対パスをそのまま含み得るが、
+            // PathRedactor は相対パス・ファイル名までは検出できないため warning には出さず debugPath 側にまとめる
+            Log.warning("設定ファイルの値が誤っているため反映していません")
+            Log.debugPath("設定ファイルの値が誤っているため反映していません（\(decodeError.description)）", path: path)
+        case .generationFailed(let path, let reason):
+            Log.warning("設定ファイルを作成できません。既定の設定で動作します")
+            Log.debugPath("設定ファイルを作成できません（\(reason)）。既定の設定で動作します", path: path)
         }
     }
 
@@ -178,11 +205,17 @@ public final class ConfigStore {
 
     /// 読み込んだ結果を反映する。Observable の通知と購読者への配信は、値が変わったときだけ行う
     private func apply(_ result: ConfigDecodingResult) {
-        // TODO(#3): Log.warning で result.warnings を記録する
         if lastError != nil {
             lastError = nil
         }
         if warnings != result.warnings {
+            // 変わらない限り再読み込みのたびに同じ警告を出さないよう、差分があるときだけ記録する。
+            // ConfigWarning.description はクォートキーの内容（任意の文字列）を含み得るため、
+            // warning には固定文だけを出し、詳細は debugPath 側にまとめる
+            for warning in result.warnings {
+                Log.warning("設定ファイルに未知のキーがあります")
+                Log.debugPath(warning.description, path: filePath)
+            }
             warnings = result.warnings
         }
         guard config != result.config else { return }
