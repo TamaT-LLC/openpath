@@ -15,6 +15,8 @@ final class AXPanelWatchEnvironment: PanelWatchEnvironment {
 
     /// 観測中のアプリから AX 通知が届いたときに、そのプロセス ID を渡して呼ぶ。
     var onNotification: ((pid_t) -> Void)?
+    /// AXObserver を張れなかったときに、そのプロセス ID を渡して呼ぶ。
+    var onObservationFailure: ((pid_t) -> Void)?
 
     private let detectPanel: PanelDetector
     private var observer: AXApplicationObserver?
@@ -49,16 +51,22 @@ final class AXPanelWatchEnvironment: PanelWatchEnvironment {
                     handler: handler
                 )
             }
-            // 登録に失敗しても補助ポーリングでパネルを検知できるため、そのまま続ける
-            guard case .success(let observer) = result else { return }
             guard let self, self.attachGeneration == generation else {
-                axQueue.async {
-                    observer.unregister()
+                if case .success(let staleObserver) = result {
+                    axQueue.async {
+                        staleObserver.unregister()
+                    }
                 }
                 return
             }
-            observer.schedule()
-            self.observer = observer
+            switch result {
+            case .success(let observer):
+                observer.schedule()
+                self.observer = observer
+            case .failure:
+                // 観測は外さず、PanelShown 中もポーリングを続けてもらう（通知の代わりにパネルの消滅を検知する）
+                self.onObservationFailure?(processID)
+            }
         }
     }
 

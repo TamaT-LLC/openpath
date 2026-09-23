@@ -88,6 +88,12 @@ public final class PanelWatchEngine {
         process(.axNotificationReceived(processID: processID))
     }
 
+    /// processID のアプリに AXObserver を張れなかったときに呼ぶ。
+    /// 通知が届かないため、AppCoordinator が PanelShown / Injecting の間もポーリングを続け、パネルの消滅を検知する。
+    public func axObservationDidFail(processID: Int32) {
+        process(.axObservationFailed(processID: processID))
+    }
+
     // MARK: - 副作用の実行
 
     private func process(_ input: PanelWatchInput) {

@@ -2,7 +2,8 @@
 @MainActor
 public protocol PanelWatchEnvironment: AnyObject {
     /// 既存の観測を外してから、processID のアプリの AX 通知（ウィンドウ生成・要素破棄・フォーカスウィンドウ変更）の購読を始める。
-    /// 通知が届いたら `PanelWatchEngine.axNotificationDidArrive(processID:)` を呼ぶこと。
+    /// 通知が届いたら `PanelWatchEngine.axNotificationDidArrive(processID:)` を、
+    /// AXObserver を張れなかったら `PanelWatchEngine.axObservationDidFail(processID:)` を呼ぶこと。
     func attach(processID: Int32)
     /// AX 通知の購読をやめる。
     func detach()

@@ -14,6 +14,8 @@ public enum PanelWatchInput: Equatable, Sendable {
     case coordinatorStateChanged(CoordinatorState)
     /// AXObserver の通知（ウィンドウ生成・要素破棄・フォーカスウィンドウ変更）が届いた。
     case axNotificationReceived(processID: Int32)
+    /// AXObserver を張れなかった（通知が届かない）。
+    case axObservationFailed(processID: Int32)
     /// 補助ポーリングの周期が来た。
     case pollTick
     /// 依頼した走査が完了した。

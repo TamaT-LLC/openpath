@@ -57,6 +57,9 @@ public final class PanelWatcher {
         environment.onNotification = { [weak engine] processID in
             engine?.axNotificationDidArrive(processID: processID)
         }
+        environment.onObservationFailure = { [weak engine] processID in
+            engine?.axObservationDidFail(processID: processID)
+        }
         self.environment = environment
         self.engine = engine
         engine.onEvent = { [weak self] event in

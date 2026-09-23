@@ -76,6 +76,21 @@ struct PanelWatchEngineTests {
         #expect(harness.environment.scanCount == 2)
     }
 
+    @Test("AXObserver を張れなかったアプリでは、PanelShown の間もポーリングを続ける")
+    func keepsPollingWhilePanelShownWithoutObserver() async {
+        let harness = PanelWatchEngineHarness()
+        harness.engine.start(frontmost: .finder)
+        await harness.environment.waitForScans(count: 1)
+        harness.engine.axObservationDidFail(processID: finderPID)
+        harness.engine.coordinatorStateDidChange(.panelShown(.finderPanel, isPaletteVisible: true))
+        await harness.drainMainActor()
+
+        harness.clock.advance(by: interval)
+
+        await harness.environment.waitForScans(count: 2)
+        #expect(harness.environment.scanCount == 2)
+    }
+
     @Test("最前面のアプリの切り替え・終了と disabled_apps の変更に合わせて張り替える")
     func followsApplicationChanges() async {
         let harness = PanelWatchEngineHarness()

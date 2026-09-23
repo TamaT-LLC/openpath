@@ -3,7 +3,8 @@
 /// 入力（`PanelWatchInput`）を受けて状態を進め、実行すべき副作用（`PanelWatchEffect`）を返す。決めるのは次の 3 つ:
 /// - どのアプリに張り付くか: 最前面のアプリ。ただし自プロセスは無視し（観測中のアプリを外さない）、
 ///   `disabled_apps` のアプリには張り付かない
-/// - 補助ポーリングの開始・停止: 張り付いていて、AppCoordinator が Idle の間だけポーリングする
+/// - 補助ポーリングの開始・停止: 張り付いていて、AppCoordinator が Idle の間だけポーリングする。
+///   ただし AXObserver を張れなかったアプリでは、パネルの消滅を検知するため Idle 以外でもポーリングする
 /// - AppCoordinator へ送るイベント: 走査で見つけたパネルを追跡し、出現・消滅を 1 回ずつ送る。
 ///   Idle に戻った後も同じパネルが開いたままなら、もう一度だけ `panelAppeared` を送る
 ///   （注入タイムアウトで Idle に戻ると AppCoordinator はパネルを見失い、ホットキーも受け付けないため）
@@ -22,6 +23,8 @@ public struct PanelWatchPolicy {
     /// 最後に最前面になった自プロセス以外のアプリ。disabled_apps の変更時に判定し直すため、張り付いていなくても覚えておく
     private var frontApplication: ActiveApplication?
     private var coordinatorState: CoordinatorState = .idle
+    /// 張り付いているアプリから AX 通知を受け取れるか。AXObserver を張れなかったら false にし、張り替えたら戻す
+    private var canReceiveAXNotifications = true
     /// AppCoordinator が最後に Idle になってから、追跡中のパネルを通知したか
     private var isTrackedPanelAnnouncedSinceIdle = false
     private var nextScanID = 0
@@ -57,6 +60,8 @@ public struct PanelWatchPolicy {
         case .axNotificationReceived(let processID):
             guard processID == attachedProcessID else { break }
             requestScan(effects: &effects)
+        case .axObservationFailed(let processID):
+            axObservationFailed(processID: processID, effects: &effects)
         case .pollTick:
             // 走査が長引いている間に周期ごとの走査を積み上げると、AX のキューが空かなくなるため捨てる
             guard isPolling, inFlightScanID == nil else { break }
@@ -112,6 +117,17 @@ public struct PanelWatchPolicy {
         requestScan(effects: &effects)
     }
 
+    private mutating func axObservationFailed(processID: Int32, effects: inout [PanelWatchEffect]) {
+        guard processID == attachedProcessID, canReceiveAXNotifications else { return }
+        canReceiveAXNotifications = false
+        let wasPolling = isPolling
+        updatePolling(effects: &effects)
+        // PanelShown 中に分かった場合、止めていた間にパネルが閉じられているかもしれないため、すぐに確かめる
+        if !wasPolling, isPolling {
+            requestScan(effects: &effects)
+        }
+    }
+
     private mutating func scanCompleted(_ result: PanelScanResult, effects: inout [PanelWatchEffect]) {
         guard result.requestID == inFlightScanID else { return }
         inFlightScanID = nil
@@ -142,6 +158,7 @@ public struct PanelWatchPolicy {
         }
         inFlightScanID = nil
         isRescanPending = false
+        canReceiveAXNotifications = true
         attachedProcessID = desiredProcessID
 
         if let desiredProcessID {
@@ -162,7 +179,8 @@ public struct PanelWatchPolicy {
     }
 
     private mutating func updatePolling(effects: inout [PanelWatchEffect]) {
-        let shouldPoll = attachedProcessID != nil && coordinatorState == .idle
+        // AX 通知を受け取れないアプリでは、PanelShown 中もポーリングしないとパネルの消滅に気づけない
+        let shouldPoll = attachedProcessID != nil && (coordinatorState == .idle || !canReceiveAXNotifications)
         guard shouldPoll != isPolling else { return }
         isPolling = shouldPoll
         effects.append(shouldPoll ? .startPolling : .stopPolling)

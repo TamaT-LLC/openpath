@@ -40,7 +40,8 @@ final class AXApplicationObserver: @unchecked Sendable {
     }
 
     /// AXObserver を生成し、アプリ要素に通知を登録する。axQueue で呼ぶこと。
-    /// 通知の一部に対応しないアプリもあるため、1 つでも登録できれば成功とする。
+    /// 1 つでも登録できなければ失敗とする。一部の通知（要素破棄など）が欠けるとパネルの消滅を取りこぼすため、
+    /// 呼び出し側はポーリングで補う。
     static func register(
         processID: pid_t,
         notifications: [String],
@@ -55,7 +56,6 @@ final class AXApplicationObserver: @unchecked Sendable {
         let applicationElement = AXUIElementCreateApplication(processID)
         let callbackTarget = Unmanaged.passRetained(CallbackTarget(handler: handler))
         var registered: [String] = []
-        var lastError = AXError.failure
         for notification in notifications {
             let result = AXObserverAddNotification(
                 observer,
@@ -63,16 +63,15 @@ final class AXApplicationObserver: @unchecked Sendable {
                 notification as CFString,
                 callbackTarget.toOpaque()
             )
-            if result == .success {
-                registered.append(notification)
-            } else {
-                lastError = result
+            guard result == .success else {
+                // ソースを RunLoop に追加する前なので、登録済みの通知を外せばコールバックは届かない
+                for registeredNotification in registered {
+                    AXObserverRemoveNotification(observer, applicationElement, registeredNotification as CFString)
+                }
+                callbackTarget.release()
+                return .failure(AXElementError(code: result, target: notification))
             }
-        }
-
-        guard !registered.isEmpty else {
-            callbackTarget.release()
-            return .failure(AXElementError(code: lastError, target: "AXObserverAddNotification"))
+            registered.append(notification)
         }
         return .success(AXApplicationObserver(
             processID: processID,

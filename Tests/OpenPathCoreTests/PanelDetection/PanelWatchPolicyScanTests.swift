@@ -72,6 +72,51 @@ struct PanelWatchPolicyScanTests {
         #expect(driver.send(.pollTick).isEmpty)
     }
 
+    // MARK: - AXObserver を張れなかったとき
+
+    @Test("AXObserver を張れなかったアプリでは、PanelShown / Injecting の間もポーリングを続ける（パネルの消滅を検知するため）")
+    func pollingContinuesWhileBusyWithoutObserver() {
+        var driver = PolicyDriver()
+        driver.startWatching()
+
+        #expect(driver.send(.axObservationFailed(processID: finderPID)).isEmpty)
+        #expect(driver.send(.coordinatorStateChanged(.panelShown(.finderPanel, isPaletteVisible: true))).isEmpty)
+        #expect(driver.send(.coordinatorStateChanged(.injecting(.finderPanel, path: "/tmp"))).isEmpty)
+        #expect(driver.policy.isPolling)
+        #expect(driver.send(.pollTick) == [.scan(finderPID)])
+    }
+
+    @Test("PanelShown 中に AXObserver を張れなかったと分かったら、ポーリングを再開してすぐに走査する")
+    func observationFailureWhileBusyResumesPolling() {
+        var driver = PolicyDriver()
+        driver.startWatching()
+        driver.send(.coordinatorStateChanged(.panelShown(.finderPanel, isPaletteVisible: true)))
+
+        #expect(driver.send(.axObservationFailed(processID: finderPID)) == [.startPolling, .scan(finderPID)])
+    }
+
+    @Test("張り替えると、AXObserver を張れなかった状態は引き継がない")
+    func observationFailureIsResetOnReattach() {
+        var driver = PolicyDriver()
+        driver.startWatching(.finder)
+        driver.send(.axObservationFailed(processID: finderPID))
+        driver.send(.applicationActivated(.claude))
+        driver.completeLatestScan(.found([]))
+
+        #expect(driver.send(.coordinatorStateChanged(.panelShown(.claudePanel, isPaletteVisible: true))) == [.stopPolling])
+    }
+
+    @Test("観測していないアプリについての AXObserver の失敗は無視する")
+    func observationFailureOfOtherProcessIsIgnored() {
+        var driver = PolicyDriver()
+        driver.startWatching(.finder)
+        driver.send(.applicationActivated(.claude))
+        driver.completeLatestScan(.found([]))
+
+        #expect(driver.send(.axObservationFailed(processID: finderPID)).isEmpty)
+        #expect(driver.send(.coordinatorStateChanged(.panelShown(.claudePanel, isPaletteVisible: true))) == [.stopPolling])
+    }
+
     // MARK: - 走査の間引き
 
     @Test("走査中に来た周期は捨て、走査を積み上げない")
