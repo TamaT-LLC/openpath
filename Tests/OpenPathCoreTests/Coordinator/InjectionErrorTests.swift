@@ -14,6 +14,8 @@ struct InjectionErrorTests {
             (InjectionError.timeout(step: .waitPaste), "移動できませんでした（パスの貼り付けに失敗）"),
             (InjectionError.timeout(step: .overall), "移動できませんでした（タイムアウト）"),
             (InjectionError.axError(code: axCannotCompleteCode), "移動できませんでした（アクセシビリティ操作に失敗 (-25204)）"),
+            // パネルの移動は済んでいる場合があるため「移動できませんでした」とは言わない
+            (InjectionError.pasteboardRestoreFailed, "クリップボードを元に戻せませんでした"),
         ]
     )
     func userMessage(error: InjectionError, expected: String) {
