@@ -31,7 +31,8 @@ public struct RootPathResolver: Sendable {
         return homeDirectory + rest
     }
 
-    private static func normalize(absolutePath: String) -> String {
+    /// 候補インデックスが統合のキーを作るときにも使う（CandidatePath）
+    static func normalize(absolutePath: String) -> String {
         var components: [Substring] = []
         for component in absolutePath.split(separator: separator) {
             switch component {

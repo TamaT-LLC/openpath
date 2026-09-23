@@ -14,31 +14,29 @@ struct FuzzyAligner {
         let indices: [Int]
     }
 
-    private let queryCharacters: [Character]
-    private let textCharacters: [Character]
-    private let bonuses: [Int]
+    private let queryCodes: [FuzzyCharacterCode]
+    private let textElements: [FuzzyTargetElement]
 
     init(query: FuzzyQuery, target: FuzzyTarget) {
-        queryCharacters = query.characters
-        textCharacters = target.characters
-        bonuses = target.bonuses
+        queryCodes = query.codes
+        textElements = target.elements
     }
 
     /// 最もスコアの高い一致位置の選び方。マッチしない場合は nil
     func bestAlignment() -> Alignment? {
-        guard !queryCharacters.isEmpty,
-              queryCharacters.count <= textCharacters.count,
+        guard !queryCodes.isEmpty,
+              queryCodes.count <= textElements.count,
               let latest = latestPositions()
         else {
             return nil
         }
         var best: Alignment?
         var indices: [Int] = []
-        indices.reserveCapacity(queryCharacters.count)
-        let firstCharacter = queryCharacters[0]
+        indices.reserveCapacity(queryCodes.count)
+        let firstCode = queryCodes[0]
         var start = 0
         while start <= latest[0] {
-            if textCharacters[start] == firstCharacter {
+            if textElements[start].code == firstCode {
                 indices.removeAll(keepingCapacity: true)
                 let score = greedyScore(start: start, latest: latest, recordingInto: &indices)
                 // 同点なら先に始まるものを残す
@@ -53,11 +51,11 @@ struct FuzzyAligner {
 
     /// 各クエリ文字を置ける最も後ろの位置。マッチしない場合は nil
     private func latestPositions() -> [Int]? {
-        var positions = [Int](repeating: 0, count: queryCharacters.count)
-        var queryIndex = queryCharacters.count - 1
-        var textIndex = textCharacters.count - 1
+        var positions = [Int](repeating: 0, count: queryCodes.count)
+        var queryIndex = queryCodes.count - 1
+        var textIndex = textElements.count - 1
         while queryIndex >= 0, textIndex >= 0 {
-            if textCharacters[textIndex] == queryCharacters[queryIndex] {
+            if textElements[textIndex].code == queryCodes[queryIndex] {
                 positions[queryIndex] = textIndex
                 queryIndex -= 1
             }
@@ -69,10 +67,10 @@ struct FuzzyAligner {
     /// `start` から前方へ貪欲に位置を選び、合計スコアを返す。選んだ位置は `indices` に追記する
     private func greedyScore(start: Int, latest: [Int], recordingInto indices: inout [Int]) -> Int {
         indices.append(start)
-        var score = bonuses[start]
+        var score = textElements[start].bonus
         var previous = start
         var queryIndex = 1
-        while queryIndex < queryCharacters.count {
+        while queryIndex < queryCodes.count {
             let chosen = bestNextPosition(for: queryIndex, after: previous, upTo: latest[queryIndex])
             indices.append(chosen.index)
             score += chosen.gain
@@ -85,20 +83,21 @@ struct FuzzyAligner {
     /// (previous, limit] の範囲で局所加点が最大の位置（同点なら手前）。
     /// `limit` は `latest` 由来で、`previous` より後ろにある一致位置であることを前提とする
     private func bestNextPosition(for queryIndex: Int, after previous: Int, upTo limit: Int) -> (index: Int, gain: Int) {
-        let queryCharacter = queryCharacters[queryIndex]
-        assert(previous < limit && textCharacters[limit] == queryCharacter, "limit が一致位置ではない")
+        let queryCode = queryCodes[queryIndex]
+        assert(previous < limit && textElements[limit].code == queryCode, "limit が一致位置ではない")
 
         var index = previous + 1
-        while index < limit, textCharacters[index] != queryCharacter {
+        while index < limit, textElements[index].code != queryCode {
             index += 1
         }
-        var chosen = (index: index, gain: FuzzyScoring.transitionGain(from: previous, to: index, bonus: bonuses[index]))
+        var chosen = (index: index, gain: FuzzyScoring.transitionGain(from: previous, to: index, bonus: textElements[index].bonus))
 
         // より後ろにボーナスの高い一致があれば乗り換える。ギャップが広がり上回れなくなった時点で打ち切る
         index += 1
         while index <= limit, chosen.gain < FuzzyScoring.maxGain(atGapOf: index - previous - 1) {
-            if textCharacters[index] == queryCharacter {
-                let gain = FuzzyScoring.transitionGain(from: previous, to: index, bonus: bonuses[index])
+            let element = textElements[index]
+            if element.code == queryCode {
+                let gain = FuzzyScoring.transitionGain(from: previous, to: index, bonus: element.bonus)
                 if gain > chosen.gain {
                     chosen = (index, gain)
                 }
