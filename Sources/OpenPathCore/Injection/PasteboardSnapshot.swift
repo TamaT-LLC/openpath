@@ -1,0 +1,70 @@
+import Foundation
+
+/// ペーストボードの内容を、アイテムごと・型ごとの Data として複製したもの（DSN-001 §3.1 ステップ 1）。
+/// 復元時はこの内容をそのまま書き戻す。
+public struct PasteboardSnapshot: Equatable, Sendable {
+    /// ペーストボードの 1 アイテム（NSPasteboardItem に相当）。
+    public struct Item: Equatable, Sendable {
+        /// アイテムが持つ型とデータ。ペーストボードが返した順（優先度の高い順）。
+        public let representations: [Representation]
+
+        public init(representations: [Representation]) {
+            self.representations = representations
+        }
+    }
+
+    /// アイテムが持つ 1 つの型とそのデータ。
+    public struct Representation: Equatable, Sendable {
+        /// UTI 形式の型名（例: `public.utf8-plain-text`）。
+        public let type: String
+        public let data: Data
+
+        public init(type: String, data: Data) {
+            self.type = type
+            self.data = data
+        }
+    }
+
+    public let items: [Item]
+
+    public init(items: [Item]) {
+        self.items = items
+    }
+
+    public static let empty = PasteboardSnapshot(items: [])
+
+    public var isEmpty: Bool {
+        items.isEmpty
+    }
+}
+
+extension PasteboardSnapshot {
+    /// 文字列の型（`NSPasteboard.PasteboardType.string`）。
+    public static let plainTextType = "public.utf8-plain-text"
+    /// クリップボード履歴アプリに記録させないための印（nspasteboard.org の取り決め）。
+    public static let transientMarkerType = "org.nspasteboard.TransientType"
+
+    /// 注入のために一時的に書き込む、文字列 1 件だけの内容。
+    /// 注入のたびにパスがクリップボード履歴アプリに残らないよう、一時的な内容である印を付ける。
+    public static func transientText(_ text: String) -> PasteboardSnapshot {
+        PasteboardSnapshot(items: [
+            Item(representations: [
+                Representation(type: plainTextType, data: Data(text.utf8)),
+                Representation(type: transientMarkerType, data: Data()),
+            ]),
+        ])
+    }
+
+    /// ペーストボードの全アイテムを型ごとに読み出す。
+    /// データを読み出せない型（提供元が応答しない遅延データ等）は書き戻せないため除き、型が 1 つも残らないアイテムも除く。
+    @MainActor
+    public static func capture(from pasteboard: any PasteboardAccessing) -> PasteboardSnapshot {
+        let items = pasteboard.items.compactMap { item -> Item? in
+            let representations = item.types.compactMap { type in
+                item.data(forType: type).map { Representation(type: type, data: $0) }
+            }
+            return representations.isEmpty ? nil : Item(representations: representations)
+        }
+        return PasteboardSnapshot(items: items)
+    }
+}
