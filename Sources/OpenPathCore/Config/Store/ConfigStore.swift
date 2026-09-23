@@ -125,8 +125,10 @@ public final class ConfigStore {
             Log.warning("設定ファイルを読み込めません")
             Log.debugPath("設定ファイルを読み込めません（\(reason)）", path: path)
         case .parseFailed(let path, let parseError):
-            Log.warning("設定ファイルの書式が誤っているため反映していません（\(parseError.description)）")
-            Log.debugPath("設定ファイルの書式が誤っているため反映していません", path: path)
+            // TOMLParseError.description は duplicateKey 等で引用キーの内容（任意の文字列）をそのまま含み得るため、
+            // PathRedactor が検出できない相対パス・ファイル名対策として warning には出さず debugPath 側にまとめる
+            Log.warning("設定ファイルの書式が誤っているため反映していません")
+            Log.debugPath("設定ファイルの書式が誤っているため反映していません（\(parseError.description)）", path: path)
         case .decodeFailed(let path, let decodeError):
             // ConfigDecodingError.description は invalidRootPath 等で利用者が入力した相対パスをそのまま含み得るが、
             // PathRedactor は相対パス・ファイル名までは検出できないため warning には出さず debugPath 側にまとめる
@@ -207,9 +209,12 @@ public final class ConfigStore {
             lastError = nil
         }
         if warnings != result.warnings {
-            // 変わらない限り再読み込みのたびに同じ警告を出さないよう、差分があるときだけ記録する
+            // 変わらない限り再読み込みのたびに同じ警告を出さないよう、差分があるときだけ記録する。
+            // ConfigWarning.description はクォートキーの内容（任意の文字列）を含み得るため、
+            // warning には固定文だけを出し、詳細は debugPath 側にまとめる
             for warning in result.warnings {
-                Log.warning(warning.description)
+                Log.warning("設定ファイルに未知のキーがあります")
+                Log.debugPath(warning.description, path: filePath)
             }
             warnings = result.warnings
         }
