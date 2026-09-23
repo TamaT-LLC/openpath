@@ -19,6 +19,36 @@ public enum PanelScanOutcome: Equatable, Sendable {
     case unavailable
 }
 
+/// 観測中のアプリのウィンドウ一覧（`kAXWindowsAttribute`）を取得できなかった理由。
+/// Core に AX の型を持ち込まないため、`AXError` のうち扱いを分けるものだけを写す。
+public enum WindowListError: Equatable, Sendable {
+    /// 属性に値がない（`kAXErrorNoValue`）。ウィンドウがない
+    case noValue
+    /// アプリの要素が無効（`kAXErrorInvalidUIElement`）。アプリが終了した
+    case invalidElement
+    /// 属性に対応していない（`kAXErrorAttributeUnsupported`）
+    case attributeUnsupported
+    /// 応答がない等で完了できなかった（`kAXErrorCannotComplete`）
+    case cannotComplete
+    /// 上記以外
+    case other
+}
+
+extension PanelScanOutcome {
+    /// ウィンドウ一覧を取得できなかったときの走査結果。
+    /// パネルがないと言い切れるのは、ウィンドウがない場合とアプリが終了した場合だけ。
+    /// それ以外（属性に対応していない、応答がない等）は取得できなかっただけなので `unavailable` とし、
+    /// 追跡中のパネルを誤って消えたとみなさないようにする。
+    public init(windowListError: WindowListError) {
+        switch windowListError {
+        case .noValue, .invalidElement:
+            self = .found([])
+        case .attributeUnsupported, .cannotComplete, .other:
+            self = .unavailable
+        }
+    }
+}
+
 /// `PanelScanRequest` に対する結果。
 public struct PanelScanResult: Equatable, Sendable {
     /// 対応する `PanelScanRequest.id`。

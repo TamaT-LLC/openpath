@@ -12,23 +12,38 @@ public typealias PanelDetector = @Sendable (AXUIElement) -> PanelContext?
 
 /// 観測中のアプリのウィンドウを列挙してパネルを探す。AX のプロセス間呼び出しを伴うため axQueue で呼ぶこと。
 enum PanelScanner {
-    /// ウィンドウがないことを表す AXError。アプリが終了した（invalidUIElement）場合もパネルはないとみなす。
-    private static let noWindowErrors: Set<AXError> = [.noValue, .attributeUnsupported, .invalidUIElement]
-
     static func scan(processID: pid_t, detectPanel: PanelDetector) -> PanelScanOutcome {
         let application = AXUIElementCreateApplication(processID)
         let windowsValue: CFTypeRef
         do {
             windowsValue = try application.copyAttributeValue(kAXWindowsAttribute)
-        } catch let error as AXElementError where noWindowErrors.contains(error.code) {
-            return .found([])
+        } catch let error as AXElementError {
+            // パネルがないと言い切れるエラーかどうかの判断は OpenPathCore の PanelScanOutcome で行う
+            return PanelScanOutcome(windowListError: WindowListError(error.code))
         } catch {
-            // 応答しない（cannotComplete）等でパネルの有無が分からない。追跡中のパネルを消えたとみなさないよう区別する
             return .unavailable
         }
         guard let windows = AXAttributeCast.cast(windowsValue, to: [AXUIElement].self) else {
             return .unavailable
         }
         return .found(windows.compactMap(detectPanel))
+    }
+}
+
+extension WindowListError {
+    /// `AXError` を Core の語彙に写す。扱いを分けない AXError はまとめて `.other` にする。
+    init(_ code: AXError) {
+        switch code {
+        case .noValue:
+            self = .noValue
+        case .invalidUIElement:
+            self = .invalidElement
+        case .attributeUnsupported:
+            self = .attributeUnsupported
+        case .cannotComplete:
+            self = .cannotComplete
+        default:
+            self = .other
+        }
     }
 }
