@@ -81,12 +81,19 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
 
 ### 2.3 パネルの選択モード推定
 
-- `canChooseDirectories` のみのパネル（Claude Desktop の「フォルダを追加」等）は、ファイル行が `AXDisabled` になる。ファイルリスト内の先頭 20 行を見て、ディレクトリ以外がすべて disabled なら「フォルダのみモード」と推定し、`CandidateIndex` にディレクトリのみを要求する。
-- 推定できない場合は設定 `include_files` に従う。
+- 判定は `AXEnabled` だけでなく、**名前の文字色（`AXForegroundColor`）の不透明度**を主に使う。実機の AX ツリーを調べた結果、リスト表示・カラム表示ではファイル行の `AXEnabled` が選べる/選べないで変わらず（両方 true）、名前の文字色の不透明度だけが変わる（選べる行 0.847、選べない行 0.247）。アイコン表示（`AXList`、サブロール `AXCollectionList`）だけは `AXEnabled` が正しく false になる。しきい値は 0.5（通常 0.85 と選べない 0.25〜0.26 の間）。文字色を読めない行は判断しない（当初案の `AXDisabled` 判定から変更、PR #60）。
+- ディレクトリかどうかは、名前の要素（`AXTextField`）が持つ `AXURL`（`file:///.file/id=…`）の末尾が `/` かで判別する（表示形式・言語に依存しないため。種類列やアイコンの説明はローカライズされる、展開の三角はリスト表示にしかない等の理由で不採用、PR #60）。
+- 行の読み取り: カラム表示は最後の `AXColumns` 列（プレビュー列がある場合はその左）の `AXList.AXVisibleChildren`、リスト表示（`AXOutline` / `AXTable`）は `AXVisibleRows`。いずれも表示中の行だけを読む（`AXChildren` はフォルダの全項目を返してしまうため）。
+- 先頭 20 行のうちディレクトリ以外の行を見て、選べる行が 1 つでもあれば「ファイルも選べる」、すべて選べなければ「フォルダのみ」、ディレクトリ以外の行が無い・判断できない行があれば「推定できない」の 3 値で決める。推定できない場合は `isDirectoriesOnly = false`（設定 `include_files` に従う。`PanelContext` の形は変えない）。
+- 推定は開くパネルと判定した最初の検知（Idle 中）でのみ行い、判定結果と一緒にキャッシュする。**種類の分かる行を 1 行も読めなかった場合だけ**、判定の再確認と同じ間隔（250ms から倍々に 4 回）で推定し直す。行を読めたうえで推定できなかった場合（例: 先頭がディレクトリのみ）は、フォルダを移動しても推定し直さない（PanelShown 中の走査で 20 行を読み直すと DSN-001 §5 の AX 呼び出し上限を超えるため。推定し直した結果を表示中のパレットへ反映する経路は、並行実装中の #21 / #22 / #27 と衝突するため #27 へ申し送り、PR #60）。
+- 中身のファイル一覧は、判定と同じ幅優先探索で最後に見つけたファイル一覧ロールの要素とする（サイドバーも同じロール条件を満たすが、中身の一覧より先に見つかるため、PR #60）。
+- アイコン表示のパネルはファイル一覧のロール条件（`AXBrowser` / `AXOutline` / `AXTable`、DSN-001 §2.2）を満たさないため検知されない（既知の限界、PR #60）。
 
 ### 2.4 パネルの位置取得
 
-- `kAXPositionAttribute` / `kAXSizeAttribute` からパネル矩形を取得し、`PaletteWindow` の配置に渡す。AX 座標系は左上原点のため、`NSScreen` の座標へ変換する。
+- `kAXPositionAttribute` / `kAXSizeAttribute` からパネル矩形を取得する。AX 座標（Quartz のグローバル座標、プライマリ画面基準）と `NSScreen` 座標（Cocoa のグローバル座標）はどちらもポイント単位でプライマリ画面基準のため、`y' = プライマリの高さ - (y + 高さ)` の反転だけで変換できる（メイン以外のディスプレイ・Retina 混在でも同じ式で成立し、スクリーン一覧は不要）。プライマリの高さは `CGDisplayBounds(CGMainDisplayID())` から取る（`NSScreen` は main スレッド前提のため使わない）。
+- `PanelContext.frame` は変換後の `NSScreen` 座標で持つ（`PalettePlacement` / `PaletteWindow.show(near:)` にそのまま渡せる）。Core の `OpenPanelLocator` / `LocatedOpenPanel` と Mac の `DetectedPanel` は AX 座標のまま持つ。矩形を読めなかったパネルはプライマリ画面左上の点（`(0, 高さ)`）になる（PR #60）。
+- 変換は `PanelScanner`（axQueue）で走査のたびに行う。矩形は DSN-001 §5 のとおり走査のたびに読み直す（1 回に固定しない。パネルが動いたときに最新の位置でパレットを出し直すため、PR #56 の判断を PR #60 が踏襲）。
 
 ## 3. PanelInjector
 
@@ -160,7 +167,7 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
 ## 5. スレッド・タイミング
 
 - AX 呼び出しはすべて `axQueue`（serial）で行い、結果を `MainActor` に戻す。要素参照には 1 回 0.25 秒のメッセージングタイムアウトを設定し、応答しないアプリで `axQueue` 全体が止まらないようにする（既定の約 6 秒のままだと注入の AX 呼び出しまで待たされる。PanelWatcher の走査・GoToSheetDetector・注入先ガードのいずれにも適用、PR #45 / #46 / #54）。
-- `PanelShown` 中の AX 呼び出し合計を 1 パネルあたり 50 回以下に抑える（判定キャッシュは 1 回。位置取得は Idle への再通知のたびに最新の位置で通知し直すため、1 パネルにつき最大 2 回読む、PR #56）。
+- `PanelShown` 中の AX 呼び出し合計を 1 パネルあたり 50 回以下に抑える（判定キャッシュは 1 回。位置取得は 1 回に固定せず走査のたびに読み直す。パネルが動いたときに最新の位置で出し直すため、PR #56 / #60）。選択モード推定（§2.3）は最初の検知時のみ（最大 69 回）で、以降の走査では増えない。
 - 注入中は `PaletteWindow.isLocked = true`。ロック中のキー入力は捨てる。
 - 注入は `InjectionSerialGate` で 1 件ずつ直列に実行する（DSN-001 §3.1、PR #45）。
 

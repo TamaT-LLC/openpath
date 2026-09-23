@@ -106,6 +106,7 @@ updated: 2026-09-24
 - **注入（PanelInjector、PR #45 / #54）**: 副方式が効くアプリがあるか。auto_confirm / Cmd+Enter の両方で動く。日本語パス（NFC / NFD）で正しく移動する。注入中にアプリを切り替えるとキー操作が送られない（`targetNotFrontmost`）。独自の確定ボタン名（「読み込む」等）を持つアプリでの挙動。
 - **再通知・履歴（AppCoordinator、PR #52）**: auto_confirm=false で Enter を押して注入に成功した後、パレットが出直さず、パネル側の Enter で確定できる（S-03）。その状態で Ctrl+Shift+O を押すとパレットを再表示できる。auto_confirm=true と Cmd+Enter のそれぞれで、パネルが閉じた後に履歴へ残る。
 - **ログ（PR #56）**: `panel detected` / `panel gone` が info でログに出る（`Log.configure` を起動時に呼ぶ必要がある）。debug ログの `open panel classified` に含まれる `axCalls` / `elapsedMs`（判定コストの実測値）を確認する。
+- **選択モード推定・位置（PanelWatcher、PR #60）**: 「コントラストを上げる」設定時の名前の文字色不透明度（プロセス内では外観を切り替えられず未確認）。サンドボックスアプリ（リモートパネル）での推定・矩形取得の AX 呼び出し回数と所要時間（プロセス内測定は 66〜127 回・9〜15ms）。マルチディスプレイ / Retina 混在環境でのパレット位置。
 
 ## 4. スモークスクリプト
 
