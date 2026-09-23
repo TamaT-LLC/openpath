@@ -32,8 +32,12 @@ final class OnboardingWindow: NSObject {
         hostingView.rootView = OnboardingView(page: page) { [weak self] command in
             self?.onCommand?(command)
         }
+        // setContentSize は左下を基準に大きさを変えるため、ページを替えても上端が動かないよう左上を保つ
+        let topLeft = NSPoint(x: window.frame.minX, y: window.frame.maxY)
         window.setContentSize(hostingView.fittingSize)
-        if !hasBeenPositioned {
+        if hasBeenPositioned {
+            window.setFrameTopLeftPoint(topLeft)
+        } else {
             window.center()
             hasBeenPositioned = true
         }
