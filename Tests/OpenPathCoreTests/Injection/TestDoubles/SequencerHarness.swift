@@ -11,6 +11,7 @@ final class SequencerHarness {
     let pasteboard: FakePasteboard
     let keyboard: KeyboardSpy
     let sheetDetector: SheetDetectorFake
+    let targetGuard: TargetGuardFake
     let hooks: HooksSpy
     let sequencer: GoToFolderPasteSequencer
 
@@ -25,11 +26,13 @@ final class SequencerHarness {
         self.pasteboard = pasteboard
         keyboard = KeyboardSpy(log: log)
         sheetDetector = SheetDetectorFake(clock: clock, log: log, appearsAt: sheetAppearsAt)
+        targetGuard = TargetGuardFake(log: log)
         hooks = HooksSpy(clock: clock, log: log)
         sequencer = GoToFolderPasteSequencer(
             pasteboard: pasteboard,
             keyboard: keyboard,
             sheetDetector: sheetDetector,
+            targetGuard: targetGuard,
             hooks: hooks.hooks,
             timing: .standard,
             clock: clock
