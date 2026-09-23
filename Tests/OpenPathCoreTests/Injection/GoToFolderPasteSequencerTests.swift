@@ -71,7 +71,7 @@ struct GoToFolderPasteSequencerTests {
         #expect(harness.log.entries.last == .init(time: returnTime + .milliseconds(300), event: .pasteboardWrite(.userClipboard)))
     }
 
-    @Test("シートが出なければ 50ms 間隔で 600ms まで確かめ、timeout(waitSheet) を投げる。ペーストボードには触れない")
+    @Test("シートが出なければ 600ms の期限まで 50ms 間隔で確かめ、timeout(waitSheet) を投げる。ペーストボードには触れない")
     func timesOutWaitingForSheet() async {
         let harness = SequencerHarness(sheetAppearsAt: nil)
 
@@ -79,24 +79,34 @@ struct GoToFolderPasteSequencerTests {
             try await harness.run(path: Self.path)
         }
 
+        // 走査は期限で打ち切るため、期限（600ms）の時点から始める確認はしない
         let checkTimes = harness.log.entries.filter { $0.event == .sheetCheck(isShown: false) }.map(\.time)
-        #expect(checkTimes == (1...12).map { Duration.milliseconds(50 * $0) })
+        #expect(checkTimes == (1...11).map { Duration.milliseconds(50 * $0) })
         #expect(harness.log.keyStrokes == [.goToFolder])
         #expect(harness.pasteboard.writes.isEmpty)
         #expect(harness.pasteboard.contents == .userClipboard)
     }
 
-    @Test("600ms ちょうどの判定でシートが出ていれば続行する")
-    func sheetAppearingAtDeadlineIsAccepted() async throws {
-        let harness = SequencerHarness(sheetAppearsAt: .milliseconds(600))
+    @Test("期限前の最後の判定（550ms）でシートが出ていれば続行する")
+    func sheetAppearingAtLastCheckIsAccepted() async throws {
+        let harness = SequencerHarness(sheetAppearsAt: .milliseconds(550))
 
         try await harness.run(path: Self.path)
 
         #expect(harness.log.keyStrokes == [.goToFolder, .selectAll, .paste, .returnKey])
     }
 
-    @Test("判定（AX の往復）に時間がかかっても、600ms を過ぎた後は再確認せずに打ち切る")
-    func stopsCheckingAfterDeadlineEvenIfChecksAreSlow() async {
+    @Test("期限（600ms）以降に出たシートは待たない")
+    func sheetAppearingAtDeadlineIsTooLate() async {
+        let harness = SequencerHarness(sheetAppearsAt: .milliseconds(600))
+
+        await #expect(throws: InjectionError.timeout(step: .waitSheet)) {
+            try await harness.run(path: Self.path)
+        }
+    }
+
+    @Test("判定の走査（AX の往復）が期限をまたいだら、走査の途中で打ち切って timeout(waitSheet) を投げる")
+    func cutsOffScanAtDeadline() async {
         let harness = SequencerHarness(sheetAppearsAt: nil)
         harness.sheetDetector.checkLatency = .milliseconds(200)
 
@@ -104,9 +114,31 @@ struct GoToFolderPasteSequencerTests {
             try await harness.run(path: Self.path)
         }
 
-        // 50ms 後に判定開始 → 250ms に終了 → 50ms 後の 300ms に開始 → … → 550ms 開始・750ms 終了で打ち切り
-        let checkTimes = harness.log.entries.filter { $0.event == .sheetCheck(isShown: false) }.map(\.time)
-        #expect(checkTimes == [.milliseconds(250), .milliseconds(500), .milliseconds(750)])
+        // 50ms に開始・250ms に終了 → 300ms に開始・500ms に終了 → 550ms に開始し、600ms の次の AX 操作の前で打ち切る
+        let scanResults = harness.log.entries.filter {
+            $0.event == .sheetCheck(isShown: false) || $0.event == .scanCutOff
+        }
+        #expect(scanResults == [
+            .init(time: .milliseconds(250), event: .sheetCheck(isShown: false)),
+            .init(time: .milliseconds(500), event: .sheetCheck(isShown: false)),
+            .init(time: .milliseconds(600), event: .scanCutOff),
+        ])
+    }
+
+    @Test("基準を記録する走査にも 600ms の期限を設け、超えたら ⌘⇧G を送らずに timeout(waitSheet) を投げる")
+    func cutsOffBaselineScanAtDeadline() async {
+        let harness = SequencerHarness()
+        harness.sheetDetector.probeLatency = .milliseconds(800)
+
+        await #expect(throws: InjectionError.timeout(step: .waitSheet)) {
+            try await harness.run(path: Self.path)
+        }
+
+        #expect(harness.log.entries == [
+            .init(time: .zero, event: .makeProbe),
+            .init(time: .milliseconds(600), event: .scanCutOff),
+        ])
+        #expect(harness.pasteboard.writes.isEmpty)
     }
 
     @Test("注入中に他のアプリやユーザーがペーストボードを書き換えたら、その内容を残す")

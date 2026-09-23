@@ -35,32 +35,41 @@ public struct GoToSheetScan: Equatable, Sendable {
     /// root（パネルのウィンドウ）の子孫を幅優先で集計する。
     /// - Parameters:
     ///   - search: 探索の上限。既定は DSN-001 §2.2 と同じ深さ 6・400 要素。
+    ///   - cutoff: 打ち切り条件。role / children / placeholder の各呼び出し（AX 操作）の直前に確かめる。
     ///   - role: 要素のロール。1 要素につき 1 回だけ呼ぶ。
     ///   - children: 要素の子。ファイル一覧など `prunedRoles` の要素には呼ばない。
     ///   - placeholder: 入力欄の placeholder。入力欄のロールの要素にだけ呼ぶ。
+    /// - Throws: 打ち切り条件に達したら、それ以降の AX 操作をせずに `ScanCutoff.Reached`。
     public static func scan<Node>(
         from root: Node,
         search: BoundedBreadthFirstSearch = BoundedBreadthFirstSearch(),
+        cutoff: ScanCutoff = .never,
         role: (Node) -> String?,
         children: (Node) -> [Node],
         placeholder: (Node) -> String?
-    ) -> GoToSheetScan {
+    ) throws -> GoToSheetScan {
         // ロールの読み取り（AX の往復）を 1 要素 1 回にするため、子を列挙するときにロールも読んで組にする
         let rootElement = ScannedElement(node: root, role: nil)
-        let matches = search.descendants(
+        let matches = try search.descendants(
             of: rootElement,
             children: { element in
                 if let elementRole = element.role, prunedRoles.contains(elementRole) {
                     return []
                 }
-                return children(element.node).map { ScannedElement(node: $0, role: role($0)) }
+                try cutoff.throwIfReached()
+                return try children(element.node).map { child in
+                    try cutoff.throwIfReached()
+                    return ScannedElement(node: child, role: role(child))
+                }
             },
             where: { element in
                 guard let elementRole = element.role else { return false }
                 if elementRole == sheetRole {
                     return true
                 }
-                guard pathFieldRoles.contains(elementRole), let text = placeholder(element.node) else { return false }
+                guard pathFieldRoles.contains(elementRole) else { return false }
+                try cutoff.throwIfReached()
+                guard let text = placeholder(element.node) else { return false }
                 return isPathFieldPlaceholder(text)
             }
         )

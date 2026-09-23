@@ -20,14 +20,14 @@ public final class GoToSheetDetector: GoToSheetDetecting {
         self.frontmostProcessID = frontmostProcessID
     }
 
-    public func makeProbe() async throws -> any GoToSheetProbe {
+    public func makeProbe(cutoff: ScanCutoff) async throws -> any GoToSheetProbe {
         guard let processID = frontmostProcessID(), processID != ProcessInfo.processInfo.processIdentifier else {
             // 自分自身へキー入力を送らないよう、注入先のパネルが無いものとして扱う
             throw InjectionError.panelGone
         }
         let (window, baseline) = try await onAXQueue { () throws -> (AXUIElement, GoToSheetScan) in
             let window = try GoToSheetAX.focusedWindow(ofProcess: processID)
-            return (window, GoToSheetAX.scan(window))
+            return (window, try GoToSheetAX.scan(window, cutoff: cutoff))
         }
         return GoToSheetAXProbe(window: window, baseline: baseline)
     }
@@ -44,9 +44,11 @@ private final class GoToSheetAXProbe: GoToSheetProbe {
         self.baseline = baseline
     }
 
-    func isSheetShown() async throws -> Bool {
+    func isSheetShown(cutoff: ScanCutoff) async throws -> Bool {
         let window = window
-        let current = await onAXQueue { GoToSheetAX.scan(window) }
+        let current = try await onAXQueue { () throws -> GoToSheetScan in
+            try GoToSheetAX.scan(window, cutoff: cutoff)
+        }
         return current.indicatesSheetShown(since: baseline)
     }
 }
@@ -73,9 +75,11 @@ private enum GoToSheetAX {
     }
 
     /// 子の取得に失敗した要素（タイムアウトを含む）は子なしとして扱う（BoundedBreadthFirstSearch と同じく、判定を止めない）。
-    static func scan(_ window: AXUIElement) -> GoToSheetScan {
-        GoToSheetScan.scan(
+    /// 走査全体の長さは cutoff（シート待ちの期限と注入のキャンセル）で抑える。
+    static func scan(_ window: AXUIElement, cutoff: ScanCutoff) throws -> GoToSheetScan {
+        try GoToSheetScan.scan(
             from: window,
+            cutoff: cutoff,
             role: { $0.role },
             children: { $0.children.map(limitingMessagingTimeout) },
             placeholder: { $0.attr(kAXPlaceholderValueAttribute) }

@@ -9,6 +9,8 @@ final class InjectionEventLog {
         case prepareForKeyEvents
         case key(InjectionKeyStroke)
         case sheetCheck(isShown: Bool)
+        /// AX の走査を打ち切り条件で途中でやめた
+        case scanCutOff
         /// ペーストボードへの書き込み（パスの書き込みと、元の内容への復元）
         case pasteboardWrite(PasteboardSnapshot)
         case didSubmitGoToSheet(autoConfirm: Bool)

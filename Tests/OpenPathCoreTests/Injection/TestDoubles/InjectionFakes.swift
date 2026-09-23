@@ -49,6 +49,7 @@ final class KeyboardSpy: KeyStrokePosting {
 }
 
 /// 指定した時刻以降の判定で移動先シートが出たことにする。
+/// AX の走査を数回の AX 操作に分けて時間を進め、実物と同じく操作の直前ごとに打ち切り条件を確かめる。
 @MainActor
 final class SheetDetectorFake: GoToSheetDetecting {
     private final class Probe: GoToSheetProbe {
@@ -58,16 +59,21 @@ final class SheetDetectorFake: GoToSheetDetecting {
             self.detector = detector
         }
 
-        func isSheetShown() async throws -> Bool {
-            try await detector.check()
+        func isSheetShown(cutoff: ScanCutoff) async throws -> Bool {
+            try await detector.check(cutoff: cutoff)
         }
     }
+
+    /// 1 回の走査を何回の AX 操作に分けるか。
+    private static let axOperationsPerScan = 4
 
     private let clock: VirtualClock
     private let log: InjectionEventLog
     /// この経過時間以降の判定でシートが出たことにする。nil なら最後まで出ない。
     var appearsAt: Duration?
-    /// 1 回の判定にかかる時間（AX の往復）。
+    /// 基準の記録（1 回の走査）にかかる時間。
+    var probeLatency: Duration = .zero
+    /// 1 回の判定（走査）にかかる時間。
     var checkLatency: Duration = .zero
     /// makeProbe で投げるエラー。
     var probeError: (any Error)?
@@ -77,6 +83,10 @@ final class SheetDetectorFake: GoToSheetDetecting {
     var checkSuspension: Suspension?
     /// 途中で止めた判定の結果。
     var suspendedCheckResult = false
+    /// 途中で止めた判定が、再開後に打ち切り条件を確かめるか。
+    var checksCutoffAfterSuspension = true
+    /// 途中で止めた判定に渡された打ち切り条件（キャンセルが走査側から見えることを確かめるため）。
+    private(set) var suspendedCheckCutoff: ScanCutoff?
 
     init(clock: VirtualClock, log: InjectionEventLog, appearsAt: Duration? = nil) {
         self.clock = clock
@@ -84,27 +94,49 @@ final class SheetDetectorFake: GoToSheetDetecting {
         self.appearsAt = appearsAt
     }
 
-    func makeProbe() async throws -> any GoToSheetProbe {
+    func makeProbe(cutoff: ScanCutoff) async throws -> any GoToSheetProbe {
         log.record(.makeProbe)
         if let probeError {
             throw probeError
         }
+        try simulateScan(taking: probeLatency, cutoff: cutoff)
         return Probe(detector: self)
     }
 
-    private func check() async throws -> Bool {
+    private func check(cutoff: ScanCutoff) async throws -> Bool {
         if let checkSuspension {
+            suspendedCheckCutoff = cutoff
             await checkSuspension.suspend()
+            if checksCutoffAfterSuspension {
+                try throwIfCutOff(cutoff)
+            }
             log.record(.sheetCheck(isShown: suspendedCheckResult))
             return suspendedCheckResult
         }
         if let checkError {
             throw checkError
         }
-        clock.advance(by: checkLatency)
+        try simulateScan(taking: checkLatency, cutoff: cutoff)
         let isShown = appearsAt.map { clock.elapsed >= $0 } ?? false
         log.record(.sheetCheck(isShown: isShown))
         return isShown
+    }
+
+    private func simulateScan(taking latency: Duration, cutoff: ScanCutoff) throws {
+        let operationLatency = latency / Self.axOperationsPerScan
+        for _ in 0..<Self.axOperationsPerScan {
+            try throwIfCutOff(cutoff)
+            clock.advance(by: operationLatency)
+        }
+    }
+
+    private func throwIfCutOff(_ cutoff: ScanCutoff) throws {
+        do {
+            try cutoff.throwIfReached()
+        } catch {
+            log.record(.scanCutOff)
+            throw error
+        }
     }
 }
 

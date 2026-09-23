@@ -47,13 +47,16 @@ public protocol KeyStrokePosting {
 public protocol GoToSheetDetecting {
     /// ⌘⇧G を送る前の状態を基準として記録し、以降の判定に使うプローブを返す。
     /// 基準と比べるのは、パネル自体がシートとして表示されている場合などに、送出前からあるシートを出現と誤認しないため。
-    /// - Throws: 注入先を特定できない場合は `InjectionError`（`.panelGone` / `.axError`）。
-    func makeProbe() async throws -> any GoToSheetProbe
+    /// - Parameter cutoff: 基準を記録する走査の打ち切り条件。AX 操作のたびに確かめること。
+    /// - Throws: 注入先を特定できない場合は `InjectionError`（`.panelGone` / `.axError`）、打ち切った場合は `ScanCutoff.Reached`。
+    func makeProbe(cutoff: ScanCutoff) async throws -> any GoToSheetProbe
 }
 
 /// 基準を記録済みの移動先シートの判定。
 @MainActor
 public protocol GoToSheetProbe {
     /// 基準の時点から移動先シートが現れたか。
-    func isSheetShown() async throws -> Bool
+    /// - Parameter cutoff: 走査の打ち切り条件。AX 操作のたびに確かめること。
+    /// - Throws: 打ち切った場合は `ScanCutoff.Reached`。
+    func isSheetShown(cutoff: ScanCutoff) async throws -> Bool
 }

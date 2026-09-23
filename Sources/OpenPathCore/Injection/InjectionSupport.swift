@@ -1,3 +1,24 @@
+import os
+
+/// 期限の到来か、呼び出し元の Task のキャンセルで打ち切る条件を作り、operation に渡す。
+/// AX の走査は axQueue 上で同期に進み Task のキャンセルを検知できないため、キャンセルをフラグに写して走査側から見えるようにする。
+func withScanCutoff<T>(
+    at deadline: Duration,
+    on timeline: ElapsedTimeline,
+    isolation: isolated (any Actor)? = #isolation,
+    _ operation: (ScanCutoff) async throws -> T
+) async throws -> T {
+    let isCancelled = OSAllocatedUnfairLock(initialState: false)
+    let cutoff = ScanCutoff {
+        isCancelled.withLock { $0 } || timeline.elapsed >= deadline
+    }
+    return try await withTaskCancellationHandler {
+        try await operation(cutoff)
+    } onCancel: {
+        isCancelled.withLock { $0 = true }
+    }
+}
+
 /// 生成時点からの経過時間で待ち合わせる時計。
 /// `any Clock<Duration>` の Instant は存在型のままでは加算・比較できないため、経過時間に置き換えて扱う。
 struct ElapsedTimeline: Sendable {

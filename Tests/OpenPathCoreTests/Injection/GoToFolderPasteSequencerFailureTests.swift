@@ -105,6 +105,49 @@ struct GoToFolderPasteSequencerFailureTests {
         #expect(harness.log.entries.last == .init(time: returnTime, event: .pasteboardWrite(.userClipboard)))
     }
 
+    // MARK: - ペーストボードの復元の失敗
+
+    @Test("注入が成功しても、ペーストボードを戻せなければ pasteboardRestoreFailed を投げる")
+    func restoreFailureAfterSuccess() async {
+        let harness = SequencerHarness()
+        harness.hooks.onSubmit = { harness.pasteboard.remainingWriteFailures = 1 }
+
+        await #expect(throws: InjectionError.pasteboardRestoreFailed) {
+            try await harness.run(path: Self.path)
+        }
+    }
+
+    @Test("注入が失敗し、ペーストボードも戻せなければ、元のエラーより pasteboardRestoreFailed を優先する")
+    func restoreFailureTakesPriorityOverInjectionFailure() async {
+        let harness = SequencerHarness()
+        harness.keyboard.failingKeyStrokes = [.returnKey]
+        harness.keyboard.onPost = { keyStroke in
+            if keyStroke == .paste {
+                harness.pasteboard.remainingWriteFailures = 1
+            }
+        }
+
+        await #expect(throws: InjectionError.pasteboardRestoreFailed) {
+            try await harness.run(path: Self.path)
+        }
+    }
+
+    @Test("他者の書き込みを優先して戻さなかった場合は、失敗経路でも元のエラーをそのまま投げる")
+    func skippedRestoreKeepsOriginalError() async {
+        let harness = SequencerHarness()
+        harness.keyboard.failingKeyStrokes = [.returnKey]
+        harness.keyboard.onPost = { keyStroke in
+            if keyStroke == .paste {
+                harness.pasteboard.simulateExternalWrite(.newerUserCopy)
+            }
+        }
+
+        await #expect(throws: InjectionError.timeout(step: .waitPaste)) {
+            try await harness.run(path: Self.path)
+        }
+        #expect(harness.pasteboard.contents == .newerUserCopy)
+    }
+
     // MARK: - キャンセル
 
     @Test("開始前にキャンセルされていたら、何もせずに CancellationError を投げる")
@@ -120,12 +163,35 @@ struct GoToFolderPasteSequencerFailureTests {
         #expect(harness.pasteboard.writes.isEmpty)
     }
 
-    @Test("シートの判定中にキャンセルされたら、判定の完了を待って、シートが出ていても貼り付けずに戻る")
-    func cancelledWhileCheckingSheet() async {
+    @Test("シートの判定中にキャンセルされたら、走査が打ち切り条件でそれを検知し、キャンセルとして戻る")
+    func cancellationIsVisibleToRunningScan() async throws {
         let harness = SequencerHarness()
         let suspension = Suspension()
         harness.sheetDetector.checkSuspension = suspension
         harness.sheetDetector.suspendedCheckResult = true
+        let task = harness.startRun(path: Self.path)
+        await suspension.waitUntilSuspended()
+        let cutoff = try #require(harness.sheetDetector.suspendedCheckCutoff)
+        #expect(!cutoff.isReached)
+
+        task.cancel()
+
+        // AX の走査は Task の外（axQueue）で同期に進むため、キャンセルは打ち切り条件を通して走査に伝わる
+        #expect(cutoff.isReached)
+        suspension.resume()
+        #expect(Self.isCancellation(await task.result))
+        #expect(harness.log.events.last == .scanCutOff)
+        #expect(harness.log.keyStrokes == [.goToFolder])
+        #expect(harness.pasteboard.writes.isEmpty)
+    }
+
+    @Test("判定が打ち切り条件を見ずにシートの出現を返しても、キャンセル済みなら貼り付けない")
+    func cancelledWhileCheckingSheetWithoutCutoff() async {
+        let harness = SequencerHarness()
+        let suspension = Suspension()
+        harness.sheetDetector.checkSuspension = suspension
+        harness.sheetDetector.suspendedCheckResult = true
+        harness.sheetDetector.checksCutoffAfterSuspension = false
         let task = harness.startRun(path: Self.path)
         await suspension.waitUntilSuspended()
 
