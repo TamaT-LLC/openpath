@@ -15,7 +15,7 @@ NSOpenPanel 自体は置き換えません。Esc でパレットを閉じれば�
 
 ## ステータス
 
-設計フェーズ。実装は未着手です。設計ドキュメントは `docs/` を参照してください（[system-doc-agent](https://github.com/TamaT-LLC/system-doc-agent-cli) 形式）。
+Phase 1 実装中。SPM プロジェクトの雛形ができ、メニューバーに常駐するだけの最小アプリが起動します（パネル検知・パレット・注入は未実装）。設計ドキュメントは `docs/` を参照してください（[system-doc-agent](https://github.com/TamaT-LLC/system-doc-agent-cli) 形式）。
 
 | Layer | ドキュメント |
 | --- | --- |
@@ -27,9 +27,27 @@ NSOpenPanel 自体は置き換えません。Esc でパレットを閉じれば�
 | L5 テスト | `docs/50_test/test-openpath-plan.md` |
 | インデックス | `docs/00_index/index.md` |
 
+## 開発
+
+### 必要環境
+
+- macOS 14 (Sonoma) 以降
+- Swift 6.0 以降のツールチェーン。Xcode は不要で、Command Line Tools（`xcode-select --install`）だけでビルド・テストできます。
+
+### ビルド・テスト・実行
+
+```bash
+swift build          # ビルド
+./scripts/test.sh    # ユニットテスト（Swift Testing）。Xcode 環境なら `swift test` でも可
+swift run openpath   # 起動。Dock には出ず、メニューバーにアイコンが出る（メニューの「終了」で終了）
+```
+
+- Command Line Tools のみの環境では、素の `swift test` は `no such module 'Testing'` で失敗します。SwiftPM が CLT 同梱の Swift Testing を見つけられないためで、`scripts/test.sh` が必要なフラグを補ってから `swift test` を実行します。引数はそのまま `swift test` に渡せます（例: `./scripts/test.sh --filter AppInfo`）。
+- `Resources/Info.plist` は実行ファイルに埋め込まれます。SwiftPM は Info.plist の変更を検知しないため、編集後は `swift package clean` してからビルドしてください。
+
 ## 予定している技術スタック
 
-- Swift 5.10+ / SwiftUI + AppKit
+- Swift 6.0+ ツールチェーン / SwiftUI + AppKit
 - 外部依存なし・ネットワーク通信なし
 - 要求権限: アクセシビリティのみ
 - 配布: Developer ID 署名 + Notarization、Homebrew cask
