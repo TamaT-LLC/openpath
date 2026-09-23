@@ -24,4 +24,17 @@ struct LogLevelTests {
     func label(level: LogLevel, expected: String) {
         #expect(level.label == expected)
     }
+
+    @Test(
+        "info 以上のメッセージはパスを伏せ字にする（NFR-05）",
+        arguments: [
+            (LogLevel.debug, false),
+            (.info, true),
+            (.warning, true),
+            (.error, true),
+        ]
+    )
+    func redactsPaths(level: LogLevel, expected: Bool) {
+        #expect(level.redactsPaths == expected)
+    }
 }

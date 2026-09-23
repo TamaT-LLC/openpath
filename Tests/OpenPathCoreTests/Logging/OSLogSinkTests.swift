@@ -17,6 +17,16 @@ struct OSLogSinkTests {
         #expect(OSLogSink.osLogType(for: .error) == .error)
     }
 
+    @Test("伏せ字処理をしない debug のメッセージは統合ログで非公開にする（CWE-532）")
+    func debugMessageIsPrivate() {
+        #expect(!OSLogSink.isMessagePublic(for: .debug))
+    }
+
+    @Test("統合ログで公開するのは、パスを伏せ字処理したレベルのメッセージだけ", arguments: LogLevel.allCases)
+    func publicOnlyWhenRedacted(level: LogLevel) {
+        #expect(OSLogSink.isMessagePublic(for: level) == level.redactsPaths)
+    }
+
     @Test("全レベル・パス付きのエントリを書き込んでもクラッシュしない")
     func writesAllKindsOfEntries() {
         let sink = OSLogSink(subsystem: Self.testSubsystem)

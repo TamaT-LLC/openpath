@@ -5,9 +5,6 @@ import Foundation
 /// 呼び出し元のスレッドで行うのは時刻の取得とメッセージの組み立てだけで、
 /// ファイル I/O は `FileLogSink` がバックグラウンドで行う。
 final class AppLogger: Sendable {
-    /// これ以上の重要度のメッセージはパスを伏せ字にする（NFR-05）。
-    private static let redactionThreshold: LogLevel = .info
-
     let minimumLevel: LogLevel
     let sinks: [any LogSink]
     private let clock: @Sendable () -> Date
@@ -34,7 +31,7 @@ final class AppLogger: Sendable {
         guard isEnabled(level) else { return }
         // レイテンシ計測の精度を保つため、メッセージの組み立てより先に時刻を取得する
         let date = clock()
-        let text = level >= Self.redactionThreshold ? PathRedactor.redact(message()) : message()
+        let text = level.redactsPaths ? PathRedactor.redact(message()) : message()
         emit(LogEntry(date: date, level: level, message: text))
     }
 
