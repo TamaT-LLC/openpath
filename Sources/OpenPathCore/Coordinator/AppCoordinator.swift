@@ -52,6 +52,8 @@ public final class AppCoordinator {
             panelAppeared(context)
         case .panelGone:
             panelGone()
+        case .panelContextChanged(let context):
+            panelContextChanged(context)
         case .confirm(let path, let openImmediately):
             confirm(path: path, openImmediately: openImmediately)
         case .escape:
@@ -99,6 +101,25 @@ public final class AppCoordinator {
             // 注入はキャンセルせず、結果を待って履歴に残す（タイムアウトは維持する）
             activeInjection?.isPanelGone = true
             palette.hide()
+        }
+    }
+
+    /// 追跡中のパネルの情報を差し替える。パレットの表示中はパレットにも知らせ、
+    /// それ以外（Esc で閉じた間・注入中・注入の成功後）は、次にパレットを出すときに使う。
+    private func panelContextChanged(_ context: PanelContext) {
+        switch state {
+        case .idle:
+            guard injectedPanel?.id == context.id else { return }
+            injectedPanel = context
+        case .panelShown(let current, let isPaletteVisible):
+            guard current.id == context.id else { return }
+            state = .panelShown(context, isPaletteVisible: isPaletteVisible)
+            if isPaletteVisible {
+                palette.update(context: context)
+            }
+        case .injecting(let current, let path):
+            guard current.id == context.id else { return }
+            state = .injecting(context, path: path)
         }
     }
 

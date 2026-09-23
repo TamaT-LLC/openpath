@@ -4,7 +4,8 @@
 /// - 表示: 別のパネルなら前回の検索語・候補・状態表示を消す（`PaletteViewModel.reset()`）。
 ///   同じパネルの再表示（Esc 後のホットキー、注入の成功後のホットキー、タイムアウト後の再検知）では、
 ///   続きから選び直せるよう検索語と選択を保ち、状態表示だけを消す。
-/// - 候補: 表示時・検索語の変更時・全件の再構築の完了時に、最新の要求の結果だけを反映する（`PaletteQuerySession`）。
+/// - 候補: 表示時・検索語の変更時・全件の再構築の完了時・選択モードの推定し直し時に、最新の要求の結果だけを反映する
+///   （`PaletteQuerySession`）。
 ///   ディレクトリに絞るかは候補を引くたびにパネルの推定と設定 include_files から決める。
 /// - キー入力: 注入のキー操作の前にパレットを表示したままキー入力をパネルへ返し、失敗を表示したらパレットに戻す。
 @MainActor
@@ -58,6 +59,14 @@ public final class PalettePresenter: PaletteDisplaying {
         window.rowCount = viewModel.rows.count
         requestRows(keepingSelection: isSamePanel)
         window.show(near: context.frame)
+    }
+
+    public func update(context: PanelContext) {
+        guard let presentedPanel, presentedPanel.id == context.id else { return }
+        self.presentedPanel = context
+        // 選択モードの推定し直しでフォルダのみかどうかが変わったときだけ、絞り込みを合わせて引き直す
+        guard presentedPanel.isDirectoriesOnly != context.isDirectoriesOnly else { return }
+        requestRows(keepingSelection: true)
     }
 
     public func hide() {

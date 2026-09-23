@@ -25,11 +25,7 @@ enum PanelScanner {
         let panels = windows.compactMap(detector.detectPanel(in:))
         let converter = ScreenCoordinateConverter.forCurrentDisplays()
         let contexts = panels.map { panel in
-            PanelContext(
-                id: panel.context.id,
-                isDirectoriesOnly: panel.context.isDirectoriesOnly,
-                frame: converter.screenRect(fromAXRect: panel.context.frame)
-            )
+            panel.context.withFrame(converter.screenRect(fromAXRect: panel.context.frame))
         }
         return Scan(outcome: .found(contexts), panelElements: panels.map(\.element))
     }

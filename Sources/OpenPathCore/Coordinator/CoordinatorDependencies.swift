@@ -7,6 +7,8 @@
 public protocol PaletteDisplaying {
     /// パネルに重ねてパレットを表示する。
     func show(context: PanelContext)
+    /// 表示中のパネルの情報（選択モードの推定）が変わった。候補の絞り込みを合わせる。
+    func update(context: PanelContext)
     func hide()
     /// 注入中はロックし、キー入力を捨てる（DSN-001 §5）。
     func setLocked(_ isLocked: Bool)

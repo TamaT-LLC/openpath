@@ -149,6 +149,8 @@ public final class PanelWatcher {
             Log.info("panel detected (id: \(panel.id.rawValue), directoriesOnly: \(panel.isDirectoriesOnly))")
         case .panelGone:
             Log.info("panel gone")
+        case .panelContextChanged(let panel):
+            Log.info("panel updated (id: \(panel.id.rawValue), directoriesOnly: \(panel.isDirectoriesOnly))")
         case .confirm, .escape, .hotkey:
             break
         }

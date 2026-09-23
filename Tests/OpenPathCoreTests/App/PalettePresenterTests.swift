@@ -114,6 +114,40 @@ struct PalettePresenterTests {
         #expect(window.calls.last == .show(near: PanelContext.sample.frame, rowCount: rows.count))
     }
 
+    // MARK: - パネルの情報の更新
+
+    @Test("表示中のパネルがフォルダのみと分かったら、ディレクトリに絞って選択を保ったまま引き直す")
+    func updatedSelectionModeRequeries() async {
+        includeFiles.value = true
+        let rows = PaletteRowFixtures.rows("fern", "fern-docs")
+        await show(.sample, answering: rows)
+        viewModel.moveSelection(by: 1)
+        let updated = PanelContext(id: PanelContext.sample.id, isDirectoriesOnly: true, frame: PanelContext.sample.frame)
+
+        presenter.update(context: updated)
+        await search.waitForCalls(2)
+        let refreshed = PaletteRowFixtures.rows("openpath", "fern", "fern-docs")
+        search.respond(to: 1, with: refreshed)
+        await waitForRows(refreshed)
+
+        #expect(search.calls.map(\.directoriesOnly) == [false, true])
+        #expect(viewModel.selectedRow == rows[1])
+    }
+
+    @Test("フォルダのみかどうかが変わらない更新や、表示中でないパネルの更新では引き直さない")
+    func irrelevantUpdatesAreIgnored() async {
+        await show(.sample, answering: [])
+        let moved = PanelContext(id: PanelContext.sample.id, isDirectoriesOnly: false, frame: PanelContext.another.frame)
+
+        presenter.update(context: moved)
+        presenter.update(context: .another)
+        presenter.hide()
+        presenter.update(context: PanelContext(id: PanelContext.sample.id, isDirectoriesOnly: true, frame: .zero))
+        await MainActorQueue.drain()
+
+        #expect(search.calls.count == 1)
+    }
+
     // MARK: - 検索語の変更
 
     @Test("表示中は検索語が変わるたびに候補を引き直す")

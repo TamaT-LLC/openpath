@@ -21,10 +21,24 @@ public struct PanelContext: Identifiable, Equatable, Sendable {
     /// NSScreen の座標系（プライマリ画面の左下原点、y 上向き）で持ち、`PalettePlacement` / `PaletteWindow.show(near:)` に
     /// そのまま渡せる。AX の座標系（左上原点）からの変換は PanelWatcher 側で済ませておく（DSN-001 §2.4）。
     public let frame: CGRect
+    /// 選択モードの推定を後で推定し直す予定か（一覧の行をまだ読めなかった。DSN-001 §2.3）。
+    /// true の間は、PanelWatcher がパレットの表示中も走査を続け、推定し直した結果を `panelContextChanged` で知らせる。
+    public let isSelectionModeProvisional: Bool
 
-    public init(id: ID, isDirectoriesOnly: Bool, frame: CGRect) {
+    public init(id: ID, isDirectoriesOnly: Bool, frame: CGRect, isSelectionModeProvisional: Bool = false) {
         self.id = id
         self.isDirectoriesOnly = isDirectoriesOnly
         self.frame = frame
+        self.isSelectionModeProvisional = isSelectionModeProvisional
+    }
+
+    /// 矩形だけを差し替えたもの（AX 座標から NSScreen 座標への変換に使う）。
+    public func withFrame(_ frame: CGRect) -> PanelContext {
+        PanelContext(
+            id: id,
+            isDirectoriesOnly: isDirectoriesOnly,
+            frame: frame,
+            isSelectionModeProvisional: isSelectionModeProvisional
+        )
     }
 }

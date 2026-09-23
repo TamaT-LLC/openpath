@@ -117,12 +117,18 @@ public struct OpenPanelLocator<Node: Hashable> {
         now: ContinuousClock.Instant
     ) throws -> LocatedOpenPanel<Node>? where Reader.Node == Node {
         guard let (id, isNewlyClassified) = try openPanelID(of: candidate, reader: reader, now: now) else { return nil }
-        let selectionMode = entries[candidate]?.selectionMode?.mode ?? .undetermined
+        let selectionModeState = entries[candidate]?.selectionMode
+        let selectionMode = selectionModeState?.mode ?? .undetermined
         // パネルが動いても最新の位置でパレットを出せるよう、矩形は毎回読む
         let frame = try reader.frame(of: candidate) ?? .zero
         return LocatedOpenPanel(
             element: candidate,
-            context: PanelContext(id: id, isDirectoriesOnly: selectionMode.isDirectoriesOnly, frame: frame),
+            context: PanelContext(
+                id: id,
+                isDirectoriesOnly: selectionMode.isDirectoriesOnly,
+                frame: frame,
+                isSelectionModeProvisional: selectionModeState?.isProvisional ?? false
+            ),
             selectionMode: selectionMode,
             isNewlyClassified: isNewlyClassified
         )
