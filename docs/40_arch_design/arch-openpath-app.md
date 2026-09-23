@@ -23,7 +23,7 @@ NSOpenPanel の出現を検知し、ファジー検索パレットを重ね、�
 
 ## 2. 技術スタック
 
-- 言語: Swift 5.10+
+- 言語: Swift（Swift 6.0+ ツールチェーン）。`OpenPathCore` は Swift 6 言語モード、AppKit 依存層（`OpenPathMac` と実行ターゲット `openpath`）は AX の C コールバックを扱うため Swift 5 言語モード
 - UI: SwiftUI（パレット内容）+ AppKit（NSPanel / NSStatusItem / イベント）
 - ビルド: Swift Package Manager（`swift build`）+ 最小限の Xcode プロジェクト（署名・Notarization 用）
 - 依存: 標準フレームワークのみ（AppKit, ApplicationServices, Carbon.HIToolbox, ServiceManagement）。TOML パースは軽量な自前実装 or `TOMLDecoder` を検討（L4 で確定）
@@ -140,11 +140,11 @@ openpath/
 │   ├── OpenPathCore/        # 状態機械, CandidateIndex, HistoryStore, ConfigStore（純 Swift, テスト可能）
 │   └── OpenPathMac/         # PanelWatcher, PaletteWindow, PanelInjector, StatusItem（AppKit 依存）
 ├── Tests/
-│   └── OpenPathCoreTests/
+│   └── OpenPathCoreTests/   # Swift Testing によるユニットテスト
 ├── Resources/
-│   ├── Info.plist           # LSUIElement = YES
+│   ├── Info.plist           # LSUIElement = YES（実行ファイルにも埋め込む）
 │   └── openpath.entitlements
-├── scripts/                 # build, sign, notarize, cask 生成
+├── scripts/                 # test（CLT 環境向け swift test ラッパー）, build, sign, notarize, cask 生成
 └── docs/                    # 本ドキュメント群
 ```
 
