@@ -190,6 +190,9 @@ struct TOMLParserErrorTests {
             // 列は Unicode スカラー単位で数える（日本語も 1 文字 = 1 列）
             TOMLErrorCase(#""日本語" = x"#, line: 1, column: 9, .invalidValue),
             TOMLErrorCase(#"a = "日本\q""#, line: 1, column: 8, .invalidEscapeSequence),
+            // 結合文字（e + U+0301）は Character では 1 文字だがスカラーでは 2 列。Character 単位で数えると 7 になる
+            TOMLErrorCase("a = \"e\u{0301}\\q\"", line: 1, column: 8, .invalidEscapeSequence),
+            TOMLErrorCase("\"e\u{0301}\" = x", line: 1, column: 8, .invalidValue),
             // 先頭の BOM は列に数えない
             TOMLErrorCase("\u{FEFF}a = x", line: 1, column: 5, .invalidValue),
         ]
