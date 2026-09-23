@@ -45,8 +45,9 @@ struct ConfigFileOpener {
             do {
                 _ = try await workspace.open([fileURL], withApplicationAt: editorURL, configuration: NSWorkspace.OpenConfiguration())
             } catch {
+                // アプリはあるので「見つからない」ではなく起動・オープンの失敗理由を見せる。理由はパスを含み得るためログには残さない
                 Log.warning("テキストエディットで設定ファイルを開けませんでした")
-                onFailure(.configFileApplicationNotFound)
+                onFailure(.configFileOpenFailure(reason: error.localizedDescription))
             }
         }
     }
