@@ -18,9 +18,8 @@ import CoreGraphics
 /// ## キャッシュ
 /// - ロール・サブロールは要素ごとに変わらないため、1 度だけ読む
 /// - 開くパネルと保存パネルの判定は、要素が破棄される（`forget`）まで覚えておく
-/// - 選択モードの推定は、開くパネルと判定したときに 1 度だけ行い、パネルの判定と一緒に覚えておく。
-///   パネルの選択モード（`canChooseFiles` / `canChooseDirectories`）は開いている間変わらないため、⌘⇧G でフォルダを
-///   移動しても推定し直さない。PanelShown 中の走査で行を読み直さず、AX の呼び出しを増やさないためでもある（DSN-001 §5）
+/// - 選択モードは、開くパネルと判定したときに推定し、パネルの判定と一緒に覚えておく。⌘⇧G でフォルダを移動しても
+///   推定し直さない。行を 1 行も読めなかった場合だけ、判定の再確認と同じ間隔で推定し直す（`SelectionModeState`）
 /// - 確定ボタンかファイル一覧が欠けていた候補は、描画途中の可能性があるため間隔を倍々に空けて判定し直し、
 ///   `OpenPanelCacheConfiguration.maxRechecks` 回で確定する（アラートを 200ms ごとに判定し直さないため）
 /// - AX の読み取りに失敗した判定は覚えない。そのウィンドウで直前に見つけたパネルを引き継ぎ、一時的な失敗で消えたとみなさない
@@ -117,34 +116,31 @@ public struct OpenPanelLocator<Node: Hashable> {
         reader: Reader,
         now: ContinuousClock.Instant
     ) throws -> LocatedOpenPanel<Node>? where Reader.Node == Node {
-        guard let (identity, isNewlyClassified) = try openPanelIdentity(of: candidate, reader: reader, now: now) else {
-            return nil
-        }
+        guard let (id, isNewlyClassified) = try openPanelID(of: candidate, reader: reader, now: now) else { return nil }
+        let selectionMode = entries[candidate]?.selectionMode?.mode ?? .undetermined
         // パネルが動いても最新の位置でパレットを出せるよう、矩形は毎回読む
         let frame = try reader.frame(of: candidate) ?? .zero
         return LocatedOpenPanel(
             element: candidate,
-            context: PanelContext(
-                id: identity.id,
-                isDirectoriesOnly: identity.selectionMode.isDirectoriesOnly,
-                frame: frame
-            ),
-            selectionMode: identity.selectionMode,
+            context: PanelContext(id: id, isDirectoriesOnly: selectionMode.isDirectoriesOnly, frame: frame),
+            selectionMode: selectionMode,
             isNewlyClassified: isNewlyClassified
         )
     }
 
-    /// candidate が開くパネルならその ID と選択モード、この呼び出しで判定したかを返す。キャッシュが有効なら判定しない。
-    private mutating func openPanelIdentity<Reader: PanelTreeReader>(
+    /// candidate が開くパネルならその ID と、この呼び出しで判定したかを返す。キャッシュが有効なら判定しない。
+    /// 開くパネルと判定したときに選択モードを推定し、推定し直す予定があれば時刻を見て推定し直す。
+    private mutating func openPanelID<Reader: PanelTreeReader>(
         of candidate: Node,
         reader: Reader,
         now: ContinuousClock.Instant
-    ) throws -> (OpenPanelIdentity, isNewlyClassified: Bool)? where Reader.Node == Node {
+    ) throws -> (PanelContext.ID, isNewlyClassified: Bool)? where Reader.Node == Node {
         touch(candidate)
         var completedRechecks: Int?
         switch entries[candidate]?.verdict {
-        case .openPanel(let identity):
-            return (identity, false)
+        case .openPanel(let id):
+            entries[candidate]?.selectionMode?.refreshIfDue(reader: reader, now: now, configuration: configuration)
+            return (id, false)
         case .rejected:
             return nil
         case .awaitingRecheck(let rechecks, let notBefore):
@@ -157,12 +153,15 @@ public struct OpenPanelLocator<Node: Hashable> {
         let classification = try OpenPanelClassifier.classification(of: candidate, reader: reader)
         switch classification.verdict {
         case .openPanel:
-            let identity = OpenPanelIdentity(
-                id: makePanelID(),
-                selectionMode: Self.estimateSelectionMode(of: classification.fileList, reader: reader)
+            let id = makePanelID()
+            entries[candidate]?.verdict = .openPanel(id)
+            entries[candidate]?.selectionMode = SelectionModeState(
+                fileList: classification.fileList,
+                reader: reader,
+                now: now,
+                configuration: configuration
             )
-            entries[candidate]?.verdict = .openPanel(identity)
-            return (identity, true)
+            return (id, true)
         case .savePanel:
             entries[candidate]?.verdict = .rejected
         case .missingElements:
@@ -170,21 +169,6 @@ public struct OpenPanelLocator<Node: Hashable> {
             entries[candidate]?.verdict = verdict
         }
         return nil
-    }
-
-    /// ファイル一覧の先頭の行から選択モードを推定する。推定の失敗でパネルの検知を妨げないよう、
-    /// 読み取りに失敗したら（行が消えた、応答がないなど）推定できなかったものとして、設定 include_files に従わせる。
-    private static func estimateSelectionMode<Reader: PanelTreeReader>(
-        of fileList: FileListElement<Node>?,
-        reader: Reader
-    ) -> PanelSelectionMode where Reader.Node == Node {
-        guard let fileList else { return .undetermined }
-        do {
-            let rows = try FileListRowSampler.sampleRows(in: fileList.node, role: fileList.role, reader: reader)
-            return PanelSelectionModeEstimator.estimate(rows)
-        } catch {
-            return .undetermined
-        }
     }
 
     private func verdictAfterMissingElements(completedRechecks: Int, now: ContinuousClock.Instant) -> CachedVerdict {
@@ -268,6 +252,8 @@ extension OpenPanelLocator {
         var subrole: CachedAttribute<String>?
         /// パネルの候補（ダイアログ・シート）でだけ持つ
         var verdict: CachedVerdict?
+        /// 開くパネルと判定した候補でだけ持つ
+        var selectionMode: SelectionModeState<Node>?
         /// トップレベルのウィンドウで最後に見つけたパネル。読み取りに失敗したときに引き継ぐ
         var lastPanel: LocatedOpenPanel<Node>?
         var lastUsedTick: UInt64
@@ -291,15 +277,9 @@ private struct CachedAttribute<Value> {
     let value: Value?
 }
 
-/// 開くパネルと判定したときに決める値。パネルの要素が破棄されるまで変わらない。
-private struct OpenPanelIdentity {
-    let id: PanelContext.ID
-    let selectionMode: PanelSelectionMode
-}
-
 /// パネルの候補の判定結果。
 private enum CachedVerdict {
-    case openPanel(OpenPanelIdentity)
+    case openPanel(PanelContext.ID)
     /// 開くパネルではないと確定した（保存パネル、または判定し直しても要素が欠けていた）
     case rejected
     /// 要素が欠けていた。notBefore 以降に判定し直す

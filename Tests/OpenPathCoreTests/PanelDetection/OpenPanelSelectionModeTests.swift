@@ -143,6 +143,86 @@ struct OpenPanelSelectionModeTests {
         #expect(harness.tree.readCount(of: .textOpacity) == 0)
     }
 
+    // MARK: - 行を読めなかったときの推定し直し
+
+    @Test("一覧の読み込み前（行がない）で推定できなかったら、250ms 後の走査で推定し直す。ID は変わらない")
+    func retriesWhenListIsNotLoaded() throws {
+        let harness = OpenPanelLocatorHarness()
+        let window = harness.add(Self.dialog(Fixtures.columnView(items: [])))
+        let first = try #require(harness.panel(in: window))
+        #expect(first.selectionMode == .undetermined)
+
+        harness.tree.replace(Fixtures.columnView(items: Self.folderOnlyItems))
+        let beforeDue = try #require(harness.panel(in: window, at: .milliseconds(200)))
+        let afterDue = try #require(harness.panel(in: window, at: .milliseconds(250)))
+
+        #expect(beforeDue.selectionMode == .undetermined)
+        #expect(afterDue.selectionMode == .directoriesOnly)
+        #expect(afterDue.context.isDirectoriesOnly)
+        #expect(afterDue.context.id == first.context.id)
+        #expect(!afterDue.isNewlyClassified)
+    }
+
+    @Test("リスト表示で見出しの行しか読めない（読み込み中）なら、推定し直す")
+    func retriesWhenOnlyHeadingRowIsReadable() throws {
+        let harness = OpenPanelLocatorHarness()
+        let window = harness.add(Self.dialog(Fixtures.listView(items: [])))
+        #expect(try #require(harness.panel(in: window)).selectionMode == .undetermined)
+
+        harness.tree.replace(Fixtures.listView(items: Self.folderOnlyItems))
+
+        #expect(harness.panel(in: window, at: .milliseconds(250))?.selectionMode == .directoriesOnly)
+    }
+
+    @Test("行の読み取りに失敗して推定できなかったら、推定し直す")
+    func retriesAfterReadFailure() throws {
+        let harness = OpenPanelLocatorHarness()
+        let window = harness.add(Self.dialog(Fixtures.columnView(items: Self.folderOnlyItems)))
+        let name = StubElement(Fixtures.nameID("delta.md", in: "\(Fixtures.fileListID)/column/1"))
+        harness.tree.failures[name] = .unavailable
+        #expect(try #require(harness.panel(in: window)).selectionMode == .undetermined)
+
+        harness.tree.failures[name] = nil
+
+        #expect(harness.panel(in: window, at: .milliseconds(250))?.selectionMode == .directoriesOnly)
+    }
+
+    @Test("種類の分かる行を読めたら、推定できなくても（ディレクトリのみ）推定し直さない")
+    func doesNotRetryWhenRowsWereRead() throws {
+        let harness = OpenPanelLocatorHarness()
+        let window = harness.add(Self.dialog(Fixtures.columnView(items: [.directory("alpha"), .directory("beta")])))
+        #expect(try #require(harness.panel(in: window)).selectionMode == .undetermined)
+
+        // フォルダを移動してファイルの行が見えるようになっても、行は読まない
+        harness.tree.replace(Fixtures.columnView(items: Self.folderOnlyItems))
+        harness.tree.resetReads()
+        for elapsed in [250, 750, 1_750, 3_750, 10_000] {
+            #expect(harness.panel(in: window, at: .milliseconds(elapsed))?.selectionMode == .undetermined)
+        }
+
+        #expect(harness.tree.readCount(of: .columns) == 0)
+        #expect(harness.tree.readCount(of: .url) == 0)
+    }
+
+    @Test("推定し直すのは、250ms から倍々に空けて 4 回まで（0 / 250 / 750 / 1750 / 3750ms、以降なし）")
+    func retrySchedule() throws {
+        let harness = OpenPanelLocatorHarness()
+        let window = harness.add(Self.dialog(Fixtures.columnView(items: [])))
+        let expectedEstimations: Set<Int> = [0, 250, 750, 1_750, 3_750]
+        var estimatedAt: [Int] = []
+
+        for elapsed in [0, 100, 250, 500, 750, 1_500, 1_750, 3_000, 3_750, 5_000, 7_750, 20_000] {
+            harness.tree.resetReads()
+            _ = try #require(harness.panel(in: window, at: .milliseconds(elapsed)))
+            if harness.tree.readCount(of: .columns) > 0 {
+                estimatedAt.append(elapsed)
+            }
+        }
+
+        #expect(Set(estimatedAt) == expectedEstimations)
+        #expect(estimatedAt.count == expectedEstimations.count)
+    }
+
     @Test("一時的な失敗で直前のパネルを引き継ぐときも、選択モードを保つ")
     func lastKnownPanelKeepsSelectionMode() throws {
         let harness = OpenPanelLocatorHarness()
