@@ -13,6 +13,12 @@ func withTemporaryDirectory<Result>(_ body: (URL) throws -> Result) throws -> Re
     return try body(directory)
 }
 
+/// 共有ロガー（`Log`）を経由する出力のうち、そのテストが出したものを見分けるための一意な文字列。
+/// パスの伏せ字処理の対象にならないよう "/" を含めない。
+func makeLogMarker() -> String {
+    "log-test-\(UUID().uuidString)"
+}
+
 /// ログファイルを行単位で読み出す。
 func readLogLines(at url: URL) throws -> [String] {
     try String(contentsOf: url, encoding: .utf8)

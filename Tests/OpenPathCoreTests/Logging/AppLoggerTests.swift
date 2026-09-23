@@ -11,6 +11,19 @@ struct AppLoggerTests {
         AppLogger(minimumLevel: minimumLevel, sinks: sinks, clock: { fixedDate })
     }
 
+    @Test("既定の設定から作ったロガーは統合ログと ~/Library/Logs/openpath/openpath.log に、既定の最小レベルで出力する")
+    func defaultConfigurationLoggerWritesToLibraryLogs() {
+        let configuration = LogConfiguration()
+
+        // シンクの生成時にはファイルに触れないため、実ユーザーのログディレクトリには書き込まない
+        let logger = AppLogger(configuration: configuration)
+
+        let fileSinks = logger.sinks.compactMap { $0 as? FileLogSink }
+        #expect(fileSinks.map(\.fileURL) == [configuration.fileURL])
+        #expect(logger.sinks.contains { $0 is OSLogSink })
+        #expect(logger.minimumLevel == LogConfiguration.defaultMinimumLevel)
+    }
+
     @Test("最小レベル以上のログだけをシンクに渡す", arguments: LogLevel.allCases, LogLevel.allCases)
     func filtersByMinimumLevel(minimumLevel: LogLevel, level: LogLevel) {
         let spy = SpyLogSink()
