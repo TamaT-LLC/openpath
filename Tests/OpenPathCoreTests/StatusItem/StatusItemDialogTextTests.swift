@@ -16,6 +16,15 @@ struct StatusItemDialogTextTests {
         ])
     }
 
+    @Test("履歴を保存できなかった場合は、次の起動で元に戻り得ることと確認することを伝える")
+    func clearHistoryFailure() {
+        let dialog = StatusItemDialog.clearHistoryFailure
+
+        #expect(dialog.title == "履歴を削除できませんでした")
+        #expect(dialog.message.contains("元の履歴に戻る"))
+        #expect(dialog.buttons == [StatusItemDialog.Button(title: "OK", role: .default)])
+    }
+
     @Test("ログイン時に起動の失敗は、理由をそのまま本文にする")
     func loginItemFailure() {
         let error = LoginItemError(command: .register, underlying: LoginItemToggleTests.failure)

@@ -37,6 +37,15 @@ public struct StatusItemDialog: Sendable, Equatable {
         ]
     )
 
+    /// 「履歴をクリア…」で空にした履歴をファイルへ保存できなかった。
+    /// パレットからは消えているが、保存できないまま終了すると次の起動で元の履歴に戻る
+    public static let clearHistoryFailure = StatusItemDialog(
+        title: "履歴を削除できませんでした",
+        message: "履歴ファイルに書き込めませんでした。パレットからは消えましたが、書き込めないまま終了すると次の起動で元の履歴に戻ることがあります。"
+            + "ディスクの空きと ~/Library/Application Support/openpath のアクセス権を確認してください。",
+        buttons: [okButton]
+    )
+
     /// ログイン時に起動の登録・解除に失敗した
     public static func loginItemFailure(_ error: LoginItemError) -> StatusItemDialog {
         StatusItemDialog(title: loginItemFailureTitle, message: error.description, buttons: [okButton])

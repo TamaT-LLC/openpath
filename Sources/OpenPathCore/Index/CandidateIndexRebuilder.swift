@@ -98,6 +98,14 @@ public final class CandidateIndexRebuilder {
         request(.history)
     }
 
+    /// 確定履歴を消したときに呼ぶ（メニューの「履歴をクリア」）。
+    /// 走査中の再構築は消す前の履歴を読んでいるため、取り消してから走査し直す。取り直しを走査の終わりまで待つと、
+    /// 全件の走査が長引く間、消した場所が候補に残るため。全件の再構築中なら全件を、それ以外は履歴だけを走査し直す。
+    public func historyDidClear() {
+        Log.debug("履歴の削除に合わせて候補を取り直します")
+        request(activeCycle?.scope == .all ? .all : .history, cancellingActive: true)
+    }
+
     /// 設定の変更を反映する。`start()` の前に呼んだ場合は起動時の再構築に使う。
     ///
     /// 候補ソースに関わる設定（roots / depth / include_files / ignore / ghq.enabled）が変わったときだけ、

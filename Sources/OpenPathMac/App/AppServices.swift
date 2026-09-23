@@ -105,10 +105,12 @@ final class AppServices {
         rebuilder.rebuild()
     }
 
-    /// メニューの「履歴をクリア…」。候補の履歴ソースも空にして、クリアした場所が候補に残らないようにする
-    func clearHistory() {
-        historyStore.clear()
-        rebuilder.refreshHistory()
+    /// メニューの「履歴をクリア…」。候補の履歴ソースも空にして、クリアした場所が候補に残らないようにする。
+    /// - Returns: 空にした履歴をファイルへ保存できたか。
+    func clearHistory() -> Bool {
+        let isSaved = historyStore.clear()
+        rebuilder.historyDidClear()
+        return isSaved
     }
 
     // MARK: - 設定の変更

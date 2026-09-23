@@ -28,7 +28,11 @@ public final class AppComposition {
                 // 「有効」は起動のたびに有効から始める（設定ファイルには書き戻さない）
                 setEnabled: { isEnabled in lifecycle.setEnabled(isEnabled) },
                 rebuildCandidates: { services.rebuildCandidates() },
-                clearHistory: { services.clearHistory() }
+                clearHistory: {
+                    // 保存できないまま終了すると次の起動で元の履歴に戻るため、ログだけでなく利用者に知らせる
+                    guard !services.clearHistory() else { return }
+                    StatusItemAlert.run(.clearHistoryFailure)
+                }
             ),
             accessibilityPermission: permissionMonitor.status
         )

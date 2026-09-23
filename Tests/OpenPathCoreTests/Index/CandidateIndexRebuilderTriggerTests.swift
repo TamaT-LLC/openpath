@@ -207,6 +207,48 @@ struct CandidateIndexRebuilderTriggerTests {
         #expect(harness.source(.history).startedCount == 2)
     }
 
+    @Test("全件の再構築の走査中に履歴を消したら、走査を取り消して全件を走査し直し、消す前の履歴を候補に残さない")
+    func historyClearDuringRebuildRestartsScan() async throws {
+        let harness = RebuilderHarness()
+        let history = harness.source(.history)
+        let root = harness.source(.root(F.firstRoot))
+        history.setSnapshot(items: [F.directory("/rebuild/cleared")])
+        root.setGated(true)
+        harness.rebuilder.start()
+        await root.waitUntilStarted(count: 1)
+        let hasOldHistory = try await F.eventually { try await harness.indexedPaths() == ["/rebuild/cleared"] }
+
+        history.setSnapshot(items: [])
+        harness.rebuilder.historyDidClear()
+        await root.waitUntilStarted(count: 2)
+        // 走査し直した root を待たずに、消した後の履歴が反映される
+        let isCleared = try await F.eventually { try await harness.indexedPaths().isEmpty }
+        root.release(items: [F.directory("/rebuild/first/repo")])
+        await harness.waitUntilIdle()
+
+        #expect(hasOldHistory)
+        #expect(isCleared)
+        #expect(root.cancelledCount == 1)
+        #expect(history.startedCount == 2)
+        #expect(try await harness.indexedPaths() == ["/rebuild/first/repo"])
+    }
+
+    @Test("再構築していないときに履歴を消したら、履歴だけを取り直す")
+    func historyClearWhileIdleRefreshesHistoryOnly() async throws {
+        let harness = RebuilderHarness()
+        let history = harness.source(.history)
+        history.setSnapshot(items: [F.directory("/rebuild/cleared")])
+        await harness.startAndWait()
+
+        history.setSnapshot(items: [])
+        harness.rebuilder.historyDidClear()
+        await harness.waitUntilIdle()
+
+        #expect(harness.source(.root(F.firstRoot)).startedCount == 1)
+        #expect(history.startedCount == 2)
+        #expect(try await harness.indexedPaths().isEmpty)
+    }
+
     @Test("同じ kind のソースが重複して渡されても、同時に走査しない")
     func duplicateKindsAreScannedOnce() async {
         let source = ScriptedCandidateSource(kind: .root(F.firstRoot))
