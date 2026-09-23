@@ -123,20 +123,18 @@ public struct GhqRepositoryLister: Sendable {
     }
 
     /// `GhqError` を記録する。ghq 未インストールは ghq を使わない利用者で毎回起きるフォールバックなので debug、
-    /// それ以外は利用者に影響する失敗として warning にする。標準エラー出力や検索パスはパスを含み得るため debug に分ける。
+    /// それ以外は利用者に影響する失敗として warning にする。
+    /// `reason` / `standardError` はパスやリポジトリ識別子を含み得るため、debug であっても記録しない
+    /// （debugPath 以外の debug 本文もファイルにはそのまま残るため、NFR-05 の対象は debugPath のパス引数に限る）。
     private func log(_ error: GhqError) {
         switch error {
         case .notInstalled(let searchPath):
             Log.debug("ghq が見つからないため、ghq からの候補取得をスキップします")
             Log.debugPath("ghq が見つかりません", path: searchPath)
-        case .launchFailed(let subcommand, let reason):
-            let command = Self.commandDescription(of: subcommand)
-            Log.warning("\(command) を起動できません")
-            Log.debug("\(command) を起動できません（\(reason)）")
-        case .nonZeroExit(let subcommand, let exitCode, let standardError):
-            let command = Self.commandDescription(of: subcommand)
-            Log.warning("\(command) が終了コード \(exitCode) で失敗しました")
-            Log.debug("\(command) の標準エラー出力: \(standardError)")
+        case .launchFailed(let subcommand, _):
+            Log.warning("\(Self.commandDescription(of: subcommand)) を起動できません")
+        case .nonZeroExit(let subcommand, let exitCode, _):
+            Log.warning("\(Self.commandDescription(of: subcommand)) が終了コード \(exitCode) で失敗しました")
         case .timedOut(let subcommand):
             Log.warning("\(Self.commandDescription(of: subcommand)) がタイムアウトしました")
         case .emptyRoot:

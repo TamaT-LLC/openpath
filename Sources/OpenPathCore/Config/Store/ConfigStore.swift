@@ -128,8 +128,10 @@ public final class ConfigStore {
             Log.warning("設定ファイルの書式が誤っているため反映していません（\(parseError.description)）")
             Log.debugPath("設定ファイルの書式が誤っているため反映していません", path: path)
         case .decodeFailed(let path, let decodeError):
-            Log.warning("設定ファイルの値が誤っているため反映していません（\(decodeError.description)）")
-            Log.debugPath("設定ファイルの値が誤っているため反映していません", path: path)
+            // ConfigDecodingError.description は invalidRootPath 等で利用者が入力した相対パスをそのまま含み得るが、
+            // PathRedactor は相対パス・ファイル名までは検出できないため warning には出さず debugPath 側にまとめる
+            Log.warning("設定ファイルの値が誤っているため反映していません")
+            Log.debugPath("設定ファイルの値が誤っているため反映していません（\(decodeError.description)）", path: path)
         case .generationFailed(let path, let reason):
             Log.warning("設定ファイルを作成できません。既定の設定で動作します")
             Log.debugPath("設定ファイルを作成できません（\(reason)）。既定の設定で動作します", path: path)
