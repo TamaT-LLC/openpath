@@ -1,5 +1,7 @@
 # openpath
 
+[![CI](https://github.com/TamaT-LLC/openpath/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TamaT-LLC/openpath/actions/workflows/ci.yml)
+
 macOS のファイル選択ダイアログ（NSOpenPanel）に、`cdr` / `fzf` 風のファジー検索パレットを重ねるメニューバー常駐アプリ。
 
 Claude Desktop・Cursor・VS Code・ブラウザなど、どのアプリの「フォルダを開く」「ファイルを添付」でも、Finder のツリーを辿らずに **数文字タイプ → Enter** で目的のパスへ飛べます。
