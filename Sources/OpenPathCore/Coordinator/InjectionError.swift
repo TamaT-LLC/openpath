@@ -8,6 +8,9 @@ public enum InjectionError: Error, Equatable, Sendable {
     /// 注入に使ったペーストボードを元の内容へ戻せなかった（FR-INJECT-04）。
     /// パネルの移動自体は済んでいる場合があるが、ユーザーのクリップボードが失われたことを知らせるため失敗として扱う。
     case pasteboardRestoreFailed
+    /// 注入先のアプリが最前面でなくなったため、キー操作・AX 操作を送らずにやめた（別のアプリへの誤送出の防止）。
+    /// パネルは残っている場合があるため panelGone とは分ける（自動確定中の panelGone は「開く」で閉じた成功とみなされるため）。
+    case targetNotFrontmost
 }
 
 /// タイムアウトした注入ステップ（DSN-001 §3.1）。
@@ -36,6 +39,8 @@ extension InjectionError {
             nil
         case .pasteboardRestoreFailed:
             PaletteMessage.pasteboardRestoreFailed
+        case .targetNotFrontmost:
+            PaletteMessage.injectionFailed(reason: "別のアプリに切り替わりました")
         }
     }
 }

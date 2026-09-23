@@ -54,7 +54,7 @@ private final class GoToSheetAXProbe: GoToSheetProbe {
 }
 
 /// `axQueue` 上で呼ぶ AX 操作。
-private enum GoToSheetAX {
+enum GoToSheetAX {
     /// 1 回の AX 呼び出しを待つ上限（秒）。
     /// 応答しないアプリで既定（約 6 秒）まで止まると、AppCoordinator がキャンセルした後も注入の後始末と次の注入が待たされるため短くする。
     /// タイムアウトは要素の参照ごとの設定で子要素には引き継がれないため、走査で得た要素にもそれぞれ設定する。
@@ -87,13 +87,13 @@ private enum GoToSheetAX {
     }
 
     /// 設定はプロセス内で完結し AX の往復を伴わないため、要素ごとに設定しても走査のコストは増えない。
-    private static func limitingMessagingTimeout(_ element: AXUIElement) -> AXUIElement {
+    static func limitingMessagingTimeout(_ element: AXUIElement) -> AXUIElement {
         _ = AXUIElementSetMessagingTimeout(element, messagingTimeoutSeconds)
         return element
     }
 
     /// フォーカス中のウィンドウが無い・消えた場合は、パネルが閉じたものとみなす。
-    private static func injectionError(for code: AXError) -> InjectionError {
+    static func injectionError(for code: AXError) -> InjectionError {
         switch code {
         case .noValue, .invalidUIElement:
             .panelGone
