@@ -71,13 +71,14 @@ enum PanelTreeFixtures {
     }
 
     /// NSSavePanel の中身。ファイル名欄とタグ欄、ファイル一覧（展開時）、下部のボタン。
-    static func savePanelBody(_ language: PanelUILanguage, confirmTitle: String? = nil) -> [StubNode] {
+    /// - Parameter fileList: 展開時のファイル一覧。省略するとカラム表示（AXBrowser）。
+    static func savePanelBody(_ language: PanelUILanguage, confirmTitle: String? = nil, fileList: StubNode? = nil) -> [StubNode] {
         let labels = language.labels
         return [
             StubNode(role: "AXStaticText"),
             textField(description: labels.saveAsField),
             textField(description: labels.tagsField),
-            group([StubNode(role: "AXScrollArea", children: [fileList(role: "AXBrowser")])]),
+            group([StubNode(role: "AXScrollArea", children: [fileList ?? Self.fileList(role: "AXBrowser")])]),
             button(labels.newFolder),
             button(labels.cancel),
             button(confirmTitle ?? labels.save),

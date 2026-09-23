@@ -10,6 +10,9 @@ struct FileListRowSamplerTests {
     private static let directoryRow = FileListRow(isDirectory: true)
     private static let dimmedFileRow = FileListRow(isDirectory: false, textOpacity: FileListFixtures.dimmedTextOpacity)
     private static let selectableFileRow = FileListRow(isDirectory: false, textOpacity: FileListFixtures.normalTextOpacity)
+    /// アイコン表示の項目（AXEnabled が選べるかをそのまま表す）
+    private static let disabledIconRow = FileListRow(isDirectory: false, isEnabled: false, isEnabledAuthoritative: true)
+    private static let enabledIconRow = FileListRow(isDirectory: false, isEnabled: true, isEnabledAuthoritative: true)
 
     private static func sample(
         _ node: StubNode,
@@ -69,6 +72,85 @@ struct FileListRowSamplerTests {
         let rows = try Self.sample(node)
 
         #expect(rows == [FileListRow(isDirectory: nil), Self.dimmedFileRow, Self.directoryRow])
+    }
+
+    // MARK: - アイコン表示
+
+    @Test("アイコン表示では、セクションの表示中の項目を読み、項目の AXImage の AXEnabled で選べるかを決める")
+    func iconViewReadsItems() throws {
+        let node = Fixtures.iconView(items: [.directory("alpha"), .dimmedFile("delta.md"), .file("gamma.txt")])
+
+        let rows = try Self.sample(node)
+
+        #expect(rows == [Self.directoryRow, Self.disabledIconRow, Self.enabledIconRow])
+        #expect(rows.map(\.isSelectable) == [nil, false, true])
+    }
+
+    @Test("アイコン表示のセクションが複数（グループ分け）なら、セクションの順に読む")
+    func iconViewReadsSectionsInOrder() throws {
+        let node = Fixtures.iconView(sections: [[.directory("alpha")], [.dimmedFile("delta.md"), .dimmedFile("gamma.txt")]])
+
+        let rows = try Self.sample(node)
+
+        #expect(rows == [Self.directoryRow, Self.disabledIconRow, Self.disabledIconRow])
+    }
+
+    @Test("アイコン表示でも先頭の limit 行だけ読み、残りのセクションは読まない")
+    func iconViewReadsOnlyLeadingItems() throws {
+        let tree = StubPanelTree()
+        let firstSection = (1...15).map { FileListItem.dimmedFile("first-\($0).txt") }
+        let secondSection = (1...10).map { FileListItem.dimmedFile("second-\($0).txt") }
+        let node = Fixtures.iconView(sections: [firstSection, secondSection, [.file("third.txt")]])
+
+        let rows = try Self.sample(node, in: tree)
+
+        #expect(rows.count == PanelSelectionModeEstimator.sampledRowCount)
+        #expect(!Self.nameReads(in: tree, name: "second-5.txt", listID: Fixtures.fileListID).isEmpty)
+        #expect(Self.nameReads(in: tree, name: "second-6.txt", listID: Fixtures.fileListID).isEmpty)
+        #expect(!tree.reads.contains(Read(element: StubElement("\(Fixtures.fileListID)/2"), attribute: .visibleChildren)))
+    }
+
+    @Test("アイコン表示のディレクトリは URL だけ、ファイルは URL と AXEnabled を読み、文字色は読まない")
+    func iconViewReadsURLAndEnabled() throws {
+        let tree = StubPanelTree()
+        let node = Fixtures.iconView(items: [.directory("alpha"), .dimmedFile("delta.md")])
+
+        _ = try Self.sample(node, in: tree)
+
+        #expect(Self.nameReads(in: tree, name: "alpha", listID: Fixtures.fileListID).map(\.attribute) == [.url])
+        #expect(Self.nameReads(in: tree, name: "delta.md", listID: Fixtures.fileListID).map(\.attribute) == [.url, .isEnabled])
+        #expect(tree.readCount(of: .textOpacity) == 0)
+    }
+
+    @Test("アイコン表示の項目が AXURL を持たなければ種類の分からない行、AXEnabled を持たなければ選べるか分からない行にする")
+    func iconViewItemsWithoutAttributes() throws {
+        var withoutURL = FileListItem.dimmedFile("no-url.txt")
+        withoutURL.hasURL = false
+        var withoutEnabled = FileListItem.dimmedFile("no-enabled.txt")
+        withoutEnabled.isEnabled = nil
+        let node = Fixtures.iconView(items: [withoutURL, withoutEnabled])
+
+        let rows = try Self.sample(node)
+
+        #expect(rows == [
+            FileListRow(isDirectory: nil),
+            FileListRow(isDirectory: false, isEnabled: nil, isEnabledAuthoritative: true),
+        ])
+        #expect(rows.map(\.isSelectable) == [nil, nil])
+    }
+
+    @Test("アイコン表示の項目が子を持たなければ、種類の分からない行にする")
+    func iconViewItemWithoutImage() throws {
+        let node = StubNode(id: Fixtures.fileListID, role: "AXList", subrole: "AXCollectionList", children: [
+            StubNode(role: "AXList", subrole: "AXSectionList", children: [StubNode(role: "AXGroup")]),
+        ])
+
+        #expect(try Self.sample(node) == [FileListRow(isDirectory: nil)])
+    }
+
+    @Test("アイコン表示にセクションがなければ（読み込み前）行はない")
+    func iconViewWithoutSections() throws {
+        #expect(try Self.sample(Fixtures.iconView(sections: [])).isEmpty)
     }
 
     // MARK: - 読む行と AX の読み取り
@@ -154,14 +236,21 @@ struct FileListRowSamplerTests {
             // 表示中の行 1 + 見出しの行（セル 1・名前の要素 1）、ディレクトリはセル・名前の要素・URL の 3、ファイルは文字色を足して 4。
             // 見出しの行も 20 行に数えるため、項目は 19 行（ディレクトリ 10・ファイル 9）
             ("リスト表示", "AXOutline", 1 + 2 + 10 * 3 + 9 * 4),
+            // セクション 1 + セクションの表示中の項目 1、ディレクトリは項目の子と URL の 2、ファイルは AXEnabled を足して 3
+            ("アイコン表示", "AXList", 2 + 10 * 2 + 10 * 3),
         ]
     )
     func axCallCount(label: String, role: String, expected: Int) throws {
         let tree = StubPanelTree()
         let items = (1...10).flatMap { [FileListItem.directory("dir-\($0)"), .dimmedFile("file-\($0).txt")] }
-        let node = role == "AXBrowser"
-            ? Fixtures.columnView(ancestors: [], items: items)
-            : Fixtures.listView(items: items)
+        let node = switch role {
+        case "AXBrowser":
+            Fixtures.columnView(ancestors: [], items: items)
+        case "AXList":
+            Fixtures.iconView(items: items)
+        default:
+            Fixtures.listView(items: items)
+        }
 
         _ = try Self.sample(node, in: tree)
 
@@ -173,19 +262,26 @@ struct FileListRowSamplerTests {
     @Test("ファイル一覧でないロールでは何も読まない")
     func unsupportedRole() throws {
         let tree = StubPanelTree()
-        let list = tree.add(StubNode(id: "list", role: "AXList", children: [StubNode(role: "AXGroup")]))
+        let group = tree.add(StubNode(id: "group", role: "AXGroup", children: [StubNode(role: "AXGroup")]))
 
-        let rows = try FileListRowSampler.sampleRows(in: list, role: "AXList", reader: tree)
+        let rows = try FileListRowSampler.sampleRows(in: group, role: "AXGroup", reader: tree)
 
         #expect(rows.isEmpty)
         #expect(tree.reads.isEmpty)
     }
 
-    @Test("読み取りの失敗はそのまま投げる", arguments: [PanelTreeReadError.elementGone, .unavailable])
-    func propagatesReadFailure(error: PanelTreeReadError) {
+    @Test(
+        "読み取りの失敗はそのまま投げる",
+        arguments: [PanelTreeReadError.elementGone, .unavailable], ["AXBrowser", "AXList"]
+    )
+    func propagatesReadFailure(error: PanelTreeReadError, role: String) {
         let tree = StubPanelTree()
-        let node = Fixtures.columnView(ancestors: [], items: [.dimmedFile("a.txt")])
-        tree.failures[StubElement(Fixtures.nameID("a.txt", in: "\(Fixtures.fileListID)/column/0"))] = error
+        let isIconView = role == "AXList"
+        let node = isIconView
+            ? Fixtures.iconView(items: [.dimmedFile("a.txt")])
+            : Fixtures.columnView(ancestors: [], items: [.dimmedFile("a.txt")])
+        let listID = isIconView ? Fixtures.fileListID : "\(Fixtures.fileListID)/column/0"
+        tree.failures[StubElement(Fixtures.nameID("a.txt", in: listID))] = error
 
         #expect(throws: error) {
             try Self.sample(node, in: tree)

@@ -28,6 +28,17 @@ struct PanelSelectionModeEstimatorTests {
         #expect(Estimator.estimate(rows) == .directoriesOnly)
     }
 
+    @Test("アイコン表示で AXEnabled が true のファイルがあれば、ファイルも選べると推定する")
+    func enabledIconViewFileMeansFilesSelectable() {
+        let rows = [
+            Self.directory,
+            FileListRow(isDirectory: false, isEnabled: false, isEnabledAuthoritative: true),
+            FileListRow(isDirectory: false, isEnabled: true, isEnabledAuthoritative: true),
+        ]
+
+        #expect(Estimator.estimate(rows) == .filesSelectable)
+    }
+
     @Test("選べるファイルの行が 1 つでもあれば、ファイルも選べると推定する（種類で絞り込むパネルを含む）")
     func anySelectableFileMeansFilesSelectable() {
         let rows = [Self.directory, Self.dimmedFile, Self.selectableFile, Self.dimmedFile]
@@ -140,5 +151,15 @@ struct FileListRowTests {
     func enabledWithoutTextOpacityIsUnknown() {
         #expect(FileListRow(isDirectory: false, isEnabled: true).isSelectable == nil)
         #expect(FileListRow(isDirectory: false).isSelectable == nil)
+    }
+
+    @Test(
+        "AXEnabled が選べるかをそのまま表す行（アイコン表示）は、AXEnabled で決める。読めなければ判断しない",
+        arguments: [(true, true), (false, false), (nil, nil)] as [(Bool?, Bool?)]
+    )
+    func authoritativeEnabledDecidesSelectability(isEnabled: Bool?, expected: Bool?) {
+        let row = FileListRow(isDirectory: false, isEnabled: isEnabled, isEnabledAuthoritative: true)
+
+        #expect(row.isSelectable == expected)
     }
 }
