@@ -6,6 +6,10 @@
 ///
 /// 種類の分かる行を 1 行も読めなかった場合（一覧の読み込み前、読み取りの失敗）だけは、判定の再確認と同じ間隔
 /// （`OpenPanelCacheConfiguration` の、倍々に空ける待ち時間と回数）で推定し直す。読めない間の読み取りは数回で済む。
+///
+/// 推定し直すのは、その時刻より後の走査（Idle 中のポーリング、AX 通知）のときで、専用の走査は予約しない。
+/// 推定し直した結果は PanelWatchPolicy の追跡中のパネルに反映されるが、AppCoordinator が使うのは通知の時点の
+/// `PanelContext` のため、表示中のパレットには届かない（Idle に戻った後の再通知から使われる）。
 struct SelectionModeState<Node> {
     private(set) var mode: PanelSelectionMode
     /// 推定し直す予定。nil なら推定は確定している
