@@ -71,9 +71,11 @@ struct AppCoordinatorInjectionTests {
         #expect(harness.injector.calls == [InjectorFake.Call(path: Self.path, autoConfirm: testCase.expectsAutoConfirm)])
     }
 
-    @Test("注入が失敗するとパレットを残してエラーを表示し、PanelShown に戻る")
-    func failedInjectionKeepsPaletteWithError() async throws {
-        let error = InjectionError.timeout(step: .waitSheet)
+    @Test(
+        "注入が失敗するとパレットを残してエラーを表示し、PanelShown に戻る",
+        arguments: [InjectionError.timeout(step: .waitSheet), .pasteboardRestoreFailed]
+    )
+    func failedInjectionKeepsPaletteWithError(error: InjectionError) async throws {
         let expectedMessage = try #require(error.userMessage)
         let harness = CoordinatorHarness(injectorBehavior: .fail(error))
         harness.showPanel()
