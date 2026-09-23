@@ -27,7 +27,8 @@ struct CandidatePreparer: Sendable {
         var indexByPath: [String: Int] = [:]
         for item in items {
             guard let path = CandidatePath.normalized(item.path) else {
-                // TODO(#3): 手編集された履歴など想定外の入力として Log.debug で記録する
+                // 手編集された履歴など想定外の入力として記録する
+                Log.debugPath("正規化できないパスをスキップしました", path: item.path)
                 continue
             }
             if let index = indexByPath[path] {
