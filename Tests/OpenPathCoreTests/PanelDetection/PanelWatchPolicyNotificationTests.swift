@@ -89,6 +89,17 @@ struct PanelWatchPolicyNotificationTests {
         #expect(driver.policy.trackedPanel == .finderPanel)
     }
 
+    @Test("PanelShown 中の走査に失敗しても、追跡中のパネルに panelGone を送らない")
+    func unavailableScanWhilePanelShownKeepsTrackedPanel() {
+        var driver = PolicyDriver()
+        driver.startWatching(initialPanels: [.finderPanel])
+        driver.send(.coordinatorStateChanged(.panelShown(.finderPanel, isPaletteVisible: true)))
+        driver.send(.axNotificationReceived(processID: finderPID))
+
+        #expect(driver.completeLatestScan(.unavailable).isEmpty)
+        #expect(driver.policy.trackedPanel == .finderPanel)
+    }
+
     @Test("追跡中のパネルが別のパネルに置き換わったら、panelGone の後に新しいパネルの panelAppeared を送る")
     func replacedPanelSendsGoneThenAppeared() {
         var driver = PolicyDriver()
@@ -172,6 +183,15 @@ struct PanelWatchPolicyNotificationTests {
         let steps = driver.send(.applicationActivated(.disabled))
 
         #expect(steps == [.send(.panelGone), .detach, .stopPolling])
+    }
+
+    @Test("パネルを追跡中に観測中のアプリが終了したら、panelGone を送って観測を外す（走査は終了を消滅とみなさないため）")
+    func terminationWhileTrackingSendsPanelGone() {
+        var driver = PolicyDriver()
+        driver.startWatching(initialPanels: [.finderPanel])
+        driver.send(.coordinatorStateChanged(.panelShown(.finderPanel, isPaletteVisible: true)))
+
+        #expect(driver.send(.applicationTerminated(processID: finderPID)) == [.send(.panelGone), .detach])
     }
 
     @Test("パネルを追跡中に停止すると panelGone を送る")
