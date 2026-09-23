@@ -11,8 +11,17 @@ struct HistoryStoreTests {
     private static let debounceInterval: Duration = .milliseconds(500)
     private static let oneMillisecond: Duration = .milliseconds(1)
     private static let staleDays = 91.0
+    /// main キューは FIFO のため数回で足りるが、ジョブが数段連鎖しても足りるよう余裕を持たせる。
+    private static let drainIterations = 20
 
     private let clock = TestClock()
+
+    /// MainActor に積まれた後続ジョブ（期限に達したデバウンス保存等）を先に走らせ、「保存されないこと」を確かめられるようにする。
+    private static func drainMainActor() async {
+        for _ in 0..<drainIterations {
+            await Task.yield()
+        }
+    }
 
     private func makeStore(
         persistence: HistoryPersistenceSpy,
@@ -112,7 +121,7 @@ struct HistoryStoreTests {
 
         store.record(path: "/a")
         clock.advance(by: Self.debounceInterval - Self.oneMillisecond)
-        await MainActorDrain.run()
+        await Self.drainMainActor()
         #expect(persistence.saveAttempts.isEmpty)
 
         clock.advance(by: Self.oneMillisecond)
@@ -133,13 +142,13 @@ struct HistoryStoreTests {
         clock.advance(by: interval)
         store.record(path: "/a")
         clock.advance(by: interval)
-        await MainActorDrain.run()
+        await Self.drainMainActor()
         #expect(persistence.saveAttempts.isEmpty)
 
         clock.advance(by: Self.debounceInterval - interval)
         await persistence.waitUntilSaveAttempted()
         clock.advance(by: Self.debounceInterval)
-        await MainActorDrain.run()
+        await Self.drainMainActor()
 
         #expect(persistence.saveAttempts == [[
             HistoryEntry(path: "/a", count: 2, lastUsed: F.now),
@@ -159,7 +168,7 @@ struct HistoryStoreTests {
 
         #expect(persistence.saveAttempts == [[HistoryEntry(path: "/a", count: 1, lastUsed: F.now)]])
         clock.advance(by: Self.debounceInterval)
-        await MainActorDrain.run()
+        await Self.drainMainActor()
         #expect(persistence.saveAttempts.count == 1)
     }
 
@@ -216,7 +225,7 @@ struct HistoryStoreTests {
 
         store.clear()
         clock.advance(by: Self.debounceInterval)
-        await MainActorDrain.run()
+        await Self.drainMainActor()
 
         #expect(persistence.saveAttempts == [[]])
     }

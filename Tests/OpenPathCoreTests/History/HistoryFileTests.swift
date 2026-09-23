@@ -15,13 +15,13 @@ struct HistoryFileTests {
     private static let brokenFileName = "history.json.broken-20260509T061320Z"
     private static let subSecond: TimeInterval = 0.9
 
-    private let temporaryDirectory: TemporaryDirectory
+    private let temporaryDirectory: HistoryTemporaryDirectory
     /// 保存先。未作成の状態から始め、ディレクトリ作成の挙動も確かめる。
     private let directory: URL
     private let file: HistoryFile
 
     init() throws {
-        temporaryDirectory = try TemporaryDirectory()
+        temporaryDirectory = try HistoryTemporaryDirectory()
         directory = temporaryDirectory.url.appending(path: Self.appDirectoryName, directoryHint: .isDirectory)
         file = HistoryFile(directory: directory, now: { F.now })
     }
@@ -112,24 +112,24 @@ struct HistoryFileTests {
     func savedFileIsOwnerReadWriteOnly() throws {
         try file.save([HistoryEntry(path: "/a", count: 1, lastUsed: F.now)])
 
-        #expect(try FilePermissions.of(fileURL) == FilePermissions.ownerReadWrite)
+        #expect(try HistoryFilePermissions.of(fileURL) == HistoryFilePermissions.ownerReadWrite)
     }
 
     @Test("権限が変わっていても、上書き保存で 0600 に戻る")
     func overwriteRestoresOwnerReadWrite() throws {
         try file.save([HistoryEntry(path: "/a", count: 1, lastUsed: F.now)])
-        try FilePermissions.set(FilePermissions.worldReadable, on: fileURL)
+        try HistoryFilePermissions.set(HistoryFilePermissions.worldReadable, on: fileURL)
 
         try file.save([HistoryEntry(path: "/a", count: 2, lastUsed: F.now)])
 
-        #expect(try FilePermissions.of(fileURL) == FilePermissions.ownerReadWrite)
+        #expect(try HistoryFilePermissions.of(fileURL) == HistoryFilePermissions.ownerReadWrite)
     }
 
     @Test("保存先ディレクトリが無ければ権限 0700 で作成する")
     func createsDirectoryWithOwnerOnlyPermissions() throws {
         try file.save([])
 
-        #expect(try FilePermissions.of(directory) == FilePermissions.ownerAll)
+        #expect(try HistoryFilePermissions.of(directory) == HistoryFilePermissions.ownerAll)
     }
 
     @Test("保存先ディレクトリを作れなければ保存はエラーになる")
@@ -190,8 +190,8 @@ struct HistoryFileTests {
     func reportsNilBackupWhenMoveFails() throws {
         try writeRaw("{not json")
         // 読み取りはできるがリネームできないよう、ディレクトリを書き込み不可にする
-        try FilePermissions.set(FilePermissions.ownerReadExecute, on: directory)
-        defer { try? FilePermissions.set(FilePermissions.ownerAll, on: directory) }
+        try HistoryFilePermissions.set(HistoryFilePermissions.ownerReadExecute, on: directory)
+        defer { try? HistoryFilePermissions.set(HistoryFilePermissions.ownerAll, on: directory) }
 
         #expect(file.load() == .corrupted(movedTo: nil))
         #expect(Self.exists(fileURL))

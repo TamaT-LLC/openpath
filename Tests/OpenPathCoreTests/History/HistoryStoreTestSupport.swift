@@ -4,7 +4,7 @@ import OpenPathCore
 
 /// テストごとに作る一時ディレクトリ。実ユーザーの history.json に触れないために使う。
 /// 破棄時に中身ごと削除する。
-final class TemporaryDirectory {
+final class HistoryTemporaryDirectory {
     let url: URL
 
     init() throws {
@@ -19,7 +19,7 @@ final class TemporaryDirectory {
 }
 
 /// ファイル権限の検証用ヘルパ。
-enum FilePermissions {
+enum HistoryFilePermissions {
     static let ownerReadWrite = 0o600
     static let ownerAll = 0o700
     static let ownerReadExecute = 0o500
@@ -80,18 +80,5 @@ final class HistoryPersistenceSpy: HistoryPersisting {
 
     func waitUntilSaveAttempted(times: Int = 1) async {
         await waiter.wait { self.saveAttempts.count >= times }
-    }
-}
-
-/// MainActor に積まれた後続ジョブを先に走らせ、「何も起きないこと」を確かめられるようにする。
-/// main キューは FIFO のため数回で足りるが、ジョブが数段連鎖しても足りるよう余裕を持たせる。
-@MainActor
-enum MainActorDrain {
-    private static let iterations = 20
-
-    static func run() async {
-        for _ in 0..<iterations {
-            await Task.yield()
-        }
     }
 }

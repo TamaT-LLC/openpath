@@ -11,11 +11,11 @@ struct HistoryStorePersistenceTests {
 
     private static let brokenFileName = "history.json.broken-20260509T061320Z"
 
-    private let temporaryDirectory: TemporaryDirectory
+    private let temporaryDirectory: HistoryTemporaryDirectory
     private let clock = TestClock()
 
     init() throws {
-        temporaryDirectory = try TemporaryDirectory()
+        temporaryDirectory = try HistoryTemporaryDirectory()
     }
 
     private var historyFile: HistoryFile {
@@ -59,7 +59,7 @@ struct HistoryStorePersistenceTests {
         await persistence.waitUntilSaveAttempted()
 
         #expect(historyFile.load() == .loaded(store.entries))
-        #expect(try FilePermissions.of(historyFile.fileURL) == FilePermissions.ownerReadWrite)
+        #expect(try HistoryFilePermissions.of(historyFile.fileURL) == HistoryFilePermissions.ownerReadWrite)
     }
 
     @Test("破損した history.json は退避され、空の履歴で起動して以後は新しいファイルに保存する")
@@ -78,7 +78,7 @@ struct HistoryStorePersistenceTests {
         store.flush()
 
         #expect(launch().entries == [HistoryEntry(path: "/a", count: 1, lastUsed: F.now)])
-        #expect(try FilePermissions.of(historyFile.fileURL) == FilePermissions.ownerReadWrite)
+        #expect(try HistoryFilePermissions.of(historyFile.fileURL) == HistoryFilePermissions.ownerReadWrite)
     }
 
     @Test("clear した後に再起動すると空の履歴になる")
