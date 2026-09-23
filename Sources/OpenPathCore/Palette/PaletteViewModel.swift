@@ -108,10 +108,11 @@ public final class PaletteViewModel {
     /// 新しいパネルに対してパレットを出し直すときに、前回の検索・選択・状態表示を消す。
     /// 候補ソースの構築状況はパネルに依らないため保つ。
     public func reset() {
-        query = ""
         rows = []
         selectedIndex = nil
         isLocked = false
         status = nil
+        // onQueryChange は同期で呼ばれるため、他の状態を戻した後に代入する（通知の中で入れ直した候補を消さない）
+        query = ""
     }
 }

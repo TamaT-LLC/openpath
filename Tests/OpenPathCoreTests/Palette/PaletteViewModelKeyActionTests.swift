@@ -160,4 +160,26 @@ struct PaletteViewModelKeyActionTests {
 
         #expect(notified == [""])
     }
+
+    @Test("リセットの通知は他の状態を戻した後に呼び、通知の中で入れ直した候補を消さない")
+    func resetNotifiesAfterClearingState() {
+        viewModel.query = "fern"
+        viewModel.replaceRows(Self.makeRows("fern"))
+        viewModel.setLocked(true)
+        viewModel.showError(PaletteMessage.injectionFailed)
+        var isLockedAtNotification: Bool?
+        var statusAtNotification: PaletteStatus?
+        viewModel.onQueryChange = { [viewModel] _ in
+            isLockedAtNotification = viewModel.isLocked
+            statusAtNotification = viewModel.status
+            viewModel.replaceRows(Self.makeRows("a", "b"))
+        }
+
+        viewModel.reset()
+
+        #expect(isLockedAtNotification == false)
+        #expect(statusAtNotification == nil)
+        #expect(viewModel.rows.map(\.name) == ["a", "b"])
+        #expect(viewModel.selectedIndex == 0)
+    }
 }
