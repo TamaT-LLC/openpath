@@ -134,18 +134,31 @@ struct PalettePresenterTests {
         #expect(viewModel.selectedRow == rows[1])
     }
 
-    @Test("フォルダのみかどうかが変わらない更新や、表示中でないパネルの更新では引き直さない")
-    func irrelevantUpdatesAreIgnored() async {
+    @Test("表示中のパネルの位置が変わっていたら、候補は引き直さずにパレットを置き直す")
+    func movedPanelRepositionsPalette() async {
         await show(.sample, answering: [])
         let moved = PanelContext(id: PanelContext.sample.id, isDirectoriesOnly: false, frame: PanelContext.another.frame)
 
         presenter.update(context: moved)
+        await MainActorQueue.drain()
+
+        #expect(window.calls.last == .reposition(near: PanelContext.another.frame))
+        #expect(search.calls.count == 1)
+    }
+
+    @Test("表示中でないパネルの更新や、閉じた後の更新では何もしない")
+    func irrelevantUpdatesAreIgnored() async {
+        await show(.sample, answering: [])
+        let callsAfterShow = window.calls
+
         presenter.update(context: .another)
+        presenter.update(context: .sample)
         presenter.hide()
         presenter.update(context: PanelContext(id: PanelContext.sample.id, isDirectoriesOnly: true, frame: .zero))
         await MainActorQueue.drain()
 
         #expect(search.calls.count == 1)
+        #expect(window.calls == callsAfterShow + [.hide])
     }
 
     // MARK: - 検索語の変更

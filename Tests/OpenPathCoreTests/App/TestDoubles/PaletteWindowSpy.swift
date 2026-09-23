@@ -8,6 +8,7 @@ final class PaletteWindowSpy: PaletteWindowControlling {
     enum Call: Equatable {
         /// 表示した。rowCount はその時点の高さの計算に使う行数
         case show(near: CGRect, rowCount: Int)
+        case reposition(near: CGRect)
         case hide
         case releaseKey
         case reclaimKey
@@ -18,6 +19,10 @@ final class PaletteWindowSpy: PaletteWindowControlling {
 
     func show(near panelFrame: CGRect) {
         calls.append(.show(near: panelFrame, rowCount: rowCount))
+    }
+
+    func reposition(near panelFrame: CGRect) {
+        calls.append(.reposition(near: panelFrame))
     }
 
     func hide() {

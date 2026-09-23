@@ -8,6 +8,8 @@ public protocol PaletteWindowControlling: AnyObject {
     var rowCount: Int { get set }
     /// NSOpenPanel の近くに表示し、キー入力を受け取れる状態にする。`panelFrame` は NSScreen 座標。
     func show(near panelFrame: CGRect)
+    /// NSOpenPanel が動いたときに位置を合わせ直す。キーの状態と表示状態は変えない。
+    func reposition(near panelFrame: CGRect)
     /// 隠す。キー入力はホストアプリのキーウィンドウ（NSOpenPanel）へ戻る。
     func hide()
     /// 表示したまま、キー入力をホストアプリのキーウィンドウへ返す（注入のキー操作の前）。

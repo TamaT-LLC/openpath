@@ -64,6 +64,9 @@ public final class PalettePresenter: PaletteDisplaying {
     public func update(context: PanelContext) {
         guard let presentedPanel, presentedPanel.id == context.id else { return }
         self.presentedPanel = context
+        if presentedPanel.frame != context.frame {
+            window.reposition(near: context.frame)
+        }
         // 選択モードの推定し直しでフォルダのみかどうかが変わったときだけ、絞り込みを合わせて引き直す
         guard presentedPanel.isDirectoriesOnly != context.isDirectoriesOnly else { return }
         requestRows(keepingSelection: true)
