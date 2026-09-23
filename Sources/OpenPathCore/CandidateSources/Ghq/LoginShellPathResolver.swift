@@ -67,7 +67,9 @@ public actor LoginShellPathResolver: SearchPathProviding {
     ) async -> String {
         let fallbackEntries = ShellSearchPath.absoluteEntries(of: fallbackSearchPath)
         guard let loginEntries = await loginShellEntries(runner: runner, shellPath: shellPath, timeout: timeout) else {
-            // TODO(#3): Log が main に入ったら、フォールバックしたことを警告ログに出す
+            // login shell の設定次第で普通に起きるフォールバックなので debug にする
+            Log.debug("login shell から PATH を取得できなかったため、既定の PATH を使います")
+            Log.debugPath("login shell から PATH を取得できません", path: shellPath)
             return ShellSearchPath.join(fallbackEntries)
         }
         // login shell の設定が zsh 以外（bash / fish 等）にある環境でも Homebrew 等を見つけられるよう、既定 PATH の不足分を補う

@@ -56,7 +56,7 @@ public struct GhqRepositoryLister: Sendable {
         do throws(GhqError) {
             return GhqListing(repositoryPaths: try await fetchRepositoryPaths(), failure: nil)
         } catch {
-            // TODO(#3): Log が main に入ったら、失敗理由を警告ログに出す
+            log(error)
             return GhqListing(repositoryPaths: [], failure: error)
         }
     }
@@ -68,7 +68,7 @@ public struct GhqRepositoryLister: Sendable {
         do throws(GhqError) {
             return try await fetchRoot(using: prepareExecution())
         } catch {
-            // TODO(#3): Log が main に入ったら、失敗理由を警告ログに出す
+            log(error)
             return nil
         }
     }
@@ -120,6 +120,34 @@ public struct GhqRepositoryLister: Sendable {
             throw .nonZeroExit(subcommand, exitCode: result.exitCode, standardError: standardError)
         }
         return result.standardOutput
+    }
+
+    /// `GhqError` を記録する。ghq 未インストールは ghq を使わない利用者で毎回起きるフォールバックなので debug、
+    /// それ以外は利用者に影響する失敗として warning にする。標準エラー出力や検索パスはパスを含み得るため debug に分ける。
+    private func log(_ error: GhqError) {
+        switch error {
+        case .notInstalled(let searchPath):
+            Log.debug("ghq が見つからないため、ghq からの候補取得をスキップします")
+            Log.debugPath("ghq が見つかりません", path: searchPath)
+        case .launchFailed(let subcommand, let reason):
+            let command = Self.commandDescription(of: subcommand)
+            Log.warning("\(command) を起動できません")
+            Log.debug("\(command) を起動できません（\(reason)）")
+        case .nonZeroExit(let subcommand, let exitCode, let standardError):
+            let command = Self.commandDescription(of: subcommand)
+            Log.warning("\(command) が終了コード \(exitCode) で失敗しました")
+            Log.debug("\(command) の標準エラー出力: \(standardError)")
+        case .timedOut(let subcommand):
+            Log.warning("\(Self.commandDescription(of: subcommand)) がタイムアウトしました")
+        case .emptyRoot:
+            Log.warning("ghq root の出力が空でした")
+        case .cancelled:
+            Log.debug("ghq の呼び出しがキャンセルされました")
+        }
+    }
+
+    private static func commandDescription(of subcommand: GhqSubcommand) -> String {
+        (["ghq"] + subcommand.arguments).joined(separator: " ")
     }
 
     private static func ghqError(from error: any Error, running subcommand: GhqSubcommand) -> GhqError {

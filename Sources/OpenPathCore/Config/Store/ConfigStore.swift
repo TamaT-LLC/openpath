@@ -93,7 +93,7 @@ public final class ConfigStore {
 
         if let generationError {
             // 読み込み直すとファイルが無いというエラーで上書きされるため、生成の失敗を公開したままにする
-            // TODO(#3): Log.warning(generationError.description)
+            logConfigError(generationError)
             lastError = generationError
             return
         }
@@ -106,10 +106,33 @@ public final class ConfigStore {
         do throws(ConfigStoreError) {
             apply(try loadFile())
         } catch {
-            // TODO(#3): Log.warning(error.description)
+            // 同じ理由での失敗が続く監視イベントのたびに重複して警告を出さないよう、変わったときだけ記録する
             if lastError != error {
+                logConfigError(error)
                 lastError = error
             }
+        }
+    }
+
+    /// `ConfigStoreError` を記録する。`description` は絶対パスを含むため、
+    /// warning にはパスを含まない説明だけを出し、パスは `debugPath` に分ける（NFR-05）。
+    private func logConfigError(_ error: ConfigStoreError) {
+        switch error {
+        case .fileNotFound(let path):
+            Log.warning("設定ファイルが見つかりません")
+            Log.debugPath("設定ファイルが見つかりません", path: path)
+        case .readFailed(let path, let reason):
+            Log.warning("設定ファイルを読み込めません")
+            Log.debugPath("設定ファイルを読み込めません（\(reason)）", path: path)
+        case .parseFailed(let path, let parseError):
+            Log.warning("設定ファイルの書式が誤っているため反映していません（\(parseError.description)）")
+            Log.debugPath("設定ファイルの書式が誤っているため反映していません", path: path)
+        case .decodeFailed(let path, let decodeError):
+            Log.warning("設定ファイルの値が誤っているため反映していません（\(decodeError.description)）")
+            Log.debugPath("設定ファイルの値が誤っているため反映していません", path: path)
+        case .generationFailed(let path, let reason):
+            Log.warning("設定ファイルを作成できません。既定の設定で動作します")
+            Log.debugPath("設定ファイルを作成できません（\(reason)）。既定の設定で動作します", path: path)
         }
     }
 
@@ -178,11 +201,14 @@ public final class ConfigStore {
 
     /// 読み込んだ結果を反映する。Observable の通知と購読者への配信は、値が変わったときだけ行う
     private func apply(_ result: ConfigDecodingResult) {
-        // TODO(#3): Log.warning で result.warnings を記録する
         if lastError != nil {
             lastError = nil
         }
         if warnings != result.warnings {
+            // 変わらない限り再読み込みのたびに同じ警告を出さないよう、差分があるときだけ記録する
+            for warning in result.warnings {
+                Log.warning(warning.description)
+            }
             warnings = result.warnings
         }
         guard config != result.config else { return }

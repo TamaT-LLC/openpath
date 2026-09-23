@@ -90,7 +90,9 @@ public struct RootDirectoryScanner: Sendable {
                 continue
             }
             guard collector.append(item) else {
-                // TODO(#3): Log が main に入ったら、打ち切ったルートと上限件数を警告ログに出す（警告は戻り値にも残る）
+                // 警告は戻り値の CandidateSourceWarning にも残る。ルートはパスなので debugPath に分ける
+                Log.warning("候補がルートあたりの上限（\(options.itemLimit) 件）に達したため、走査を打ち切りました")
+                Log.debugPath("候補が上限に達したため走査を打ち切りました", path: root)
                 return
             }
         }
