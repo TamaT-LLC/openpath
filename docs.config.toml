@@ -1,0 +1,9 @@
+docs_root = "docs"
+index_dir = "00_index"
+layers = ["L0", "L1", "L2", "L3", "L4", "L5"]
+scopes = ["global", "feature"]
+
+[ai]
+command_path = "claude"
+args = ["-p", "{prompt}", "--output-format", "json"]
+timeout_secs = 600
