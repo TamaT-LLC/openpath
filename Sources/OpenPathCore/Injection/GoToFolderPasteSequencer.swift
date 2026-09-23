@@ -11,6 +11,8 @@
 ///
 /// - ペーストボードは差し替えた後なら、成功・失敗・キャンセルのどの経路でも戻す。
 ///   失敗・キャンセル時は 200ms を待たずにすぐ戻す。戻せなければ `InjectionError.pasteboardRestoreFailed` を投げる。
+/// - キーを送る直前ごとに注入先がまだ有効か（アプリが最前面で、ウィンドウが残っているか）を確かめ、
+///   無効なら送らずに `.targetNotFrontmost` / `.panelGone` を投げる。注入先の記録は呼び出し元（`PathInjectionFlow`）が行う。
 /// - キャンセルには各ステップの間と待機中に応じ、以降のキー操作は送らない。
 /// - AX の走査には期限（600ms）を設け、期限の到来かキャンセルで AX 操作の合間に打ち切る（`ScanCutoff`）。
 /// - 前の注入が後始末を終えるまで、次の注入は始めない（`InjectionSerialGate`）。
@@ -19,16 +21,20 @@ public final class GoToFolderPasteSequencer {
     private let pasteboard: any PasteboardAccessing
     private let keyboard: any KeyStrokePosting
     private let sheetDetector: any GoToSheetDetecting
+    private let targetGuard: any InjectionTargetGuarding
     private let hooks: PathInjectionHooks
     private let timing: PathInjectionTiming
     private let clock: any Clock<Duration>
     private let gate = InjectionSerialGate()
 
-    /// - Parameter clock: 待機に使う。テストでは実時間を待たない Clock を渡す。
+    /// - Parameters:
+    ///   - targetGuard: キーを送る直前ごとに注入先を確かめる。配線漏れで誤送出を防げなくならないよう、既定値を持たせない。
+    ///   - clock: 待機に使う。テストでは実時間を待たない Clock を渡す。
     public init(
         pasteboard: any PasteboardAccessing,
         keyboard: any KeyStrokePosting,
         sheetDetector: any GoToSheetDetecting,
+        targetGuard: any InjectionTargetGuarding,
         hooks: PathInjectionHooks = .none,
         timing: PathInjectionTiming = .standard,
         clock: any Clock<Duration> = ContinuousClock()
@@ -36,6 +42,7 @@ public final class GoToFolderPasteSequencer {
         self.pasteboard = pasteboard
         self.keyboard = keyboard
         self.sheetDetector = sheetDetector
+        self.targetGuard = targetGuard
         self.hooks = hooks
         self.timing = timing
         self.clock = clock
@@ -53,7 +60,7 @@ public final class GoToFolderPasteSequencer {
         let probe = try await makeProbe(on: timeline)
         await hooks.prepareForKeyEvents()
         try Task.checkCancellation()
-        try post(.goToFolder, failingAs: .waitSheet)
+        try await post(.goToFolder, failingAs: .waitSheet, on: timeline)
         try await waitForSheet(probe, on: timeline)
         try Task.checkCancellation()
 
@@ -121,17 +128,24 @@ public final class GoToFolderPasteSequencer {
 
     /// ステップ 5〜9。ペーストボードは呼び出し元が戻す。
     private func pasteAndSubmit(autoConfirm: Bool, on timeline: ElapsedTimeline) async throws {
-        try post(.selectAll, failingAs: .waitPaste)
-        try post(.paste, failingAs: .waitPaste)
+        try await post(.selectAll, failingAs: .waitPaste, on: timeline)
+        try await post(.paste, failingAs: .waitPaste, on: timeline)
         try await timeline.sleep(untilElapsed: timeline.elapsed + timing.pasteSettleDelay)
-        try post(.returnKey, failingAs: .waitPaste)
+        try await post(.returnKey, failingAs: .waitPaste, on: timeline)
 
         let submittedAt = timeline.elapsed
         try await hooks.didSubmitGoToSheet(autoConfirm)
         try await timeline.sleep(untilElapsed: submittedAt + timing.restoreDelay)
     }
 
-    private func post(_ keyStroke: InjectionKeyStroke, failingAs step: InjectionStep) throws {
+    /// キーはその時点のキーウィンドウに届くため、送る直前に注入先がまだ有効かを確かめる。
+    /// 注入中に別のアプリへ切り替わると、⌘A / ⌘V / Return がそのアプリに届いてしまう（チャットアプリでの送信など）。
+    private func post(
+        _ keyStroke: InjectionKeyStroke,
+        failingAs step: InjectionStep,
+        on timeline: ElapsedTimeline
+    ) async throws {
+        try await InjectionTargetCheck.ensureAvailable(targetGuard, on: timeline)
         do {
             try keyboard.post(keyStroke)
         } catch {
