@@ -17,7 +17,7 @@ final class PaletteAssembly {
     }
 
     /// - Parameters:
-    ///   - index: 候補の検索先。クエリは MainActor の外で走る。
+    ///   - index: 候補の検索先。クエリと、検索語に打ったパスの存在確認は MainActor の外で走る。
     ///   - includeFiles: 設定 include_files。候補を引くたびに読む。
     init(index: CandidateIndex, includeFiles: @escaping @MainActor @Sendable () -> Bool) {
         let viewModel = PaletteViewModel()
@@ -27,9 +27,7 @@ final class PaletteAssembly {
             viewModel: viewModel,
             window: window,
             includeFiles: includeFiles,
-            search: { text, directoriesOnly, limit in
-                try await index.query(text, directoriesOnly: directoriesOnly, limit: limit).map(\.paletteRow)
-            }
+            search: PaletteCandidateSearch.make(index: index)
         )
         keyController = PaletteKeyController(window: window.window, viewModel: viewModel)
     }
