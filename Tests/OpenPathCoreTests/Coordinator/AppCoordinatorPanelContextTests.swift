@@ -50,7 +50,7 @@ struct AppCoordinatorPanelContextTests {
         #expect(harness.palette.calls == [.show(.sample)])
     }
 
-    @Test("注入中は状態だけ差し替え、失敗して PanelShown に戻るときに使う")
+    @Test("注入中は状態を差し替えてパレットにも知らせ、失敗して PanelShown に戻っても新しい情報で候補を引く")
     func updatesDuringInjection() async {
         let harness = CoordinatorHarness(injectorBehavior: .suspend(respondsToCancellation: true))
         harness.showPanel()
@@ -63,7 +63,7 @@ struct AppCoordinatorPanelContextTests {
         await harness.waitForState(.panelShown(Self.updated, isPaletteVisible: true))
 
         #expect(stateWhileInjecting == .injecting(Self.updated, path: Self.path))
-        #expect(!harness.palette.calls.contains(.update(Self.updated)))
+        #expect(harness.palette.calls.contains(.update(Self.updated)))
     }
 
     @Test("注入に成功したパネルの更新は、ホットキーでの再表示に使う")
