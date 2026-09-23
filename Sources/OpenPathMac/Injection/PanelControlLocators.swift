@@ -5,24 +5,25 @@ import OpenPathCore
 /// 注入先のアプリのプロセス ID（`InjectionTargetGuard.targetProcessID`）。
 public typealias InjectionTargetProcessID = @MainActor () -> pid_t?
 
+/// 注入先のウィンドウ（`InjectionTargetGuard.targetWindow`）。
+public typealias InjectionTargetWindow = @MainActor () -> AXUIElement?
+
 /// 副方式（DSN-001 §3.2）で、移動先シートの入力欄と「移動」/「Go」ボタンを AX で探す。
 ///
-/// 注入先のアプリのフォーカス中のウィンドウを探し直す（移動先シートが別のウィンドウとして出た場合も拾うため）。
+/// 注入の最初に記録したウィンドウ（とそのシート）の中を探す。同じアプリの別のウィンドウの入力欄を書き換えないため。
 /// どの要素を入力欄とみなすかは OpenPathCore の `GoToFieldSearch` が持つ。
 @MainActor
 public final class GoToFieldLocator: GoToFieldLocating {
-    private let targetProcessID: InjectionTargetProcessID
+    private let targetWindow: InjectionTargetWindow
 
-    public init(targetProcessID: @escaping InjectionTargetProcessID) {
-        self.targetProcessID = targetProcessID
+    public init(targetWindow: @escaping InjectionTargetWindow) {
+        self.targetWindow = targetWindow
     }
 
     public func locateGoToField(cutoff: ScanCutoff) async throws -> GoToFieldControls? {
-        let processID = try PanelControlAX.require(targetProcessID())
+        let window = try PanelControlAX.require(targetWindow())
         let match = try await onAXQueue { () throws -> GoToFieldMatch<AXUIElement>? in
-            try cutoff.throwIfReached()
-            let window = try GoToSheetAX.focusedWindow(ofProcess: processID)
-            return try GoToFieldSearch.locate(
+            try GoToFieldSearch.locate(
                 in: window,
                 cutoff: cutoff,
                 role: { $0.role },
@@ -41,21 +42,19 @@ public final class GoToFieldLocator: GoToFieldLocating {
 }
 
 /// auto_confirm（DSN-001 §3.1 ステップ 8）で、パネルの確定ボタン（「開く」等）を AX で探す。
-/// どのボタンを押すかは OpenPathCore の `OpenButtonSearch` が持つ。
+/// 注入の最初に記録したウィンドウ（とそのシート）の中を探す。どのボタンを押すかは OpenPathCore の `OpenButtonSearch` が持つ。
 @MainActor
 public final class OpenButtonLocator: OpenButtonLocating {
-    private let targetProcessID: InjectionTargetProcessID
+    private let targetWindow: InjectionTargetWindow
 
-    public init(targetProcessID: @escaping InjectionTargetProcessID) {
-        self.targetProcessID = targetProcessID
+    public init(targetWindow: @escaping InjectionTargetWindow) {
+        self.targetWindow = targetWindow
     }
 
     public func locateOpenButton(cutoff: ScanCutoff) async throws -> (any PanelElementOperating)? {
-        let processID = try PanelControlAX.require(targetProcessID())
+        let window = try PanelControlAX.require(targetWindow())
         let button = try await onAXQueue { () throws -> AXUIElement? in
-            try cutoff.throwIfReached()
-            let window = try GoToSheetAX.focusedWindow(ofProcess: processID)
-            return try OpenButtonSearch.locate(
+            try OpenButtonSearch.locate(
                 in: window,
                 cutoff: cutoff,
                 role: { $0.role },
@@ -111,9 +110,27 @@ final class AXPanelElement: PanelElementOperating {
 /// `axQueue` 上で呼ぶ、副方式・auto_confirm・注入先の確認の AX 操作。
 enum PanelControlAX {
     /// 注入先を記録していなければ、注入先のパネルが無いものとして扱う。
-    static func require(_ processID: pid_t?) throws -> pid_t {
-        guard let processID else { throw InjectionError.panelGone }
-        return processID
+    static func require(_ window: AXUIElement?) throws -> AXUIElement {
+        guard let window else { throw InjectionError.panelGone }
+        return window
+    }
+
+    /// window（またはそのシート）が、processID のアプリのフォーカス中のウィンドウか。
+    /// キー入力はフォーカス中のウィンドウに届くため、同じアプリの別のウィンドウに移っていれば false。
+    static func hasFocus(_ window: AXUIElement, inProcess processID: pid_t, cutoff: ScanCutoff) throws -> Bool {
+        let focusedWindow: AXUIElement
+        do {
+            focusedWindow = try GoToSheetAX.focusedWindow(ofProcess: processID)
+        } catch InjectionError.panelGone {
+            return false
+        }
+        if CFEqual(focusedWindow, window) {
+            return true
+        }
+        try cutoff.throwIfReached()
+        // 移動先シートがウィンドウとしてフォーカスを持つ場合も、記録したウィンドウに付いたものなら注入先とみなす
+        guard let parent: AXUIElement = focusedWindow.attr(kAXParentAttribute) else { return false }
+        return CFEqual(parent, window)
     }
 
     /// 走査で得た子要素にも、応答しないアプリで止まらないようメッセージングタイムアウトを設定する（GoToSheetDetector と同じ）。

@@ -29,10 +29,11 @@ public final class PanelInjector: PathInjecting {
         clock: any Clock<Duration> = ContinuousClock()
     ) {
         let targetGuard = InjectionTargetGuard()
-        // シートの判定と要素探しは、注入の最初に記録した注入先のアプリに対して行う（途中で最前面が変わっても別のアプリを走査しない）
+        // シートの判定と要素探しは、注入の最初に記録した注入先に対して行う（途中でフォーカスが移っても別のアプリ・ウィンドウを走査しない）
         let targetProcessID: InjectionTargetProcessID = { [targetGuard] in targetGuard.targetProcessID }
+        let targetWindow: InjectionTargetWindow = { [targetGuard] in targetGuard.targetWindow }
         let autoConfirm = OpenButtonAutoConfirm(
-            locator: OpenButtonLocator(targetProcessID: targetProcessID),
+            locator: OpenButtonLocator(targetWindow: targetWindow),
             targetGuard: targetGuard,
             clock: clock
         )
@@ -47,7 +48,7 @@ public final class PanelInjector: PathInjecting {
                 clock: clock
             ),
             secondary: GoToFieldDirectEntry(
-                locator: GoToFieldLocator(targetProcessID: targetProcessID),
+                locator: GoToFieldLocator(targetWindow: targetWindow),
                 targetGuard: targetGuard,
                 didSubmit: autoConfirm.hook,
                 clock: clock

@@ -31,7 +31,7 @@ public struct GoToFieldControls {
 /// 副方式: 移動先シートの入力欄を探す（DSN-001 §3.2 ステップ 1）。
 @MainActor
 public protocol GoToFieldLocating {
-    /// 注入先のフォーカス中のウィンドウから、移動先シートの入力欄を探す（どの要素を選ぶかは `GoToFieldSearch`）。
+    /// 注入の最初に記録したウィンドウ（とそのシート）から、移動先シートの入力欄を探す（どの要素を選ぶかは `GoToFieldSearch`）。
     /// - Parameter cutoff: 走査の打ち切り条件。AX 操作のたびに確かめること。
     /// - Returns: 見つからなければ nil。
     /// - Throws: 注入先を特定できなければ `InjectionError`、打ち切ったら `ScanCutoff.Reached`。
@@ -41,7 +41,7 @@ public protocol GoToFieldLocating {
 /// auto_confirm: パネルの確定ボタン（「開く」等）を探す（DSN-001 §3.1 ステップ 8）。
 @MainActor
 public protocol OpenButtonLocating {
-    /// 注入先のフォーカス中のウィンドウから、確定ボタンを探す（どの要素を選ぶかは `OpenButtonSearch`）。
+    /// 注入の最初に記録したウィンドウ（とそのシート）から、確定ボタンを探す（どの要素を選ぶかは `OpenButtonSearch`）。
     /// - Parameter cutoff: 走査の打ち切り条件。AX 操作のたびに確かめること。
     /// - Returns: 見つからなければ nil。
     /// - Throws: 注入先を特定できなければ `InjectionError`、打ち切ったら `ScanCutoff.Reached`。
@@ -50,9 +50,9 @@ public protocol OpenButtonLocating {
 
 /// 注入先の状態。
 public enum InjectionTargetStatus: Equatable, Sendable {
-    /// 注入先のアプリが最前面で、注入先のウィンドウが残っている。
+    /// 注入先のアプリが最前面で、注入先のウィンドウ（またはそのシート）にフォーカスがある。
     case available
-    /// 注入先のアプリが最前面でない（別のアプリに切り替わった）。
+    /// 注入先のウィンドウが最前面でない（別のアプリ、または同じアプリの別のウィンドウに切り替わった）。
     case notFrontmost
     /// 注入先のウィンドウが消えた。
     case gone
@@ -60,7 +60,7 @@ public enum InjectionTargetStatus: Equatable, Sendable {
 
 /// 注入先（注入を始めた時点の最前面アプリと、そのフォーカス中のウィンドウ）の記録と確認。
 ///
-/// キー入力はその時点のキーウィンドウに届くため、注入中に別のアプリへ切り替わると ⌘A / ⌘V / Return がそのアプリに届く
+/// キー入力はその時点のキーウィンドウに届くため、注入中に別のアプリ・ウィンドウへ切り替わると ⌘A / ⌘V / Return がそこに届く
 /// （チャットアプリでの送信など）。これを防ぐため、キー操作とパネルへの AX 操作の直前ごとに確かめる。
 @MainActor
 public protocol InjectionTargetGuarding {

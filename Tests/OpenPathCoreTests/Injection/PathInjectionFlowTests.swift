@@ -259,7 +259,7 @@ struct PathInjectionFlowTests {
         }
     }
 
-    @Test("別のアプリに切り替わったら、送らずに targetNotFrontmost を投げ、パレットには理由を出す")
+    @Test("別のアプリ・ウィンドウに切り替わったら、送らずに targetNotFrontmost を投げ、パレットには理由を出す")
     func targetNotFrontmostMessage() async {
         let harness = FlowHarness()
         harness.targetGuard.invalidation = (fromCheck: 1, status: .notFrontmost)
@@ -272,7 +272,7 @@ struct PathInjectionFlowTests {
         }
 
         #expect(thrown as? InjectionError == .targetNotFrontmost)
-        #expect((thrown as? InjectionError)?.userMessage == "移動できませんでした（別のアプリに切り替わりました）")
+        #expect((thrown as? InjectionError)?.userMessage == "移動できませんでした（パネルが最前面でなくなりました）")
         #expect(harness.log.keyStrokes == [.goToFolder])
         #expect(harness.pasteboard.contents == .userClipboard)
     }
