@@ -1,12 +1,12 @@
 /// 先頭一致・区切り直後・CamelCase 境界・連続一致にボーナスを付ける貪欲なファジーマッチ（fzf v2 の簡略版）。
 /// スコア規則は `FuzzyScoring`、一致位置の選び方は `FuzzyAligner` を参照。
 ///
-/// 正規化（大文字小文字・日本語の同一視など）は `TextNormalizer` として差し込む。
+/// 正規化（大文字小文字・日本語の同一視など）は `TextNormalizer` として差し込む。既定は `JapaneseAwareNormalizer`。
 /// 候補側は `prepareTarget(_:)` で前処理した結果を保持しておき、キー入力ごとに `prepareQuery(_:)` だけを行う使い方を想定する。
 public struct FuzzyMatcher: Sendable {
     private let normalizer: any TextNormalizer
 
-    public init(normalizer: any TextNormalizer = LowercaseNormalizer()) {
+    public init(normalizer: any TextNormalizer = JapaneseAwareNormalizer()) {
         self.normalizer = normalizer
     }
 

@@ -30,12 +30,16 @@ struct TextNormalizerTests {
         #expect(normalized.sourceOffsets == [0, 1, 2, 3, 4, 5])
     }
 
-    @Test("既定の正規化は LowercaseNormalizer")
-    func defaultNormalizerIsLowercase() {
+    @Test("既定の正規化は JapaneseAwareNormalizer（かな・幅を同一視する）")
+    func defaultNormalizerIsJapaneseAware() throws {
         let defaultMatcher = FuzzyMatcher()
-        let explicitMatcher = FuzzyMatcher(normalizer: LowercaseNormalizer())
+        let explicitMatcher = FuzzyMatcher(normalizer: JapaneseAwareNormalizer())
+        let lowercaseMatcher = FuzzyMatcher(normalizer: LowercaseNormalizer())
 
-        #expect(defaultMatcher.score(query: "FeRn", in: "fern") == explicitMatcher.score(query: "FeRn", in: "fern"))
+        let match = try #require(defaultMatcher.score(query: "しりょう", in: "ｼﾘｮｳ"))
+
+        #expect(match == explicitMatcher.score(query: "しりょう", in: "ｼﾘｮｳ"))
+        #expect(lowercaseMatcher.score(query: "しりょう", in: "ｼﾘｮｳ") == nil)
     }
 
     @Test("差し込んだ正規化はクエリと対象の両方に適用される")
