@@ -89,6 +89,15 @@ struct PaletteKeyBindingInputStateTests {
         #expect(PaletteKeyBinding.resolve(KeyStroke.n.typing("т").input(.control)) == .perform(.moveSelection(by: 1)))
         #expect(PaletteKeyBinding.resolve(KeyStroke.p.typing("з").input(.control)) == .perform(.moveSelection(by: -1)))
         #expect(PaletteKeyBinding.resolve(KeyStroke.v.typing("м").input(.command)) == .edit(.paste))
+        #expect(PaletteKeyBinding.resolve(KeyStroke.a.typing("ф").input(.command)) == .edit(.selectAll))
+        // 割り当てのない文字キーは位置で読み替えても素通し
+        #expect(PaletteKeyBinding.resolve(KeyStroke.e.typing("у").input(.control)) == .passThrough)
+    }
+
+    @Test("文字キー以外の位置では読み替えない")
+    func nonLetterKeysAreNotReinterpretedByPosition() {
+        #expect(PaletteKeyBinding.resolve(KeyStroke.digit1.typing("¡").input(.command)) == .passThrough)
+        #expect(PaletteKeyBinding.resolve(KeyStroke.eisu.input(.control)) == .passThrough)
     }
 
     @Test("文字が取れないキー（デッドキー等）は US 配列の位置で判定する")

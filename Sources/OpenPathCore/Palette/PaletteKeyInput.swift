@@ -25,7 +25,7 @@ extension PaletteKeyModifiers: CustomStringConvertible {
 ///
 /// AppKit の `NSEvent` を Core に持ち込まないよう、キーの判定に必要な値だけを持つ。
 public struct PaletteKeyInput: Equatable, Sendable {
-    /// 仮想キーコード（`NSEvent.keyCode`）。物理的なキーの位置を表す
+    /// 仮想キーコード（`NSEvent.keyCode`）。物理的なキーの位置を表し、値は `VirtualKey` の rawValue と同じ
     public let keyCode: UInt16
     /// 修飾キーを除いた入力文字（`NSEvent.charactersIgnoringModifiers`）。Shift だけは反映される
     public let charactersIgnoringModifiers: String

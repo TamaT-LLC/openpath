@@ -14,7 +14,13 @@
 /// - Enter / Esc / Tab は、割り当てのない修飾の組み合わせやリピートでも検索フィールドに渡さず消費する。
 ///   渡すと編集終了（insertNewline:）・補完（complete:）・フォーカス移動（insertTab:）が起きるため。
 /// - それ以外の割り当てのないキーは、文字入力やカーソル移動として検索フィールドに渡す。
+///
+/// 特殊キーは仮想キーコード（`VirtualKey`）で判定する。
 public enum PaletteKeyBinding {
+    /// テンキーの Enter（Carbon の kVK_ANSI_KeypadEnter）。
+    /// `VirtualKey` はホットキーに指定できるキーだけを持ち、テンキーの Enter を含まないためここで定義する
+    static let keypadEnterKeyCode: UInt16 = 0x4C
+
     private static let previousRow = -1
     private static let nextRow = 1
 
@@ -34,18 +40,21 @@ public enum PaletteKeyBinding {
         // IME にも渡さないよう、変換中の判定より先に見る
         if input.isLocked { return .discard }
         if input.hasMarkedText { return .passThrough }
-        if let key = PaletteKeyCode(rawValue: input.keyCode), let resolution = resolveSpecialKey(key, input) {
+        if let resolution = resolveSpecialKey(input) {
             return resolution
         }
         return shortcutLetter(of: input)
             .flatMap { letterShortcuts[LetterShortcut(input.modifiers, $0)] } ?? .passThrough
     }
 
-    /// 特殊キーの扱い。文字キーは nil を返し、入力文字での判定に回す。
-    private static func resolveSpecialKey(_ key: PaletteKeyCode, _ input: PaletteKeyInput) -> PaletteKeyResolution? {
+    /// 特殊キーの扱い。特殊キー以外は nil を返し、入力文字での判定に回す。
+    private static func resolveSpecialKey(_ input: PaletteKeyInput) -> PaletteKeyResolution? {
+        if input.keyCode == keypadEnterKeyCode {
+            return consumingOneShot(input, action: confirmAction(for: input.modifiers))
+        }
         let hasNoModifiers = input.modifiers.isEmpty
-        switch key {
-        case .return, .keypadEnter:
+        switch VirtualKey(keyCode: input.keyCode) {
+        case .return:
             return consumingOneShot(input, action: confirmAction(for: input.modifiers))
         case .escape:
             return consumingOneShot(input, action: hasNoModifiers ? .dismiss : nil)
@@ -55,7 +64,7 @@ public enum PaletteKeyBinding {
             return hasNoModifiers ? .perform(.moveSelection(by: previousRow)) : .passThrough
         case .downArrow:
             return hasNoModifiers ? .perform(.moveSelection(by: nextRow)) : .passThrough
-        case .ansiA, .ansiC, .ansiN, .ansiP, .ansiV, .ansiX, .ansiZ:
+        default:
             return nil
         }
     }
@@ -84,7 +93,7 @@ public enum PaletteKeyBinding {
         if characters.count == 1, let character = characters.first, character.isASCII {
             return character.isLetter ? Character(character.lowercased()) : nil
         }
-        return PaletteKeyCode(rawValue: input.keyCode)?.ansiLetter
+        return VirtualKey(keyCode: input.keyCode)?.ansiLetter
     }
 }
 
@@ -96,5 +105,19 @@ private struct LetterShortcut: Hashable {
     init(_ modifiers: PaletteKeyModifiers, _ letter: Character) {
         self.modifiers = modifiers
         self.letter = letter
+    }
+}
+
+private extension VirtualKey {
+    /// `NSEvent.keyCode`（UInt16）から引く。
+    init?(keyCode: UInt16) {
+        self.init(rawValue: UInt32(keyCode))
+    }
+
+    /// 文字キーの US 配列での文字（小文字）。文字キーの設定上の名前はその文字 1 字であることを使う
+    var ansiLetter: Character? {
+        let name = canonicalName
+        guard name.count == 1, let letter = name.first, letter.isLetter else { return nil }
+        return letter
     }
 }
