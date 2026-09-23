@@ -2,8 +2,16 @@ import os
 
 /// アプリ全体で使うロギングの窓口。
 ///
-/// 統合ログ（`os.Logger`）と `~/Library/Logs/openpath/openpath.log` の両方に出力する。
+/// 統合ログ（`os.Logger`）に出力し、`configure(_:)` を呼んだ後はログファイルにも出力する。
 /// どのスレッドからも呼び出せ、ファイルへの書き込みはバックグラウンドで行う。
+///
+/// ## 初期化
+///
+/// - アプリは起動直後に `configure(_:)` を呼ぶこと。呼ぶまではファイルに出力されず、ログは統合ログにのみ残る。
+///   既定の設定 `Log.configure(LogConfiguration())` では `~/Library/Logs/openpath/openpath.log` に出力し、
+///   最小レベルは DEBUG ビルドで debug、リリースビルドで info になる。
+/// - Core のコードからも `Log` を使ってよい。ユニットテストは `configure(_:)` を呼ばないため、
+///   テスト中のログが実ユーザーのログディレクトリに書き込まれることはない。
 ///
 /// ## パスの扱い（NFR-05）
 ///
@@ -14,13 +22,21 @@ import os
 ///   `<path>` に置き換える。パスの終端は判別できないため、引用符や括弧で囲んでいても後続の文脈は失われる。
 ///   検出はヒューリスティックで相対パスやファイル名は拾えないため、この安全網を前提にしないこと。
 public enum Log {
-    private static let current = OSAllocatedUnfairLock(initialState: AppLogger(configuration: LogConfiguration()))
+    /// `configure(_:)` が呼ばれるまでは統合ログにのみ出力し、ファイルは作らない。
+    /// Swift Testing にはテスト実行全体の前処理を差し込む仕組みがなく、既定でファイルに書くと
+    /// Core のコードを通るテストが実ユーザーの `~/Library/Logs` に書き込んでしまうため。
+    private static let current = OSAllocatedUnfairLock(
+        initialState: AppLogger(minimumLevel: LogConfiguration.defaultMinimumLevel, sinks: [OSLogSink()])
+    )
 
     static var logger: AppLogger {
         current.withLock { $0 }
     }
 
-    /// 出力先や最小レベルを変更する。以降のログは新しい設定で出力される。
+    /// ログファイルへの出力を有効にし、出力先と最小レベルを設定する。以降のログは新しい設定で出力される。
+    ///
+    /// アプリは起動直後に呼ぶこと。呼ぶ前に出したログはファイルに残らない。
+    /// 再度呼ぶと設定を差し替える。
     public static func configure(_ configuration: LogConfiguration) {
         install(AppLogger(configuration: configuration))
     }
