@@ -58,6 +58,8 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
     let hasConfirm = window.descendants(role: kAXButtonRole, maxDepth: 6)
         .contains { confirmTitles.contains($0.title ?? "") }
     let hasFileList = window.descendants(roles: [kAXBrowserRole, kAXOutlineRole, kAXTableRole], maxDepth: 6).isEmpty == false
+        || window.descendants(role: kAXListRole, maxDepth: 6)
+            .contains { ($0.attr(kAXSubroleAttribute) as String?) == "AXCollectionList" }  // アイコン表示
     let isSavePanel = window.descendants(role: kAXTextFieldRole, maxDepth: 6)
         .contains {
             [$0.attr(kAXDescriptionAttribute) as String?, $0.title].contains {
@@ -70,6 +72,7 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
 
 - ロールが `AXSheet` の要素も候補にする（サブロールだけでなく、シートは通常ロールも `AXSheet` のため。当初案のコードはサブロールのみ比較していた、PR #56）。
 - 確定ボタンに「アップロード」/「Upload」を追加した（Safari の `input[type=file]` パネル対策。TST-001 S-06）。
+- ファイル一覧の条件（判定条件 3）に、アイコン表示（ロールが `AXList` でサブロールが `AXCollectionList` の要素）を加えた。`AXList` 全般ではなくサブロールを `AXCollectionList` に限定したのは、`AXList` が設定シートの一覧などファイル一覧でない要素にも使われ、限定しないと確定ボタンを持つ設定シート等を開くパネルと誤判定するため（`AXCollectionList` は `NSCollectionView` の公開サブロールでローカライズされない）。サブロールは `AXList` の要素だけ読むため、リスト表示・カラム表示の判定では AX 呼び出しは増えない（PR #64）。
 - 子のシートを 2 段まで探す（リモートビューが外側のシートの下にさらにシートを重ねる構成に対応）。ただし、ファイル一覧の行（ファイル名を保存欄と誤認しないため）と、子のシート自体の中（開くパネルでないダイアログをパネルと誤判定しないため）へは降りない。
 - 保存パネルの除外条件は `AXDescription` とタイトルの両方を「Save」「保存」「名前」で調べる（当初案のコードは説明を「Save」、タイトルを「名前」でしか見ておらず、ARCH-001 §6 の「保存」「Save As」とも食い違っていたため統一した、PR #56）。検索フィールドは対象外。
 - `descendants` は幅優先で最大 6 階層、1 パネルあたり 400 要素で打ち切る（サンドボックスパネルはリモート要素のため往復コストが高い）。
@@ -81,13 +84,13 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
 
 ### 2.3 パネルの選択モード推定
 
-- 判定は `AXEnabled` だけでなく、**名前の文字色（`AXForegroundColor`）の不透明度**を主に使う。実機の AX ツリーを調べた結果、リスト表示・カラム表示ではファイル行の `AXEnabled` が選べる/選べないで変わらず（両方 true）、名前の文字色の不透明度だけが変わる（選べる行 0.847、選べない行 0.247）。アイコン表示（`AXList`、サブロール `AXCollectionList`）だけは `AXEnabled` が正しく false になる。しきい値は 0.5（通常 0.85 と選べない 0.25〜0.26 の間）。文字色を読めない行は判断しない（当初案の `AXDisabled` 判定から変更、PR #60）。
-- ディレクトリかどうかは、名前の要素（`AXTextField`）が持つ `AXURL`（`file:///.file/id=…`）の末尾が `/` かで判別する（表示形式・言語に依存しないため。種類列やアイコンの説明はローカライズされる、展開の三角はリスト表示にしかない等の理由で不採用、PR #60）。
-- 行の読み取り: カラム表示は最後の `AXColumns` 列（プレビュー列がある場合はその左）の `AXList.AXVisibleChildren`、リスト表示（`AXOutline` / `AXTable`）は `AXVisibleRows`。いずれも表示中の行だけを読む（`AXChildren` はフォルダの全項目を返してしまうため）。
+- 選べるかどうかの判定は表示形式で分かれる。**リスト表示・カラム表示**は名前の文字色（`AXForegroundColor`）の不透明度を主に使う。実機の AX ツリーを調べた結果、ファイル行の `AXEnabled` は選べる/選べないで変わらず（両方 true）、名前の文字色の不透明度だけが変わる（選べる行 0.847、選べない行 0.247）。しきい値は 0.5（通常 0.85 と選べない 0.25〜0.26 の間）。文字色を読めない行は判断しない（当初案の `AXDisabled` 判定から変更、PR #60）。
+- **アイコン表示**は名前の要素が `AXImage`（`AXTitleUIElement` を持たず、属性付き文字列の読み取りにも非対応）のため文字色を読めない。代わりに `AXEnabled` をそのまま使う（選べない項目だけ false になることを実機で確認済み）。`FileListRow.isEnabledAuthoritative` で、その行が `AXEnabled` を判断にそのまま使ってよい行かどうかを表す（PR #64）。
+- ディレクトリかどうかは、名前の要素（リスト表示・カラム表示は `AXTextField`、アイコン表示は `AXImage`）が持つ `AXURL`（`file:///.file/id=…`）の末尾が `/` かで判別する（表示形式・言語に依存しないため。種類列やアイコンの説明はローカライズされる、展開の三角はリスト表示にしかない等の理由で不採用、PR #60）。
+- 行の読み取り: カラム表示は最後の `AXColumns` 列（プレビュー列がある場合はその左）の `AXList.AXVisibleChildren`、リスト表示（`AXOutline` / `AXTable`）は `AXVisibleRows`、**アイコン表示は `AXList`（`AXCollectionList`）の `AXVisibleChildren`（セクション）の、それぞれの `AXVisibleChildren`（項目 `AXGroup`。最初の子の `AXImage` を名前の要素とする）**。いずれも表示中の行だけを読む（`AXChildren` はフォルダの全項目を返してしまうため）。20 行を読む AX 呼び出しはカラム表示最大 54 回、リスト表示 69 回、アイコン表示 52 回（テストで固定、PR #60 / #64）。
 - 先頭 20 行のうちディレクトリ以外の行を見て、選べる行が 1 つでもあれば「ファイルも選べる」、すべて選べなければ「フォルダのみ」、ディレクトリ以外の行が無い・判断できない行があれば「推定できない」の 3 値で決める。推定できない場合は `isDirectoriesOnly = false`（設定 `include_files` に従う。`PanelContext` の形は変えない）。
 - 推定は開くパネルと判定した最初の検知（Idle 中）でのみ行い、判定結果と一緒にキャッシュする。**種類の分かる行を 1 行も読めなかった場合だけ**、判定の再確認と同じ間隔（250ms から倍々に 4 回）で推定し直す。行を読めたうえで推定できなかった場合（例: 先頭がディレクトリのみ）は、フォルダを移動しても推定し直さない（PanelShown 中の走査で 20 行を読み直すと DSN-001 §5 の AX 呼び出し上限を超えるため。推定し直した結果を表示中のパレットへ反映する経路は、並行実装中の #21 / #22 / #27 と衝突するため #27 へ申し送り、PR #60）。
-- 中身のファイル一覧は、判定と同じ幅優先探索で最後に見つけたファイル一覧ロールの要素とする（サイドバーも同じロール条件を満たすが、中身の一覧より先に見つかるため、PR #60）。
-- アイコン表示のパネルはファイル一覧のロール条件（`AXBrowser` / `AXOutline` / `AXTable`、DSN-001 §2.2）を満たさないため検知されない（既知の限界、PR #60）。
+- 中身のファイル一覧は、判定と同じ幅優先探索で最後に見つけたファイル一覧ロールの要素とする。サイドバー（`AXOutline`）も同じロール条件を満たすが、中身の一覧より先に見つかるため対象にならない（PR #60）。アイコン表示のパネルでサイドバーを表示している場合、DSN-001 §2.2 の条件 3 の追加（PR #64）以前はサイドバーが唯一のファイル一覧として検知され、行が `AXURL` を持たないため常に「推定できない」になっていた（PR #64 で中身のアイコン表示自体が対象になり解消）。
 
 ### 2.4 パネルの位置取得
 
