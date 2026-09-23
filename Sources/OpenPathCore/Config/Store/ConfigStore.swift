@@ -135,7 +135,19 @@ public final class ConfigStore {
         let subscriberID = nextSubscriberID
         nextSubscriberID += 1
         subscribers[subscriberID] = continuation
+        // 設定が変わらないまま購読者が入れ替わっても溜まらないよう、購読をやめたら取り除く。
+        // onTermination は任意のスレッドから呼ばれるため MainActor に戻ってから触れる
+        continuation.onTermination = { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.removeSubscriber(subscriberID)
+            }
+        }
         return stream
+    }
+
+    private func removeSubscriber(_ subscriberID: Int) {
+        subscribers[subscriberID] = nil
     }
 
     // MARK: - 読み込み
@@ -176,8 +188,7 @@ public final class ConfigStore {
         guard config != result.config else { return }
         config = result.config
         for (subscriberID, continuation) in subscribers {
-            // 購読をやめたストリームはここで取り除く。onTermination は任意のスレッドから呼ばれ、
-            // MainActor の状態に触れるには Task を挟む必要があるため使わない
+            // onTermination による除去は MainActor に戻るまで遅れるため、ここで終了済みと分かったものも取り除く
             if case .terminated = continuation.yield(result.config) {
                 subscribers[subscriberID] = nil
             }
