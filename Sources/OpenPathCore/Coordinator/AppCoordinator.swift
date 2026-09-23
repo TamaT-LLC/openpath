@@ -23,6 +23,11 @@ public final class AppCoordinator {
     private let clock: any Clock<Duration>
     private var activeInjection: ActiveInjection?
     private var nextInjectionID = 0
+    /// 注入に成功し、まだ開いているはずのパネル。Idle 中だけ持つ。
+    /// PanelWatcher は Idle に戻ると開いたままのパネルを再通知する。注入に成功したパネルでは、ユーザーがパネル側で
+    /// Enter（「開く」）を押して確定するため（UX-001 §2）、再通知でパレットを出し直してキー入力を奪わないよう無視する。
+    /// ホットキーは明示的な再表示（UX-001 §4）なので、このパネルのパレットを出す。
+    private var injectedPanel: PanelContext?
 
     /// - Parameters:
     ///   - isAutoConfirmEnabled: 設定 auto_confirm。設定ファイルの変更を反映するため confirm のたびに読む。
@@ -61,6 +66,8 @@ public final class AppCoordinator {
     private func panelAppeared(_ context: PanelContext) {
         switch state {
         case .idle:
+            // 注入に成功したパネルの再通知では、パネル側での確定（Enter）を妨げないようパレットを出さない
+            guard injectedPanel?.id != context.id else { return }
             showPalette(for: context)
         case .panelShown(let current, _):
             // 同じパネルの再検知で、Esc で閉じたパレットを勝手に出し直さない
@@ -74,15 +81,23 @@ public final class AppCoordinator {
     private func panelGone() {
         switch state {
         case .idle:
+            injectedPanel = nil
             // タイムアウトで Idle に戻った後もエラー表示のパレットが残り得るため、閉じておく
             palette.hide()
         case .panelShown:
             state = .idle
             palette.hide()
         case .injecting:
-            cancelActiveInjection()
-            state = .idle
-            palette.setLocked(false)
+            guard activeInjection?.shouldAwaitResultAfterPanelGone == true else {
+                cancelActiveInjection()
+                state = .idle
+                palette.setLocked(false)
+                palette.hide()
+                return
+            }
+            // 自動確定では injector が最後に「開く」を押し、注入の完了より先にパネルが消える。
+            // 注入はキャンセルせず、結果を待って履歴に残す（タイムアウトは維持する）
+            activeInjection?.isPanelGone = true
             palette.hide()
         }
     }
@@ -106,11 +121,20 @@ public final class AppCoordinator {
     }
 
     private func hotkey() {
-        guard case .panelShown(let context, isPaletteVisible: false) = state else { return }
-        showPalette(for: context)
+        switch state {
+        case .idle:
+            // タイムアウト後などは、開いたままのパネルの再通知でパレットを出し直す（PanelWatcher 側の責務）
+            guard let injectedPanel else { return }
+            showPalette(for: injectedPanel)
+        case .panelShown(let context, isPaletteVisible: false):
+            showPalette(for: context)
+        case .panelShown(_, isPaletteVisible: true), .injecting:
+            return
+        }
     }
 
     private func showPalette(for context: PanelContext) {
+        injectedPanel = nil
         state = .panelShown(context, isPaletteVisible: true)
         palette.show(context: context)
     }
@@ -122,6 +146,7 @@ public final class AppCoordinator {
         nextInjectionID += 1
         activeInjection = ActiveInjection(
             id: injectionID,
+            isAutoConfirm: autoConfirm,
             work: makeInjectionTask(id: injectionID, path: path, autoConfirm: autoConfirm),
             timeout: Self.makeTimeoutTask(on: clock) { [weak self] in
                 self?.finishInjection(id: injectionID, outcome: .timedOut)
@@ -136,6 +161,7 @@ public final class AppCoordinator {
         Task { [weak self, injector] in
             // confirm 直後にパネル消滅等で取り消された場合、無関係なウィンドウへキー入力を送らない
             guard !Task.isCancelled else { return }
+            self?.injectionDidStart(id: id)
             let outcome: InjectionOutcome
             do {
                 try await injector.inject(path: path, autoConfirm: autoConfirm)
@@ -163,13 +189,25 @@ public final class AppCoordinator {
         }
     }
 
+    private func injectionDidStart(id: Int) {
+        guard activeInjection?.id == id else { return }
+        activeInjection?.hasStarted = true
+    }
+
     private func finishInjection(id: Int, outcome: InjectionOutcome) {
         // 取り消し済み・置き換え済みの注入から遅れて届いた結果は捨てる
-        guard activeInjection?.id == id, case .injecting(let context, let path) = state else { return }
+        guard let injection = activeInjection, injection.id == id,
+              case .injecting(let context, let path) = state else { return }
         cancelActiveInjection()
 
+        if injection.isPanelGone {
+            finishInjectionAfterPanelGone(path: path, outcome: outcome)
+            return
+        }
         switch outcome {
         case .succeeded:
+            // パネルは開いたまま。ユーザーがパネル側で確定するまで、同じパネルの再通知ではパレットを出さない
+            injectedPanel = context
             state = .idle
             palette.setLocked(false)
             palette.hide()
@@ -190,6 +228,21 @@ public final class AppCoordinator {
         }
     }
 
+    /// 自動確定中にパネルが消えた注入を終える。パレットは閉じ済みのため、結果にかかわらずエラーは出さない。
+    private func finishInjectionAfterPanelGone(path: String, outcome: InjectionOutcome) {
+        state = .idle
+        palette.setLocked(false)
+        switch outcome {
+        case .succeeded, .failed(InjectionError.panelGone), .failed(InjectionError.pasteboardRestoreFailed):
+            // 「開く」の押下でパネルが閉じたとみなす。押下まで進んだかは Coordinator からは分からないため、
+            // injector がパネルの消滅（panelGone）で終えた場合と、元の結果より優先して伝えられる
+            // ペーストボードの復元失敗で終えた場合も、パネルの消滅を根拠に成功として扱う
+            history.record(path: path)
+        case .failed, .timedOut:
+            return
+        }
+    }
+
     private func cancelActiveInjection() {
         activeInjection?.cancel()
         activeInjection = nil
@@ -205,8 +258,19 @@ private enum InjectionOutcome {
 /// 実行中の注入と、その全体タイムアウトの組。
 private struct ActiveInjection {
     let id: Int
+    /// 最後に「開く」を押す注入か（auto_confirm または Cmd+Enter）。
+    let isAutoConfirm: Bool
     let work: Task<Void, Never>
     let timeout: Task<Void, Never>
+    /// injector の呼び出しを始めたか。始める前のパネル消滅は「開く」の押下によるものではない。
+    var hasStarted = false
+    /// 注入中にパネルの消滅を受けたか。
+    var isPanelGone = false
+
+    /// パネルが消えても注入を続け、結果を待つか。
+    var shouldAwaitResultAfterPanelGone: Bool {
+        isAutoConfirm && hasStarted
+    }
 
     func cancel() {
         work.cancel()
