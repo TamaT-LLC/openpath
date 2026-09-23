@@ -7,8 +7,9 @@ import OpenPathCore
 ///
 /// - `NSWorkspace.didActivateApplicationNotification` で最前面アプリの切り替えを追い、AXObserver を張り替える
 /// - AXObserver の通知（ウィンドウ生成・要素破棄・フォーカスウィンドウ変更）と、AppCoordinator が Idle の間の
-///   200ms 間隔の補助ポーリングでウィンドウを走査し、`detectPanel` でパネルかどうかを判定する
-/// - パネルの出現・消滅は `onEvent` に `CoordinatorEvent.panelAppeared` / `.panelGone` として渡す
+///   200ms 間隔の補助ポーリングでウィンドウを走査し、`detector` でパネルかどうかを判定する
+/// - パネルの出現・消滅は `onEvent` に `CoordinatorEvent.panelAppeared` / `.panelGone` として渡し、ログにも残す
+///   （`panel detected` はスモークテストとレイテンシ計測に使う。TST-001 §4）
 ///
 /// どのアプリに張り付くか、ポーリングの開始・停止、重複通知の抑止は OpenPathCore の `PanelWatchPolicy` で決める。
 /// このクラスはそれを NSWorkspace と AX に接続するだけにしている。
@@ -20,9 +21,6 @@ import OpenPathCore
 /// ```
 @MainActor
 public final class PanelWatcher {
-    /// パネル判定（#18）を差し込むまでの既定。常にパネルなしとする。
-    public nonisolated static let noPanelDetector: PanelDetector = { _ in nil }
-
     /// パネルの出現・消滅。MainActor で呼ばれる。
     /// この中から同期的に `coordinatorStateDidChange(_:)` が呼ばれても、現在の処理を終えてから順に反映する。
     public var onEvent: ((CoordinatorEvent) -> Void)?
@@ -39,16 +37,16 @@ public final class PanelWatcher {
 
     /// 生成しただけでは監視しない。アクセシビリティ権限を確認してから `start()` を呼ぶこと（DSN-001 §6）。
     /// - Parameters:
-    ///   - detectPanel: パネル判定。axQueue で呼ばれる。
+    ///   - detector: パネル判定。axQueue で呼ばれる。既定は NSOpenPanel の判定（DSN-001 §2.2）。
     ///   - isAppDisabled: bundle id が設定 `disabled_apps` に含まれるか。MainActor で、アプリの切り替えのたびに呼ぶ。
     ///   - workspace: 最前面アプリの取得と通知の購読に使う。
     public init(
-        detectPanel: @escaping PanelDetector = PanelWatcher.noPanelDetector,
+        detector: any PanelDetecting = OpenPanelDetector(),
         isAppDisabled: @escaping (String) -> Bool = { _ in false },
         workspace: NSWorkspace = .shared
     ) {
         self.workspace = workspace
-        let environment = AXPanelWatchEnvironment(detectPanel: detectPanel)
+        let environment = AXPanelWatchEnvironment(detector: detector)
         let engine = PanelWatchEngine(
             ownProcessID: ProcessInfo.processInfo.processIdentifier,
             environment: environment,
@@ -63,6 +61,7 @@ public final class PanelWatcher {
         self.environment = environment
         self.engine = engine
         engine.onEvent = { [weak self] event in
+            Self.log(event)
             self?.onEvent?(event)
         }
     }
@@ -139,6 +138,20 @@ public final class PanelWatcher {
 
     private nonisolated static func runningApplication(in notification: Notification) -> NSRunningApplication? {
         notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+    }
+
+    // MARK: - ログ
+
+    /// 検知の時刻はログのタイムスタンプ（ミリ秒）で分かる。パスは含まない。
+    private static func log(_ event: CoordinatorEvent) {
+        switch event {
+        case .panelAppeared(let panel):
+            Log.info("panel detected (id: \(panel.id.rawValue), directoriesOnly: \(panel.isDirectoriesOnly))")
+        case .panelGone:
+            Log.info("panel gone")
+        case .confirm, .escape, .hotkey:
+            break
+        }
     }
 }
 

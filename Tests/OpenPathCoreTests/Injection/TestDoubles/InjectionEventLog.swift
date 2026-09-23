@@ -14,6 +14,20 @@ final class InjectionEventLog {
         /// ペーストボードへの書き込み（パスの書き込みと、元の内容への復元）
         case pasteboardWrite(PasteboardSnapshot)
         case didSubmitGoToSheet(autoConfirm: Bool)
+        /// 注入先を記録した
+        case captureTarget
+        /// 注入先がまだ有効か確かめた（TargetGuardFake.logsChecks のときだけ記録する）
+        case targetCheck
+        /// 副方式: 移動先シートの入力欄を探した
+        case lookUpGoToField
+        /// auto_confirm: 「開く」ボタンを探した
+        case lookUpOpenButton
+        /// パネル内の要素に kAXValue をセットした
+        case setValue(element: String, value: String)
+        /// パネル内の要素を AXPress した
+        case press(element: String)
+        /// パネル内の要素に kAXConfirmAction を送った
+        case confirmField(element: String)
     }
 
     struct Entry: Equatable {
