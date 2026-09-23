@@ -47,6 +47,53 @@ swift run openpath   # 起動。Dock には出ず、メニューバーにアイ�
 - Command Line Tools のみの環境では、素の `swift test` は `no such module 'Testing'` で失敗します。SwiftPM が CLT 同梱の Swift Testing を見つけられないためで、`scripts/test.sh` が必要なフラグを補ってから `swift test` を実行します。引数はそのまま `swift test` に渡せます（例: `./scripts/test.sh --filter AppInfo`）。
 - `Resources/Info.plist` は実行ファイルに埋め込まれます。SwiftPM は Info.plist の変更を検知しないため、編集後は `swift package clean` してからビルドしてください。
 
+### .app バンドルのビルドと署名
+
+`swift build` の成果物は実行ファイル単体です。常用や配布には `scripts/` のスクリプトで `.app` バンドルを組み立てて署名します。どのスクリプトも Command Line Tools だけで動きます。
+
+```bash
+./scripts/build.sh        # リリースビルド → build/openpath.app（Universal 2）
+./scripts/sign.sh         # 署名。OPENPATH_SIGN_IDENTITY が未設定なら ad-hoc 署名
+open build/openpath.app   # Dock には出ず、メニューバーに常駐する
+```
+
+| スクリプト | 内容 | 環境変数 |
+| --- | --- | --- |
+| `build.sh [--arch universal\|arm64\|x86_64] [--version X.Y.Z]` | `swift build -c release` をアーキテクチャごとに実行して lipo で結合し、`build/openpath.app` を組み立てる | なし |
+| `sign.sh` | Hardened Runtime と `Resources/openpath.entitlements` を付けて署名し、`codesign --verify --deep --strict` で検証する | `OPENPATH_SIGN_IDENTITY`（任意） |
+| `notarize.sh` | zip にして `notarytool submit --wait` → `stapler staple` → `spctl -a -vv` を行い、staple 済みの `build/openpath-<version>.zip` を作る | `OPENPATH_NOTARY_PROFILE`（必須） |
+| `cask.sh [--version X.Y.Z] [--zip PATH] [--output FILE]` | 配布用 zip の sha256 から Homebrew cask 定義を生成する（既定は標準出力） | なし |
+| `release.sh [--version X.Y.Z]` | build → sign → notarize → cask を順に実行し、`build/openpath-<version>.zip` と `build/Casks/openpath.rb` を作る | 上の 2 つとも必須 |
+
+`.app` から起動すると `Bundle.main.bundleURL` が `.app` を指すため、`swift run` では不安定な次の 2 点が安定します。
+
+- メニューの「ログイン時に起動」: `SMAppService.mainApp` は `.app` を登録する仕組みのため、バンドル外（`swift run` 等）では項目を選べません。`.app` から起動すると使えます。
+- アクセシビリティ権限（TCC）: `.app` として起動すると、権限は openpath 自身（bundle id とコード署名）に対して付与されます。ターミナルから `swift run` した場合は、ターミナルアプリ側の権限として扱われることがあります。
+  - ad-hoc 署名では署名の要件（cdhash）が再ビルドのたびに変わります。再ビルド後は「システム設定 → プライバシーとセキュリティ → アクセシビリティ」で openpath をいったん削除して追加し直してください。Developer ID で署名すると要件が bundle id と Team ID になるため、更新しても権限はそのまま残ります。
+
+補足:
+
+- Universal 2: Command Line Tools だけの環境では `swift build --arch arm64 --arch x86_64` が XCBuild（Xcode 同梱）を要求して失敗します。そのため `build.sh` はアーキテクチャごとにビルドしてから lipo で結合します。
+- バージョン: 正本は `Resources/Info.plist` の `CFBundleShortVersionString` で、スクリプトは書き換えません。上げるときは `Resources/Info.plist` と `Sources/OpenPathCore/AppInfo.swift` を一緒に更新してください（不一致はテストで検出されます）。`build.sh --version` と `release.sh` は、指定値や `vX.Y.Z` タグが Info.plist と一致しなければ止まります。
+- `build.sh` は毎回リンクをやり直し、埋め込まれた Info.plist が `Resources/Info.plist` と一致するかを検証します。このため `swift package clean` は不要です。
+
+### 配布（Developer ID 署名・Notarization・Homebrew cask）
+
+リリース担当者向けの手順です。Apple ID・パスワード・Team ID・証明書はスクリプトにもリポジトリにも書かず、keychain と環境変数で渡します。
+
+```bash
+# Developer ID Application 証明書を keychain に入れておく
+security find-identity -v -p codesigning        # 証明書の名前か SHA-1 を確認
+export OPENPATH_SIGN_IDENTITY="Developer ID Application: <名前> (<Team ID>)"
+
+xcrun notarytool store-credentials <profile>    # Apple ID・Team ID・App 用パスワードを対話的に keychain へ保存
+export OPENPATH_NOTARY_PROFILE=<profile>
+
+./scripts/release.sh                            # HEAD の vX.Y.Z タグ（無ければ Info.plist）のバージョンで作る
+```
+
+できた `build/openpath-<version>.zip` を `gh release create v<version> build/openpath-<version>.zip` で GitHub Releases に添付し、`build/Casks/openpath.rb` を tap リポジトリの `Casks/openpath.rb` にコピーします。cask の URL は `https://github.com/TamaT-LLC/openpath/releases/download/v#{version}/openpath-#{version}.zip` を前提にしています。
+
 ## 予定している技術スタック
 
 - Swift 6.0+ ツールチェーン / SwiftUI + AppKit
