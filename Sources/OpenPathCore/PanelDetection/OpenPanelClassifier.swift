@@ -12,7 +12,7 @@ public enum OpenPanelVerdict: Equatable, Sendable {
 /// パネルの中で見つけたファイル一覧の要素。
 public struct FileListElement<Node> {
     public let node: Node
-    /// `OpenPanelCriteria.fileListRoles` のいずれか。
+    /// `OpenPanelCriteria.fileListRoles` のいずれか、またはアイコン表示の `OpenPanelCriteria.collectionListRole`（AXList）。
     public let role: String
 
     public init(node: Node, role: String) {
@@ -39,7 +39,8 @@ extension OpenPanelClassification: Equatable where Node: Equatable {}
 public enum OpenPanelClassifier {
     /// candidate の子孫を幅優先で調べる。
     ///
-    /// AX の往復を減らすため、ロールは 1 要素につき 1 回だけ読み、タイトルはボタンと入力欄、説明は入力欄にだけ読む。
+    /// AX の往復を減らすため、ロールは 1 要素につき 1 回だけ読み、タイトルはボタンと入力欄、説明は入力欄、
+    /// サブロールは AXList（アイコン表示のファイル一覧か見分ける）にだけ読む。
     /// ファイル一覧など `OpenPanelCriteria.prunedRoles` の要素の中へは降りない。保存パネルと分かった時点で以降の読み取りをやめる。
     /// - Parameters:
     ///   - candidate: パネルの候補。条件 1（ロール・サブロール）は呼び出し側で確かめておくこと。
@@ -109,7 +110,9 @@ public enum OpenPanelClassifier {
         case OpenPanelCriteria.textFieldRole:
             findings.isSavePanel = try isSaveField(element.node, reader: reader)
         default:
-            if OpenPanelCriteria.fileListRoles.contains(role) {
+            // サブロールで見分けるのはアイコン表示（AXList）だけなので、それ以外の要素ではサブロールを読まない
+            let subrole = role == OpenPanelCriteria.collectionListRole ? try reader.subrole(of: element.node) : nil
+            if OpenPanelCriteria.isFileList(role: role, subrole: subrole) {
                 findings.fileList = FileListElement(node: element.node, role: role)
             }
         }
