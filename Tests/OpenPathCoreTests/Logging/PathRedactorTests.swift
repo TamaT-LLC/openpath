@@ -2,6 +2,8 @@ import Testing
 
 @testable import OpenPathCore
 
+/// パスの開始を検出したら、その位置からメッセージの末尾までを伏せる。
+/// パスの終端は判別できないため、後続の文脈が失われることは許容する。
 @Suite("PathRedactor")
 struct PathRedactorTests {
     @Test(
@@ -9,10 +11,10 @@ struct PathRedactorTests {
         arguments: [
             ("/Users/alice/project", "<path>"),
             ("opened /Users/alice/project", "opened <path>"),
+            ("opened /Users/alice/project in 12ms", "opened <path>"),
             ("url=file:///tmp/a", "url=<path>"),
             ("root:/Users/alice", "root:<path>"),
             ("パス/Users/alice を開いた", "パス<path>"),
-            // 後続がパスの続きか通常の文かは判別できないため、2 つ目のパスも含めて末尾まで伏せる
             ("/a, /b", "<path>"),
         ]
     )
@@ -40,23 +42,22 @@ struct PathRedactorTests {
     }
 
     @Test(
-        "引用符・括弧で囲まれたパスは閉じ記号の直前までを伏せ、後続の文を残す",
+        "引用符・括弧で囲まれたパスも閉じ記号で打ち切らず、末尾まで伏せる",
         arguments: [
-            ("\"/Users/alice\"", "\"<path>\""),
-            ("(/a)(/b)", "(<path>)(<path>)"),
-            ("opened \"/Users/alice/My File.txt\" in 12ms", "opened \"<path>\" in 12ms"),
-            // 英数字が続くアポストロフィは閉じ記号とみなさない
-            ("opened '/Users/alice/Bob's Notes.txt' in 12ms", "opened '<path>' in 12ms"),
-            ("opened `~/My Projects/app` in 12ms", "opened `<path>` in 12ms"),
-            ("opened (/Users/alice/My Docs) in 12ms", "opened (<path>) in 12ms"),
-            ("opened [file:///Users/alice/My Docs] in 12ms", "opened [<path>] in 12ms"),
-            ("opened “/Users/alice/My Docs” in 12ms", "opened “<path>” in 12ms"),
-            ("「/Users/alice/My Docs」を開いた", "「<path>」を開いた"),
-            // 閉じ記号が無ければ末尾まで伏せる
-            ("opened \"/Users/alice/My File.txt", "opened \"<path>"),
+            // 閉じ記号はファイル名の一部にもなり得るため、終端とみなさない
+            ("opened \"/Users/alice/report\".secret\" in 12ms", "opened \"<path>"),
+            ("\"/Users/alice\"", "\"<path>"),
+            ("(/a)(/b)", "(<path>"),
+            ("opened \"/Users/alice/My File.txt\" in 12ms", "opened \"<path>"),
+            ("opened '/Users/alice/Bob's Notes.txt' in 12ms", "opened '<path>"),
+            ("opened `~/My Projects/app` in 12ms", "opened `<path>"),
+            ("opened (/Users/alice/My Docs) in 12ms", "opened (<path>"),
+            ("opened [file:///Users/alice/My Docs] in 12ms", "opened [<path>"),
+            ("opened “/Users/alice/My Docs” in 12ms", "opened “<path>"),
+            ("「/Users/alice/My Docs」を開いた", "「<path>"),
         ]
     )
-    func redactsQuotedPaths(message: String, expected: String) {
+    func redactsQuotedPathsToEndOfMessage(message: String, expected: String) {
         #expect(PathRedactor.redact(message) == expected)
     }
 

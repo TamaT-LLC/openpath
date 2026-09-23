@@ -6,9 +6,6 @@ import Testing
 
 @Suite("OSLogSink")
 struct OSLogSinkTests {
-    /// テストの出力をアプリ本体の統合ログと区別するためのサブシステム。
-    private static let testSubsystem = "\(AppInfo.bundleIdentifier).tests"
-
     @Test("LogLevel を統合ログのレベルに対応付ける")
     func mapsLevelToOSLogType() {
         #expect(OSLogSink.osLogType(for: .debug) == .debug)
@@ -29,7 +26,7 @@ struct OSLogSinkTests {
 
     @Test("全レベル・パス付きのエントリを書き込んでもクラッシュしない")
     func writesAllKindsOfEntries() {
-        let sink = OSLogSink(subsystem: Self.testSubsystem)
+        let sink = OSLogSink(subsystem: testOSLogSubsystem)
 
         for level in LogLevel.allCases {
             sink.write(LogEntry(date: fixedDate, level: level, message: "os log sink test"))

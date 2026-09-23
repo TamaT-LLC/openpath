@@ -21,6 +21,7 @@ func readLogLines(at url: URL) throws -> [String] {
 }
 
 /// 受け取ったエントリと flush 回数を記録するテスト用シンク。
+/// `forwardingTo` を指定すると、記録した上で実際のシンクにも渡す（出力を観測できないシンクへの入力を検証するため）。
 final class SpyLogSink: LogSink {
     private struct State {
         var entries: [LogEntry] = []
@@ -28,18 +29,28 @@ final class SpyLogSink: LogSink {
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
+    private let forwardTarget: (any LogSink)?
 
     var entries: [LogEntry] { state.withLock { $0.entries } }
     var flushCount: Int { state.withLock { $0.flushCount } }
 
+    init(forwardingTo forwardTarget: (any LogSink)? = nil) {
+        self.forwardTarget = forwardTarget
+    }
+
     func write(_ entry: LogEntry) {
         state.withLock { $0.entries.append(entry) }
+        forwardTarget?.write(entry)
     }
 
     func flush() {
         state.withLock { $0.flushCount += 1 }
+        forwardTarget?.flush()
     }
 }
+
+/// テストの出力をアプリ本体の統合ログと区別するためのサブシステム。
+let testOSLogSubsystem = "\(AppInfo.bundleIdentifier).tests"
 
 /// `FileLogSink` の書き込み失敗通知の回数を記録する。
 final class FailureRecorder: Sendable {

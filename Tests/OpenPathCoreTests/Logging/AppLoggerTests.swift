@@ -97,14 +97,38 @@ struct AppLoggerTests {
         #expect(spy.entries.map(\.message) == ["opened <path>"])
     }
 
-    @Test("空白を含むパスも断片を残さずにシンクへ渡す（NFR-05）", arguments: [LogLevel.info, .warning, .error])
-    func redactsPathsContainingSpaces(level: LogLevel) {
-        let spy = SpyLogSink()
-        let logger = Self.makeLogger(minimumLevel: .debug, sinks: [spy])
+    @Test(
+        "空白や閉じ記号を含むパスの断片が OSLogSink・FileLogSink のどちらにも渡らない（NFR-05）",
+        arguments: [
+            ("opened \"/Users/alice/report\".secret\" in 12ms", "opened \"<path>"),
+            ("opened /Users/alice/My Documents/secret.txt", "opened <path>"),
+            ("opened '/Users/alice/Bob's secret.txt' in 12ms", "opened '<path>"),
+        ]
+    )
+    func sinksNeverReceivePathFragments(message: String, expected: String) throws {
+        try withTemporaryDirectory { directory in
+            let configuration = LogConfiguration(directory: directory, minimumLevel: .info)
+            // 統合ログの出力は観測できないため、OSLogSink に渡る内容を記録してから転送する
+            let osLogInput = SpyLogSink(forwardingTo: OSLogSink(subsystem: testOSLogSubsystem))
+            let logger = AppLogger(
+                minimumLevel: configuration.minimumLevel,
+                sinks: [osLogInput, FileLogSink(configuration: configuration)]
+            )
 
-        logger.log(level, "opened /Users/alice/My Documents/secret.txt")
+            logger.info(message)
+            logger.warning(message)
+            logger.error(message)
+            logger.flush()
 
-        #expect(spy.entries.map(\.message) == ["opened <path>"])
+            let fileContents = try String(contentsOf: configuration.fileURL, encoding: .utf8)
+            let fileMessages = try readLogLines(at: configuration.fileURL).map { line in
+                line.split(separator: "] ", maxSplits: 1).last.map(String.init) ?? line
+            }
+            #expect(osLogInput.entries.map(\.message) == [expected, expected, expected])
+            #expect(fileMessages == [expected, expected, expected])
+            #expect(!fileContents.contains("alice"))
+            #expect(!fileContents.contains("secret"))
+        }
     }
 
     @Test("debug のメッセージは伏せ字にしない")

@@ -10,8 +10,8 @@ import os
 /// - パス（ファイル・ディレクトリの場所や file URL）は必ず `debugPath(_:path:)` で記録する。
 /// - `info` / `warning` / `error` のメッセージにはパスを含めない。これらのメッセージは統合ログで公開扱いになる。
 ///   ファイル名や、それを含み得る文字列（`Error.localizedDescription` など）も含めない。
-/// - 契約違反への安全網として、info 以上のメッセージでパスを検出すると、その位置から末尾まで
-///   （引用符・括弧で囲まれていれば閉じ記号の直前まで）を `<path>` に置き換える。
+/// - 契約違反への安全網として、info 以上のメッセージでパスの開始を検出すると、その位置からメッセージの末尾までを
+///   `<path>` に置き換える。パスの終端は判別できないため、引用符や括弧で囲んでいても後続の文脈は失われる。
 ///   検出はヒューリスティックで相対パスやファイル名は拾えないため、この安全網を前提にしないこと。
 public enum Log {
     private static let current = OSAllocatedUnfairLock(initialState: AppLogger(configuration: LogConfiguration()))
