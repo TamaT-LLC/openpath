@@ -217,6 +217,29 @@ struct HistoryStoreTests {
         #expect(persistence.saveAttempts == [[]])
     }
 
+    @Test("clear は保存できたかを返す。失敗してもメモリ上は空にし、次の保存で保存し直す")
+    func clearReportsSaveFailure() {
+        let persistence = HistoryPersistenceSpy(loadResult: .loaded([
+            HistoryEntry(path: "/a", count: 5, lastUsed: F.ago(F.oneDay)),
+        ]))
+        let store = makeStore(persistence: persistence)
+        persistence.remainingSaveFailures = 1
+
+        let isSaved = store.clear()
+        store.flush()
+
+        #expect(isSaved == false)
+        #expect(store.entries.isEmpty)
+        #expect(persistence.saveAttempts == [[], []])
+    }
+
+    @Test("clear は保存できたら true を返す")
+    func clearReportsSaveSuccess() {
+        let store = makeStore(persistence: HistoryPersistenceSpy())
+
+        #expect(store.clear())
+    }
+
     @Test("clear の前に保留していたデバウンス保存は行わない")
     func clearCancelsPendingSave() async {
         let persistence = HistoryPersistenceSpy()

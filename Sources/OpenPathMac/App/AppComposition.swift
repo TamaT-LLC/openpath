@@ -7,26 +7,50 @@ import OpenPathCore
 /// - 起動・終了の順番と、アクセシビリティ権限によるパネルの監視の開始・停止: OpenPathCore の `AppLifecycle`
 /// - 権限の変化の監視（`AccessibilityPermissionMonitor`）と、メニューバー（`StatusItemController`）はここで持つ。
 ///   監視の通知先は 1 つしか持てないため、AppLifecycle とメニューバーの両方へここで振り分ける。
+/// - メニューの操作（有効・候補を再構築・履歴をクリア）、設定エラーのバッジ（`ConfigStore.lastError`）、
+///   自動確定の後のクリップボードの復元失敗のバッジをメニューバーへつなぐ。
 @MainActor
 public final class AppComposition {
     private let services: AppServices
     private let lifecycle: AppLifecycle
     private let permissionMonitor: AccessibilityPermissionMonitor
     private let statusItemController: StatusItemController
+    private let configErrorObservation: ObservationRelay<ConfigStoreError?>
     private var launchTask: Task<Void, Never>?
 
     public init() {
         let services = AppServices()
         let permissionMonitor = AccessibilityPermissionMonitor()
-        self.services = services
-        self.permissionMonitor = permissionMonitor
-        lifecycle = AppLifecycle(services: services, permission: permissionMonitor.status)
-        statusItemController = StatusItemController(
+        let lifecycle = AppLifecycle(services: services, permission: permissionMonitor.status)
+        let statusItemController = StatusItemController(
             configFileURL: services.configStore.fileURL,
+            actions: StatusMenuActions(
+                // 「有効」は起動のたびに有効から始める（設定ファイルには書き戻さない）
+                setEnabled: { isEnabled in lifecycle.setEnabled(isEnabled) },
+                rebuildCandidates: { services.rebuildCandidates() },
+                clearHistory: {
+                    // 保存できないまま終了すると次の起動で元の履歴に戻るため、ログだけでなく利用者に知らせる
+                    guard !services.clearHistory() else { return }
+                    StatusItemAlert.run(.clearHistoryFailure)
+                }
+            ),
             accessibilityPermission: permissionMonitor.status
         )
+        let configStore = services.configStore
+        self.services = services
+        self.permissionMonitor = permissionMonitor
+        self.lifecycle = lifecycle
+        self.statusItemController = statusItemController
+        configErrorObservation = ObservationRelay(read: { configStore.lastError }) { [weak statusItemController] error in
+            statusItemController?.setConfigError(error)
+        }
         permissionMonitor.onChange = { [weak self] status in
             self?.permissionDidChange(status)
+        }
+        services.onErrorOutsidePalette = { [weak statusItemController] error in
+            guard error == .pasteboardRestoreFailed else { return }
+            Log.warning("自動確定の後にクリップボードを元に戻せませんでした")
+            statusItemController?.showClipboardRestoreFailure()
         }
     }
 
@@ -44,6 +68,7 @@ public final class AppComposition {
     /// ログの書き出し（`Log.flush()`）は呼び出し側で最後に行う。
     public func stop() {
         permissionMonitor.stop()
+        configErrorObservation.cancel()
         lifecycle.terminate()
     }
 

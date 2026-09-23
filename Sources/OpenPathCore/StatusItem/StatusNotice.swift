@@ -6,6 +6,8 @@ public struct StatusNotice: Sendable, Equatable {
         case accessibilityPermissionMissing
         /// 設定ファイルを読み込めず、直前の有効な設定（または既定値）で動いている
         case configError
+        /// 自動確定でパネルとパレットが閉じた後、注入に使ったクリップボードを元の内容へ戻せなかった
+        case clipboardRestoreFailed
     }
 
     public let kind: Kind
@@ -19,6 +21,13 @@ public struct StatusNotice: Sendable, Equatable {
         title: StatusMenuText.permissionMissingTitle,
         detail: StatusMenuText.permissionMissingDetail,
         command: .openAccessibilitySettings
+    )
+
+    static let clipboardRestoreFailed = StatusNotice(
+        kind: .clipboardRestoreFailed,
+        title: StatusMenuText.clipboardRestoreFailedTitle,
+        detail: StatusMenuText.clipboardRestoreFailedDetail,
+        command: .dismissClipboardNotice
     )
 
     static func configError(_ error: ConfigStoreError) -> StatusNotice {

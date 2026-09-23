@@ -86,6 +86,12 @@ public final class StatusItemController: NSObject {
         input.configError = error
     }
 
+    /// 自動確定の後にクリップボードを元へ戻せなかったことを、バッジとメニューの通知で知らせる。
+    /// パネルとパレットは閉じているため、ここでしか伝えられない。通知を選ぶと消える
+    public func showClipboardRestoreFailure() {
+        input.hasClipboardRestoreFailure = true
+    }
+
     /// ログイン時に起動の状態を読み直す
     public func refreshLoginItemStatus() {
         input.loginItemStatus = loginItem.status
@@ -140,6 +146,8 @@ public final class StatusItemController: NSObject {
             actions.openAccessibilitySettings()
         case .quit:
             actions.quit()
+        case .dismissClipboardNotice:
+            input.hasClipboardRestoreFailure = false
         }
     }
 

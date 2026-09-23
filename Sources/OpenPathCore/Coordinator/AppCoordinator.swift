@@ -16,6 +16,11 @@ public final class AppCoordinator {
     /// 通知の途中で状態が変わらないよう、この中から `handle(_:)` を同期的に呼ばないこと。
     public var onStateChange: (@MainActor (CoordinatorState) -> Void)?
 
+    /// パレットを閉じた後に分かった注入のエラーのうち、利用者が気づくべきものを伝える。
+    /// 自動確定では「開く」でパネルが閉じ、パレットも閉じるため、クリップボードを元に戻せなかったこと
+    /// （`InjectionError.pasteboardRestoreFailed`）をパレットでは伝えられない。メニューバーのバッジ等で知らせる。
+    public var onErrorOutsidePalette: (@MainActor (InjectionError) -> Void)?
+
     private let palette: any PaletteDisplaying
     private let injector: any PathInjecting
     private let history: any HistoryRecording
@@ -28,6 +33,11 @@ public final class AppCoordinator {
     /// Enter（「開く」）を押して確定するため（UX-001 §2）、再通知でパレットを出し直してキー入力を奪わないよう無視する。
     /// ホットキーは明示的な再表示（UX-001 §4）なので、このパネルのパレットを出す。
     private var injectedPanel: PanelContext?
+    /// 自動確定の注入がクリップボードの復元失敗で終わった後、まだパネルの消滅を受けていない確定。PanelShown 中だけ持つ。
+    /// 「開く」でパネルが閉じても、PanelWatcher の panelGone は注入の結果より遅れて届くことがある。
+    /// そのまま panelGone が届いたら、パネルの消滅を根拠に履歴に残し、閉じるパレットの代わりにパレットの外へ知らせる。
+    /// 利用者がパレットを操作したら（Esc・再試行・再表示）、パネルの消滅は「開く」によるものとみなさない。
+    private var pendingRestoreFailure: PendingRestoreFailure?
 
     /// - Parameters:
     ///   - isAutoConfirmEnabled: 設定 auto_confirm。設定ファイルの変更を反映するため confirm のたびに読む。
@@ -52,6 +62,8 @@ public final class AppCoordinator {
             panelAppeared(context)
         case .panelGone:
             panelGone()
+        case .panelContextChanged(let context):
+            panelContextChanged(context)
         case .confirm(let path, let openImmediately):
             confirm(path: path, openImmediately: openImmediately)
         case .escape:
@@ -84,9 +96,14 @@ public final class AppCoordinator {
             injectedPanel = nil
             // タイムアウトで Idle に戻った後もエラー表示のパレットが残り得るため、閉じておく
             palette.hide()
-        case .panelShown:
+        case .panelShown(let context, _):
+            let restoreFailure = pendingRestoreFailure
+            pendingRestoreFailure = nil
             state = .idle
             palette.hide()
+            guard let restoreFailure, restoreFailure.panelID == context.id else { return }
+            history.record(path: restoreFailure.path)
+            onErrorOutsidePalette?(.pasteboardRestoreFailed)
         case .injecting:
             guard activeInjection?.shouldAwaitResultAfterPanelGone == true else {
                 cancelActiveInjection()
@@ -102,6 +119,27 @@ public final class AppCoordinator {
         }
     }
 
+    /// 追跡中のパネルの情報を差し替える。パレットの表示中はパレットにも知らせ、
+    /// それ以外（Esc で閉じた間・注入中・注入の成功後）は、次にパレットを出すときに使う。
+    private func panelContextChanged(_ context: PanelContext) {
+        switch state {
+        case .idle:
+            guard injectedPanel?.id == context.id else { return }
+            injectedPanel = context
+        case .panelShown(let current, let isPaletteVisible):
+            guard current.id == context.id else { return }
+            state = .panelShown(context, isPaletteVisible: isPaletteVisible)
+            if isPaletteVisible {
+                palette.update(context: context)
+            }
+        case .injecting(let current, let path):
+            guard current.id == context.id else { return }
+            state = .injecting(context, path: path)
+            // 注入中もパレットは表示したまま。失敗して PanelShown に戻ったときに新しい情報で候補を引けるよう伝えておく
+            palette.update(context: context)
+        }
+    }
+
     private func confirm(path: String, openImmediately: Bool) {
         guard case .panelShown(let context, isPaletteVisible: true) = state, !path.isEmpty else { return }
         startInjection(context: context, path: path, autoConfirm: openImmediately || isAutoConfirmEnabled())
@@ -113,6 +151,7 @@ public final class AppCoordinator {
             // タイムアウト後に残ったエラー表示のパレットを閉じられるようにする
             palette.hide()
         case .panelShown(let context, isPaletteVisible: true):
+            pendingRestoreFailure = nil
             state = .panelShown(context, isPaletteVisible: false)
             palette.hide()
         case .panelShown(_, isPaletteVisible: false), .injecting:
@@ -135,6 +174,7 @@ public final class AppCoordinator {
 
     private func showPalette(for context: PanelContext) {
         injectedPanel = nil
+        pendingRestoreFailure = nil
         state = .panelShown(context, isPaletteVisible: true)
         palette.show(context: context)
     }
@@ -142,6 +182,7 @@ public final class AppCoordinator {
     // MARK: - 注入
 
     private func startInjection(context: PanelContext, path: String, autoConfirm: Bool) {
+        pendingRestoreFailure = nil
         let injectionID = nextInjectionID
         nextInjectionID += 1
         activeInjection = ActiveInjection(
@@ -219,6 +260,9 @@ public final class AppCoordinator {
         case .failed(let error):
             // 失敗はパレットを残し、そのまま再試行できるようにする（UX-001 §5）
             state = .panelShown(context, isPaletteVisible: true)
+            if injection.isAutoConfirm, error as? InjectionError == .pasteboardRestoreFailed {
+                pendingRestoreFailure = PendingRestoreFailure(panelID: context.id, path: path)
+            }
             palette.setLocked(false)
             palette.showError((error as? InjectionError)?.userMessage ?? PaletteMessage.injectionFailed)
         case .timedOut:
@@ -233,11 +277,15 @@ public final class AppCoordinator {
         state = .idle
         palette.setLocked(false)
         switch outcome {
-        case .succeeded, .failed(InjectionError.panelGone), .failed(InjectionError.pasteboardRestoreFailed):
+        case .succeeded, .failed(InjectionError.panelGone):
             // 「開く」の押下でパネルが閉じたとみなす。押下まで進んだかは Coordinator からは分からないため、
-            // injector がパネルの消滅（panelGone）で終えた場合と、元の結果より優先して伝えられる
-            // ペーストボードの復元失敗で終えた場合も、パネルの消滅を根拠に成功として扱う
+            // injector がパネルの消滅（panelGone）で終えた場合も、パネルの消滅を根拠に成功として扱う
             history.record(path: path)
+        case .failed(InjectionError.pasteboardRestoreFailed):
+            // 元の結果より優先して伝えられるペーストボードの復元失敗も、パネルの消滅を根拠に成功として扱う。
+            // クリップボードが失われたことはパレットで伝えられないため、外へ知らせる
+            history.record(path: path)
+            onErrorOutsidePalette?(.pasteboardRestoreFailed)
         case .failed, .timedOut:
             return
         }
@@ -247,6 +295,12 @@ public final class AppCoordinator {
         activeInjection?.cancel()
         activeInjection = nil
     }
+}
+
+/// パネルの消滅を待っている、自動確定のクリップボードの復元失敗。
+private struct PendingRestoreFailure {
+    let panelID: PanelContext.ID
+    let path: String
 }
 
 private enum InjectionOutcome {

@@ -18,6 +18,7 @@ public protocol AppLifecycleServices: AnyObject {
 /// - 起動: 設定の読み込み → 候補の構築 → パネルの監視 → ホットキー。
 ///   パネルの監視はアクセシビリティ権限があるときだけ始め、権限の付与・取り消しに合わせて始める・止める。
 ///   権限が無いまま AX を呼んでも失敗するだけで、パレットを出せないため（UX-001 §5）。
+/// - 有効・無効（メニューの「有効」）: 無効の間はパネルの監視とホットキーを止める。候補の構築は続け、有効に戻したらすぐ使えるようにする。
 /// - 終了: パネルの監視 → ホットキーを止めてから終了処理をする。設定の読み込み中に終了した場合は、読み込み後に何も始めない。
 ///
 /// 各モジュールへの呼び出しは状態が変わったときだけ行い、同じ開始・停止を重ねない。
@@ -34,6 +35,8 @@ public final class AppLifecycle {
     public private(set) var phase = Phase.notLaunched
     /// 最後に知らされたアクセシビリティ権限の状態
     public private(set) var permission: AccessibilityPermissionStatus
+    /// メニューの「有効」。起動のたびに有効から始める
+    public private(set) var isEnabled = true
     /// パネルを監視中か
     public private(set) var isPanelWatching = false
     /// ホットキーを登録中か
@@ -51,11 +54,11 @@ public final class AppLifecycle {
     }
 
     private var shouldWatchPanels: Bool {
-        phase == .running && permission.isGranted
+        phase == .running && isEnabled && permission.isGranted
     }
 
     private var shouldRegisterHotkey: Bool {
-        phase == .running
+        phase == .running && isEnabled
     }
 
     /// 起動する。設定の読み込みを待ってから、候補の構築・パネルの監視・ホットキーを始める。2 回目以降は何もしない。
@@ -76,6 +79,13 @@ public final class AppLifecycle {
         guard phase != .terminated, newPermission != permission else { return }
         permission = newPermission
         Log.info(newPermission.isGranted ? "アクセシビリティ権限が付与されました" : "アクセシビリティ権限が取り消されました")
+        reconcile()
+    }
+
+    /// メニューの「有効」の切り替えを反映する。無効の間はパネルの監視とホットキーを止める。
+    public func setEnabled(_ newValue: Bool) {
+        guard phase != .terminated, newValue != isEnabled else { return }
+        isEnabled = newValue
         reconcile()
     }
 

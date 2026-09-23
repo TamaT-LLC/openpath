@@ -61,10 +61,14 @@ public final class HistoryStore: HistoryRecording {
 
     /// 履歴を空にして即座に保存する。
     /// 利用者が明示的に消した履歴が、直後の異常終了でディスクに残らないようデバウンスしない。
-    public func clear() {
+    /// - Returns: 保存できたら true。失敗してもメモリ上の履歴は空のままで、次の記録や `flush()` で保存し直す。
+    ///   保存できないまま終了すると次の起動で元の履歴に戻るため、呼び出し側で利用者に知らせる。
+    @discardableResult
+    public func clear() -> Bool {
         list = HistoryList()
         hasUnsavedChanges = true
         flush()
+        return !hasUnsavedChanges
     }
 
     /// 保留中の変更があれば即座に保存する。アプリ終了時に呼ぶ。

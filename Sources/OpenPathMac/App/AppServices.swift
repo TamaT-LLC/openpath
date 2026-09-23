@@ -7,7 +7,7 @@ import OpenPathCore
 /// - AppCoordinator → パレット（PalettePresenter）→ CandidateIndex（検索語ごとの候補）
 /// - パレットの確定 → AppCoordinator → PanelInjector → 履歴（HistoryStore）→ 候補の履歴の取り直し
 /// - グローバルホットキー → AppCoordinator（パレットの再表示）
-/// - ConfigStore の変更 → 候補の再構築（CandidateIndexRebuilder）・ホットキーの差し替え
+/// - ConfigStore の変更 → 候補の再構築（CandidateIndexRebuilder）・ホットキーの差し替え・disabled_apps の判定し直し
 @MainActor
 final class AppServices {
     let configStore: ConfigStore
@@ -19,8 +19,16 @@ final class AppServices {
     private let globalHotkey: GlobalHotkey
     /// ホットキーを登録しておくべきか。設定の変更で差し替えるかの判定に使う（初回の登録に失敗しても後の変更で登録し直す）
     private var isHotkeyEnabled = false
+    /// 最後に反映した設定。変わった項目だけを各モジュールへ伝えるために使う
+    private var appliedConfig: Config?
     private var configChangesTask: Task<Void, Never>?
     private var rebuildingObservation: ObservationRelay<Bool>?
+
+    /// 自動確定でパレットを閉じた後に分かった、利用者が気づくべき注入のエラー（`AppCoordinator.onErrorOutsidePalette`）
+    var onErrorOutsidePalette: (@MainActor @Sendable (InjectionError) -> Void)? {
+        get { coordinator.onErrorOutsidePalette }
+        set { coordinator.onErrorOutsidePalette = newValue }
+    }
 
     init() {
         // login shell の起動を繰り返さないよう、ghq root の取得（設定の既定値）と候補の ghq ソースで共有する
@@ -90,9 +98,25 @@ final class AppServices {
         }
     }
 
+    // MARK: - メニューの操作
+
+    /// メニューの「候補を再構築」。構築中なら、終わった後に 1 回だけ走査し直す
+    func rebuildCandidates() {
+        rebuilder.rebuild()
+    }
+
+    /// メニューの「履歴をクリア…」。候補の履歴ソースも空にして、クリアした場所が候補に残らないようにする。
+    /// - Returns: 空にした履歴をファイルへ保存できたか。
+    func clearHistory() -> Bool {
+        let isSaved = historyStore.clear()
+        rebuilder.historyDidClear()
+        return isSaved
+    }
+
     // MARK: - 設定の変更
 
     private func observeConfigChanges() {
+        appliedConfig = configStore.config
         // 購読した時点の設定は流れないため、読み込み済みの設定を反映した直後に同期的に購読する
         let changes = configStore.changes()
         configChangesTask = Task { [weak self] in
@@ -104,9 +128,15 @@ final class AppServices {
 
     private func configurationDidChange(_ config: Config) {
         Log.debug("設定の変更を反映します")
+        let previous = appliedConfig
+        appliedConfig = config
         rebuilder.apply(config: config)
         if isHotkeyEnabled {
             registerHotkey(config.hotkey)
+        }
+        // 最前面のアプリを判定し直し、無効にしたアプリのパネルを閉じる・有効に戻したアプリのパネルを拾う（S-12）
+        if previous?.disabledApps != config.disabledApps {
+            panelWatcher.disabledAppsDidChange()
         }
     }
 

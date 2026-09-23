@@ -4,10 +4,14 @@
 /// - どのアプリに張り付くか: 最前面のアプリ。ただし自プロセスは無視し（観測中のアプリを外さない）、
 ///   `disabled_apps` のアプリには張り付かない
 /// - 補助ポーリングの開始・停止: 張り付いていて、AppCoordinator が Idle の間だけポーリングする。
-///   ただし AXObserver を張れなかったアプリでは、パネルの消滅を検知するため Idle 以外でもポーリングする
+///   ただし AXObserver を張れなかったアプリでは、パネルの消滅を検知するため Idle 以外でもポーリングする。
+///   追跡中のパネルの選択モードを推定し直す予定の間（`PanelContext.isSelectionModeProvisional`）も、
+///   推定し直す走査の機会を作るため Idle 以外でもポーリングする（推定し直しは最大 4 回・約 4 秒で終わる）
 /// - AppCoordinator へ送るイベント: 走査で見つけたパネルを追跡し、出現・消滅を 1 回ずつ送る。
 ///   Idle に戻った後も同じパネルが開いたままなら、もう一度だけ `panelAppeared` を送る
-///   （注入タイムアウトで Idle に戻ると AppCoordinator はパネルを見失い、ホットキーも受け付けないため）
+///   （注入タイムアウトで Idle に戻ると AppCoordinator はパネルを見失い、ホットキーも受け付けないため）。
+///   通知済みのパネルのフォルダのみかどうか（推定し直し）か位置が変わっていたら、`panelContextChanged` を送る。
+///   位置の変化は、走査したとき（AX 通知・ポーリング）に分かった分だけ送る（移動の通知は観測していない）
 public struct PanelWatchPolicy {
     /// `start` 済みで `stop` されていないか。
     public private(set) var isStarted = false
@@ -179,8 +183,10 @@ public struct PanelWatchPolicy {
     }
 
     private mutating func updatePolling(effects: inout [PanelWatchEffect]) {
-        // AX 通知を受け取れないアプリでは、PanelShown 中もポーリングしないとパネルの消滅に気づけない
-        let shouldPoll = attachedProcessID != nil && (coordinatorState == .idle || !canReceiveAXNotifications)
+        // AX 通知を受け取れないアプリでは、PanelShown 中もポーリングしないとパネルの消滅に気づけない。
+        // 選択モードを推定し直す予定のパネルも、PanelShown 中に走査しないと推定し直す機会が無い
+        let needsScansWhileBusy = !canReceiveAXNotifications || trackedPanel?.isSelectionModeProvisional == true
+        let shouldPoll = attachedProcessID != nil && (coordinatorState == .idle || needsScansWhileBusy)
         guard shouldPoll != isPolling else { return }
         isPolling = shouldPoll
         effects.append(shouldPoll ? .startPolling : .stopPolling)
@@ -202,10 +208,17 @@ public struct PanelWatchPolicy {
     }
 
     private mutating func applyScannedPanels(_ panels: [PanelContext], effects: inout [PanelWatchEffect]) {
+        // 追跡中のパネルの選択モードの推定し直しの予定が変われば、ポーリングの要否も変わる
+        defer { updatePolling(effects: &effects) }
         if let tracked = trackedPanel {
-            if let current = panels.first(where: { $0.id == tracked.id }) {
+            if let scanned = panels.first(where: { $0.id == tracked.id }) {
+                // 位置を読めなかった走査（OpenPanelLocator は矩形を .zero にする）を移動とみなさず、直前の位置を保つ
+                let current = scanned.frame.isEmpty ? scanned.withFrame(tracked.frame) : scanned
                 trackedPanel = current
-                reannounceIfNeeded(current, effects: &effects)
+                let hasChanged = current.isDirectoriesOnly != tracked.isDirectoriesOnly || current.frame != tracked.frame
+                if !reannounceIfNeeded(current, effects: &effects), hasChanged {
+                    effects.append(.send(.panelContextChanged(current)))
+                }
                 return
             }
             trackedPanel = nil
@@ -220,9 +233,11 @@ public struct PanelWatchPolicy {
 
     /// 追跡中のパネルは、AppCoordinator が Idle に戻ってからまだ通知していない場合に限り通知し直す。
     /// PanelShown 中の重複通知や、Idle のままの再通知（ポーリングのたびにパレットが出る）を防ぐ。
-    private mutating func reannounceIfNeeded(_ panel: PanelContext, effects: inout [PanelWatchEffect]) {
-        guard coordinatorState == .idle, !isTrackedPanelAnnouncedSinceIdle else { return }
+    /// - Returns: 通知し直したか。通知し直した場合は最新の `PanelContext` を渡しているため、更新の通知は要らない。
+    private mutating func reannounceIfNeeded(_ panel: PanelContext, effects: inout [PanelWatchEffect]) -> Bool {
+        guard coordinatorState == .idle, !isTrackedPanelAnnouncedSinceIdle else { return false }
         isTrackedPanelAnnouncedSinceIdle = true
         effects.append(.send(.panelAppeared(panel)))
+        return true
     }
 }

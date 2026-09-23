@@ -29,7 +29,7 @@ struct PanelWatchPolicyNotificationTests {
         #expect(driver.policy.trackedPanel == nil)
     }
 
-    @Test("同じパネルを再び見つけても、AppCoordinator の状態が変わっていなければ重複して通知しない")
+    @Test("同じパネルを再び見つけても、AppCoordinator の状態が変わっていなければ重複して通知しない（動いていれば更新だけ知らせる）")
     func samePanelIsNotAnnouncedTwice() {
         var driver = PolicyDriver()
         driver.startWatching(initialPanels: [.finderPanel])
@@ -37,7 +37,7 @@ struct PanelWatchPolicyNotificationTests {
         driver.send(.pollTick)
         #expect(driver.completeLatestScan(.found([.finderPanel])).isEmpty)
         driver.send(.axNotificationReceived(processID: finderPID))
-        #expect(driver.completeLatestScan(.found([.movedFinderPanel])).isEmpty)
+        #expect(driver.completeLatestScan(.found([.movedFinderPanel])) == [.send(.panelContextChanged(.movedFinderPanel))])
     }
 
     @Test("PanelShown 中の走査で同じパネルを見つけても通知しない")

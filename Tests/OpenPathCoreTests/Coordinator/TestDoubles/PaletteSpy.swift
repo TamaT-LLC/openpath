@@ -5,6 +5,7 @@ import OpenPathCore
 final class PaletteSpy: PaletteDisplaying {
     enum Call: Equatable {
         case show(PanelContext)
+        case update(PanelContext)
         case hide
         case setLocked(Bool)
         case showStatus(String)
@@ -15,6 +16,10 @@ final class PaletteSpy: PaletteDisplaying {
 
     func show(context: PanelContext) {
         calls.append(.show(context))
+    }
+
+    func update(context: PanelContext) {
+        calls.append(.update(context))
     }
 
     func hide() {

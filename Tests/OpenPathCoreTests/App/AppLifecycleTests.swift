@@ -107,6 +107,66 @@ struct AppLifecycleTests {
         #expect(services.calls.contains(.setPanelWatching(true)))
     }
 
+    // MARK: - 有効・無効（メニューの「有効」）
+
+    @Test("無効にするとパネルの監視とホットキーを止め、有効に戻すと再開する")
+    func followsEnabled() async {
+        let services = AppLifecycleServicesSpy()
+        let lifecycle = AppLifecycle(services: services, permission: .granted)
+        await lifecycle.launch()
+
+        lifecycle.setEnabled(false)
+        let callsAfterDisabling = services.calls.suffix(2)
+        lifecycle.setEnabled(true)
+
+        #expect(Array(callsAfterDisabling) == [.setPanelWatching(false), .setHotkeyRegistered(false)])
+        #expect(services.calls.suffix(2) == [.setPanelWatching(true), .setHotkeyRegistered(true)])
+        #expect(lifecycle.isEnabled)
+    }
+
+    @Test("無効の間に権限が付与されても監視を始めず、有効に戻したときに始める")
+    func permissionWhileDisabled() async {
+        let services = AppLifecycleServicesSpy()
+        let lifecycle = AppLifecycle(services: services, permission: .notGranted)
+        await lifecycle.launch()
+        lifecycle.setEnabled(false)
+
+        lifecycle.permissionDidChange(.granted)
+        let watchedWhileDisabled = lifecycle.isPanelWatching
+        lifecycle.setEnabled(true)
+
+        #expect(watchedWhileDisabled == false)
+        #expect(services.calls.suffix(2) == [.setPanelWatching(true), .setHotkeyRegistered(true)])
+    }
+
+    @Test("起動前に無効にしたら、起動しても監視もホットキーも始めない")
+    func disabledBeforeLaunch() async {
+        let services = AppLifecycleServicesSpy()
+        let lifecycle = AppLifecycle(services: services, permission: .granted)
+
+        lifecycle.setEnabled(false)
+        await lifecycle.launch()
+
+        #expect(services.calls == [.loadConfiguration, .startCandidateIndexing])
+    }
+
+    @Test("同じ値の設定や、終了後の設定では何もしない")
+    func ignoresRedundantEnabled() async {
+        let services = AppLifecycleServicesSpy()
+        let lifecycle = AppLifecycle(services: services, permission: .granted)
+        await lifecycle.launch()
+        let callsAfterLaunch = services.calls
+
+        lifecycle.setEnabled(true)
+        let callsAfterRedundant = services.calls
+        lifecycle.terminate()
+        let callsAfterTerminate = services.calls
+        lifecycle.setEnabled(false)
+
+        #expect(callsAfterRedundant == callsAfterLaunch)
+        #expect(services.calls == callsAfterTerminate)
+    }
+
     // MARK: - 終了
 
     @Test("終了はパネルの監視 → ホットキーを止めてから終了処理をする")
