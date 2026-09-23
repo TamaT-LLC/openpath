@@ -9,8 +9,16 @@ import Observation
 @MainActor
 @Observable
 public final class PaletteViewModel {
-    /// 検索フィールドの入力。変更を受けて候補を引き直すのは配線側の責務
-    public var query = ""
+    /// 検索フィールドの確定済みの入力。IME の変換中の未確定文字は含まない（確定するまで検索フィールド側で保留する）
+    public var query = "" {
+        didSet {
+            guard query != oldValue else { return }
+            onQueryChange?(query)
+        }
+    }
+    /// 検索語が変わるたびに呼ばれる。候補を引き直して `replaceRows(_:)` するのは配線側の責務。
+    /// 値が変わったときだけ呼ぶため、初回表示の候補は配線側で別途引くこと
+    @ObservationIgnored public var onQueryChange: ((String) -> Void)?
     public private(set) var rows: [PaletteRow] = []
     /// 選択中の候補の添字。候補が 0 件のときだけ nil
     public private(set) var selectedIndex: Int?
