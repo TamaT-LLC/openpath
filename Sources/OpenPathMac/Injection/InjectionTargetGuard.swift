@@ -47,12 +47,16 @@ public final class InjectionTargetGuard: InjectionTargetGuarding {
 
     public func currentStatus(cutoff: ScanCutoff) async throws -> InjectionTargetStatus {
         guard let target else { return .gone }
-        // AX の往復が要らない最前面アプリの確認を先に行う
+        // AX の往復が要らない最前面アプリの確認を先に行い、切り替わっていれば AX を待たずに打ち切る
         guard frontmostProcessID() == target.processID else { return .notFrontmost }
         let window = target.window
-        return try await onAXQueue { () throws -> InjectionTargetStatus in
+        let windowExists = try await onAXQueue { () throws -> Bool in
             try cutoff.throwIfReached()
-            return try PanelControlAX.exists(window) ? .available : .gone
+            return try PanelControlAX.exists(window)
         }
+        guard windowExists else { return .gone }
+        // AX の往復（最大でメッセージングタイムアウトまで）の間に切り替わった場合に備え、キー送出の直前にもう一度確かめる
+        guard frontmostProcessID() == target.processID else { return .notFrontmost }
+        return .available
     }
 }

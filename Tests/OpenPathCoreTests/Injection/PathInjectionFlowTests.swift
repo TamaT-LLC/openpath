@@ -64,6 +64,43 @@ struct PathInjectionFlowTests {
         #expect(harness.pasteboard.contents == .userClipboard)
     }
 
+    @Test(
+        "「開く」を押す前にパネルが消えたら、自動確定では panelGoneBeforeConfirm、そうでなければ panelGone を投げる",
+        arguments: [
+            (autoConfirm: true, expected: InjectionError.panelGoneBeforeConfirm),
+            (autoConfirm: false, expected: InjectionError.panelGone),
+        ]
+    )
+    func panelGoneBeforeOpen(outcome: (autoConfirm: Bool, expected: InjectionError)) async {
+        let harness = FlowHarness()
+        // ⌘A の直前の確認でパネルが消えている
+        harness.targetGuard.invalidation = (fromCheck: 1, status: .gone)
+
+        await #expect(throws: outcome.expected) {
+            try await harness.run(path: Self.rawPath, autoConfirm: outcome.autoConfirm)
+        }
+
+        #expect(harness.log.keyStrokes == [.goToFolder])
+        #expect(harness.pasteboard.contents == .userClipboard)
+    }
+
+    @Test("自動確定で「開く」を探す時点でパネルが消えていたら、押していないので panelGoneBeforeConfirm を投げる")
+    func panelGoneWhileLookingUpOpenButton() async {
+        let harness = FlowHarness()
+        harness.openButtonLocator.error = InjectionError.panelGone
+        var thrown: (any Error)?
+
+        do {
+            try await harness.run(path: Self.rawPath, autoConfirm: true)
+        } catch {
+            thrown = error
+        }
+
+        #expect(thrown as? InjectionError == .panelGoneBeforeConfirm)
+        #expect((thrown as? InjectionError)?.userMessage == "移動できませんでした（パネルが閉じられました）")
+        #expect(!harness.log.events.contains(.press(element: "open")))
+    }
+
     // MARK: - 副方式へのフォールバック
 
     @Test("⌘⇧G のシートが出なければ副方式で入力欄に直接セットして「移動」を押す。ペーストボードには触れない")
