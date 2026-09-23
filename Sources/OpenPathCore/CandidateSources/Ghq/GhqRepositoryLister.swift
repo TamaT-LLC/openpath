@@ -12,6 +12,12 @@ public struct GhqRepositoryLister: Sendable {
     private static let executableName = "ghq"
     private static let pathEnvironmentKey = "PATH"
 
+    /// サブコマンドの実行に共通する、ghq の実行ファイルと環境変数
+    private struct Execution {
+        let executable: String
+        let environment: [String: String]
+    }
+
     private let isEnabled: Bool
     private let runner: any CommandRunning
     private let searchPathProvider: any SearchPathProviding
@@ -55,19 +61,41 @@ public struct GhqRepositoryLister: Sendable {
         }
     }
 
+    /// `ghq root` の結果を返す。既定の config.toml の roots に使う（UX-001 §7）。
+    /// 無効化されている・未インストール・失敗した場合は nil。`ghq list` は実行しない。
+    public func root() async -> String? {
+        guard isEnabled else { return nil }
+        do throws(GhqError) {
+            return try await fetchRoot(using: prepareExecution())
+        } catch {
+            // TODO(#3): Log が main に入ったら、失敗理由を警告ログに出す
+            return nil
+        }
+    }
+
     private func fetchRepositoryPaths() async throws(GhqError) -> [String] {
+        let execution = try await prepareExecution()
+        let root = try await fetchRoot(using: execution)
+        let listOutput = try await run(.list, executable: execution.executable, environment: execution.environment)
+        return GhqOutputParser.repositoryPaths(fromListOutput: listOutput, root: root)
+    }
+
+    /// ghq の実行ファイルの場所と、ghq に渡す環境変数を決める。
+    private func prepareExecution() async throws(GhqError) -> Execution {
         let searchPath = await searchPathProvider.searchPath()
         guard let executable = executableLocator.locateExecutable(named: Self.executableName, inSearchPath: searchPath) else {
             throw .notInstalled(searchPath: searchPath)
         }
         let environment = baseEnvironment.merging([Self.pathEnvironmentKey: searchPath]) { _, replacement in replacement }
+        return Execution(executable: executable, environment: environment)
+    }
 
-        let rootOutput = try await run(.root, executable: executable, environment: environment)
+    private func fetchRoot(using execution: Execution) async throws(GhqError) -> String {
+        let rootOutput = try await run(.root, executable: execution.executable, environment: execution.environment)
         guard let root = GhqOutputParser.root(fromOutput: rootOutput) else {
             throw .emptyRoot
         }
-        let listOutput = try await run(.list, executable: executable, environment: environment)
-        return GhqOutputParser.repositoryPaths(fromListOutput: listOutput, root: root)
+        return root
     }
 
     /// サブコマンドを実行して標準出力を返す。
