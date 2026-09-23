@@ -17,7 +17,9 @@ public struct PanelContext: Identifiable, Equatable, Sendable {
     /// フォルダのみ選択できるパネルと推定されたか（DSN-001 §2.3）。
     /// false（推定できない場合を含む）のときは設定 include_files に従う。
     public let isDirectoriesOnly: Bool
-    /// パネルの矩形。パレットの配置に使う。座標系の変換は PanelWatcher 側で済ませておく。
+    /// パネルの矩形。パレットの配置に使う。
+    /// NSScreen の座標系（プライマリ画面の左下原点、y 上向き）で持ち、`PalettePlacement` / `PaletteWindow.show(near:)` に
+    /// そのまま渡せる。AX の座標系（左上原点）からの変換は PanelWatcher 側で済ませておく（DSN-001 §2.4）。
     public let frame: CGRect
 
     public init(id: ID, isDirectoriesOnly: Bool, frame: CGRect) {

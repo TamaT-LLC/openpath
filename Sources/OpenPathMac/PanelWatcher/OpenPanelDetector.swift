@@ -10,6 +10,7 @@ import OpenPathCore
 ///   ⌘⇧G で移動先シートを出してフォルダを移動しても、パネルの要素は変わらないため ID も変わらない
 /// - キャッシュ: 要素をキーに持ち、`elementDestroyed(_:)`（kAXUIElementDestroyedNotification）で破棄する
 /// - AX の一時的な失敗: 直前にそのウィンドウで見つけたパネルを返し、追跡中のパネルを消えたとみなさない
+/// - 選択モード: 開くパネルと判定したときに、ファイル一覧の先頭の行から 1 度だけ推定する（DSN-001 §2.3）
 ///
 /// `@unchecked Sendable` の根拠: 可変状態（locator）はロックで守る。メソッドはどちらも axQueue で呼ばれるため、
 /// ロックを保持したまま AX を呼び出しても待たされるスレッドはない。
@@ -37,12 +38,14 @@ public final class OpenPanelDetector: PanelDetecting, @unchecked Sendable {
         }
     }
 
-    /// 判定のコスト（AX 呼び出しの回数と所要時間）を残す。パネルの出現そのものは PanelWatcher が `panel detected` で記録する。
+    /// 判定のコスト（AX 呼び出しの回数と所要時間。選択モードの推定を含む）と推定結果を残す。
+    /// パネルの出現そのものは PanelWatcher が `panel detected` で記録する。
     private static func log(_ lookup: OpenPanelLookup<AXUIElement>, axCalls: Int, elapsed: Duration) {
         switch lookup {
         case .found(let panel) where panel.isNewlyClassified:
             Log.debug(
-                "open panel classified (id: \(panel.context.id.rawValue), axCalls: \(axCalls), elapsedMs: \(elapsed.wholeMilliseconds))"
+                "open panel classified (id: \(panel.context.id.rawValue), selectionMode: \(panel.selectionMode), "
+                    + "axCalls: \(axCalls), elapsedMs: \(elapsed.wholeMilliseconds))"
             )
         case .undetermined(let lastKnown):
             Log.debug(

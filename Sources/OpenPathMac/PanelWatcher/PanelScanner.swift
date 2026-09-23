@@ -3,6 +3,9 @@ import ApplicationServices
 import OpenPathCore
 
 /// 観測中のアプリのウィンドウを列挙してパネルを探す。AX のプロセス間呼び出しを伴うため axQueue で呼ぶこと。
+///
+/// 見つけたパネルの矩形は、AX の座標系（左上原点）から NSScreen の座標系（左下原点）へ変換して返す（DSN-001 §2.4）。
+/// PanelWatcher が送る `PanelContext.frame` を、そのまま `PaletteWindow.show(near:)` に渡せるようにするため。
 enum PanelScanner {
     struct Scan {
         let outcome: PanelScanOutcome
@@ -20,6 +23,14 @@ enum PanelScanner {
             return Scan(outcome: .unavailable, panelElements: [])
         }
         let panels = windows.compactMap(detector.detectPanel(in:))
-        return Scan(outcome: .found(panels.map(\.context)), panelElements: panels.map(\.element))
+        let converter = ScreenCoordinateConverter.forCurrentDisplays()
+        let contexts = panels.map { panel in
+            PanelContext(
+                id: panel.context.id,
+                isDirectoriesOnly: panel.context.isDirectoriesOnly,
+                frame: converter.screenRect(fromAXRect: panel.context.frame)
+            )
+        }
+        return Scan(outcome: .found(contexts), panelElements: panels.map(\.element))
     }
 }

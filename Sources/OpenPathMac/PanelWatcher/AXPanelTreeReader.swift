@@ -1,4 +1,5 @@
 import ApplicationServices
+import Foundation
 
 import OpenPathCore
 
@@ -13,6 +14,11 @@ final class AXPanelTreeReader: PanelTreeReader {
     /// 応答しないアプリで既定（約 6 秒）まで axQueue を止めると、注入の AX 呼び出しまで待たされるため短くする。
     /// タイムアウトは要素の参照ごとの設定で子要素には引き継がれないため、読み取った子要素にもそれぞれ設定する。
     private static let messagingTimeoutSeconds: Float = 0.25
+    /// 文字色を読む範囲の長さ。先頭の 1 文字だけ読む
+    private static let textStyleSampleLength = 1
+    private static let foregroundColorKey = NSAttributedString.Key(
+        kAXForegroundColorTextAttribute.takeUnretainedValue() as String
+    )
 
     /// この読み手で行った AX 呼び出しの回数。DSN-001 §5 の上限（1 パネルあたり 50 回）を確かめるためにログへ出す。
     private(set) var callCount = 0
@@ -52,6 +58,54 @@ final class AXPanelTreeReader: PanelTreeReader {
         return CGRect(origin: origin, size: size)
     }
 
+    func visibleRows(of node: AXUIElement) throws -> [AXUIElement] {
+        try elements(kAXVisibleRowsAttribute, of: node)
+    }
+
+    func visibleChildren(of node: AXUIElement) throws -> [AXUIElement] {
+        try elements(kAXVisibleChildrenAttribute, of: node)
+    }
+
+    func columns(of node: AXUIElement) throws -> [AXUIElement] {
+        try elements(kAXColumnsAttribute, of: node)
+    }
+
+    func titleElement(of node: AXUIElement) throws -> AXUIElement? {
+        try value(kAXTitleUIElementAttribute, of: node, as: AXUIElement.self).map(Self.limitingMessagingTimeout)
+    }
+
+    func url(of node: AXUIElement) throws -> URL? {
+        try value(kAXURLAttribute, of: node, as: URL.self)
+    }
+
+    func isEnabled(of node: AXUIElement) throws -> Bool? {
+        try value(kAXEnabledAttribute, of: node, as: Bool.self)
+    }
+
+    /// 先頭の 1 文字の属性付き文字列から文字色を読む。色は文字列全体で同じため、1 文字で足りる。
+    func textOpacity(of node: AXUIElement) throws -> Double? {
+        var range = CFRange(location: 0, length: Self.textStyleSampleLength)
+        guard let rangeValue = AXValueCreate(.cfRange, &range),
+              let attributed = try parameterizedValue(
+                  kAXAttributedStringForRangeParameterizedAttribute,
+                  parameter: rangeValue,
+                  of: node
+              ),
+              let string: NSAttributedString = Self.castCFType(attributed, typeID: CFAttributedStringGetTypeID()),
+              string.length > 0,
+              let colorValue = string.attribute(Self.foregroundColorKey, at: 0, effectiveRange: nil),
+              let color: CGColor = Self.castCFType(colorValue as CFTypeRef, typeID: CGColor.typeID) else {
+            return nil
+        }
+        return Double(color.alpha)
+    }
+
+    /// 要素の配列の属性。読み取った要素にもメッセージングのタイムアウトを設定する。
+    private func elements(_ attribute: String, of node: AXUIElement) throws -> [AXUIElement] {
+        let elements = try value(attribute, of: node, as: [AXUIElement].self) ?? []
+        return elements.map(Self.limitingMessagingTimeout)
+    }
+
     /// 型が一致しない値は、属性を持たないものとして nil にする。
     private func value<T>(_ attribute: String, of node: AXUIElement, as type: T.Type) throws -> T? {
         callCount += 1
@@ -67,5 +121,28 @@ final class AXPanelTreeReader: PanelTreeReader {
         default:
             throw PanelTreeReadError.unavailable
         }
+    }
+
+    /// パラメータ付きの属性。属性を持たない場合と、範囲が文字列の外の場合（空の文字列）は nil にする。
+    private func parameterizedValue(_ attribute: String, parameter: CFTypeRef, of node: AXUIElement) throws -> CFTypeRef? {
+        callCount += 1
+        var value: CFTypeRef?
+        let result = AXUIElementCopyParameterizedAttributeValue(node, attribute as CFString, parameter, &value)
+        switch result {
+        case .success:
+            return value
+        case .noValue, .attributeUnsupported, .parameterizedAttributeUnsupported, .illegalArgument:
+            return nil
+        case .invalidUIElement:
+            throw PanelTreeReadError.elementGone
+        default:
+            throw PanelTreeReadError.unavailable
+        }
+    }
+
+    /// CF 型は `as?` が実行時に型を検査しないため、CFTypeID を照合してから変換する。
+    private static func castCFType<T>(_ value: CFTypeRef, typeID: CFTypeID) -> T? {
+        guard CFGetTypeID(value) == typeID else { return nil }
+        return value as? T
     }
 }

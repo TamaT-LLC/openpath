@@ -2,6 +2,9 @@ import CoreGraphics
 
 /// トップレベルのウィンドウから NSOpenPanel を探す（DSN-001 §2.2、ARCH-001 §6）。判定結果を要素ごとにキャッシュする。
 ///
+/// 開くパネルと判定したときに、ファイル一覧の先頭の行から選択モードも推定する（DSN-001 §2.3）。
+/// 返す `PanelContext.frame` は AX の座標系（左上原点）のまま。NSScreen の座標系への変換は OpenPathMac の PanelScanner で行う。
+///
 /// ## パネルの候補
 /// - ウィンドウ自身: ダイアログ（`runModal` のパネル）か、ウィンドウ一覧に現れたシート
 /// - ウィンドウの子のシート: `beginSheetModal` のパネルやサンドボックスアプリのパネル（別プロセスで描画され、ホストの
@@ -15,6 +18,8 @@ import CoreGraphics
 /// ## キャッシュ
 /// - ロール・サブロールは要素ごとに変わらないため、1 度だけ読む
 /// - 開くパネルと保存パネルの判定は、要素が破棄される（`forget`）まで覚えておく
+/// - 選択モードは、開くパネルと判定したときに推定し、パネルの判定と一緒に覚えておく。⌘⇧G でフォルダを移動しても
+///   推定し直さない。行を 1 行も読めなかった場合だけ、判定の再確認と同じ間隔で推定し直す（`SelectionModeState`）
 /// - 確定ボタンかファイル一覧が欠けていた候補は、描画途中の可能性があるため間隔を倍々に空けて判定し直し、
 ///   `OpenPanelCacheConfiguration.maxRechecks` 回で確定する（アラートを 200ms ごとに判定し直さないため）
 /// - AX の読み取りに失敗した判定は覚えない。そのウィンドウで直前に見つけたパネルを引き継ぎ、一時的な失敗で消えたとみなさない
@@ -50,7 +55,12 @@ public struct OpenPanelLocator<Node: Hashable> {
         do {
             let panel = try findPanel(in: window, depth: 0, reader: reader, now: now)
             entries[window]?.lastPanel = panel.map {
-                LocatedOpenPanel(element: $0.element, context: $0.context, isNewlyClassified: false)
+                LocatedOpenPanel(
+                    element: $0.element,
+                    context: $0.context,
+                    selectionMode: $0.selectionMode,
+                    isNewlyClassified: false
+                )
             }
             return panel.map(OpenPanelLookup.found) ?? .notFound
         } catch PanelTreeReadError.elementGone {
@@ -100,24 +110,26 @@ public struct OpenPanelLocator<Node: Hashable> {
         return nil
     }
 
-    /// candidate が開くパネルなら、ID と矩形を付けて返す。
+    /// candidate が開くパネルなら、ID・選択モード・矩形を付けて返す。
     private mutating func openPanel<Reader: PanelTreeReader>(
         _ candidate: Node,
         reader: Reader,
         now: ContinuousClock.Instant
     ) throws -> LocatedOpenPanel<Node>? where Reader.Node == Node {
         guard let (id, isNewlyClassified) = try openPanelID(of: candidate, reader: reader, now: now) else { return nil }
+        let selectionMode = entries[candidate]?.selectionMode?.mode ?? .undetermined
         // パネルが動いても最新の位置でパレットを出せるよう、矩形は毎回読む
         let frame = try reader.frame(of: candidate) ?? .zero
         return LocatedOpenPanel(
             element: candidate,
-            // フォルダのみのパネルの推定は #19 で行う
-            context: PanelContext(id: id, isDirectoriesOnly: false, frame: frame),
+            context: PanelContext(id: id, isDirectoriesOnly: selectionMode.isDirectoriesOnly, frame: frame),
+            selectionMode: selectionMode,
             isNewlyClassified: isNewlyClassified
         )
     }
 
     /// candidate が開くパネルならその ID と、この呼び出しで判定したかを返す。キャッシュが有効なら判定しない。
+    /// 開くパネルと判定したときに選択モードを推定し、推定し直す予定があれば時刻を見て推定し直す。
     private mutating func openPanelID<Reader: PanelTreeReader>(
         of candidate: Node,
         reader: Reader,
@@ -127,6 +139,7 @@ public struct OpenPanelLocator<Node: Hashable> {
         var completedRechecks: Int?
         switch entries[candidate]?.verdict {
         case .openPanel(let id):
+            entries[candidate]?.selectionMode?.refreshIfDue(reader: reader, now: now, configuration: configuration)
             return (id, false)
         case .rejected:
             return nil
@@ -137,10 +150,17 @@ public struct OpenPanelLocator<Node: Hashable> {
             break
         }
 
-        switch try OpenPanelClassifier.classify(candidate, reader: reader) {
+        let classification = try OpenPanelClassifier.classification(of: candidate, reader: reader)
+        switch classification.verdict {
         case .openPanel:
             let id = makePanelID()
             entries[candidate]?.verdict = .openPanel(id)
+            entries[candidate]?.selectionMode = SelectionModeState(
+                fileList: classification.fileList,
+                reader: reader,
+                now: now,
+                configuration: configuration
+            )
             return (id, true)
         case .savePanel:
             entries[candidate]?.verdict = .rejected
@@ -232,6 +252,8 @@ extension OpenPanelLocator {
         var subrole: CachedAttribute<String>?
         /// パネルの候補（ダイアログ・シート）でだけ持つ
         var verdict: CachedVerdict?
+        /// 開くパネルと判定した候補でだけ持つ
+        var selectionMode: SelectionModeState<Node>?
         /// トップレベルのウィンドウで最後に見つけたパネル。読み取りに失敗したときに引き継ぐ
         var lastPanel: LocatedOpenPanel<Node>?
         var lastUsedTick: UInt64
