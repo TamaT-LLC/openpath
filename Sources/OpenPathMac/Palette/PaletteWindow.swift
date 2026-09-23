@@ -11,7 +11,7 @@ import OpenPathCore
 ///   ホストの `NSApp.keyWindow` も NSOpenPanel のまま残る。キー入力だけがパレットに届き、
 ///   その間は NSOpenPanel の `isKeyWindow` のみが false になる。
 /// - `hide()` するとキー入力はホストのキーウィンドウ（NSOpenPanel）へ戻る。ホストの再アクティブ化は不要。
-/// - PanelInjector が CGEvent（Cmd+Shift+G など）を送る前には必ず `hide()` すること。
+/// - PanelInjector が CGEvent（Cmd+Shift+G など）を送る前には必ず `releaseKey()`（または `hide()`）すること。
 ///   パレットがキーのままだとイベントがパレットに届いてしまう。
 /// - ユーザーが NSOpenPanel をクリックすればキー入力はパネルへ移り、パレットは表示されたまま残る。
 ///   パレットを再度クリックすればまたパレットがキーになる。
@@ -76,6 +76,22 @@ public final class PaletteWindow<Content: View> {
         panel.orderOut(nil)
     }
 
+    /// パレットを表示したまま、キー入力をホストアプリのキーウィンドウ（NSOpenPanel）へ返す。
+    /// PanelInjector が CGEvent を送る前に呼ぶ。`resignKey()` はキーの状態を変えないため、
+    /// いったん隠してキーを手放し、キーにしない `orderFrontRegardless()` で出し直す。
+    public func releaseKey() {
+        guard panel.isVisible else { return }
+        panel.orderOut(nil)
+        panel.orderFrontRegardless()
+    }
+
+    /// 表示中のパレットにキー入力を戻す（注入の失敗を表示した後など）。隠れている場合は何もしない。
+    public func reclaimKey() {
+        guard panel.isVisible else { return }
+        panel.orderFrontRegardless()
+        panel.makeKey()
+    }
+
     private func applyFrame(near panelFrame: CGRect) {
         anchorPanelFrame = panelFrame
         let frame = PalettePlacement.frame(
@@ -90,12 +106,7 @@ public final class PaletteWindow<Content: View> {
     }
 }
 
-extension PaletteWindow where Content == PalettePlaceholderView {
-    /// 本実装のビュー（#21）ができるまでの仮ビューで生成する。
-    public convenience init(metrics: PaletteMetrics = .standard) {
-        self.init(rootView: PalettePlaceholderView(metrics: metrics), metrics: metrics)
-    }
-}
+extension PaletteWindow: PaletteWindowControlling {}
 
 /// パレットの見た目（角丸の半透明背景）と配置先の画面を扱う。
 /// ジェネリック型には static stored property を置けないため、PaletteWindow から切り出している。
