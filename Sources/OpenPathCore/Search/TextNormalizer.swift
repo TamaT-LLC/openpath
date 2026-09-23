@@ -17,12 +17,12 @@ public struct NormalizedText: Sendable, Equatable {
 }
 
 /// マッチの前にクエリと対象文字列の両方へ同じ規則で適用する正規化。
-/// 日本語の同一視（NFC・濁点・全半角・かな）はこのプロトコルの実装として差し込む（#8）。
+/// 日本語の同一視（NFC・全半角・かな）を行う既定の実装は `JapaneseAwareNormalizer`。
 public protocol TextNormalizer: Sendable {
     func normalize(_ text: String) -> NormalizedText
 }
 
-/// 大文字小文字の同一視だけを行う既定の正規化
+/// 大文字小文字の同一視だけを行う正規化
 public struct LowercaseNormalizer: TextNormalizer {
     public init() {}
 
