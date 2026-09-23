@@ -1,9 +1,11 @@
 import Darwin
+import Foundation
 import Testing
 
 import OpenPathCore
 
 /// DSN-002 §8「1 文字入力ごとのマッチ（候補 5,000 件）16ms 以内」の簡易ベンチ。
+/// 併せて、インデックス構築時に 1 回だけ行う候補の前処理（正規化）の時間も測る。
 ///
 /// 並列に走る他のテストや他プロセスに CPU を奪われた待ち時間まで含めると高負荷時に大きくぶれるため、
 /// 判定はマッチ処理を実行したスレッドの CPU 時間で行い、wall-clock は参考としてログに出す。
@@ -29,13 +31,23 @@ struct FuzzyMatcherBenchmarkTests {
     private static let millisecondsPerSecond = 1_000.0
     private static let attosecondsPerMillisecond = 1e15
 
-    private static let queries = ["s", "sd", "sda", "fern", "openpath", "rgtf"]
+    /// 候補の前処理はインデックス構築時に 1 回だけ行う。DSN-002 §8 の roots 走査（5,000 件で 2 秒）に対し、
+    /// その 1 割を前処理（name + path の正規化と位置ボーナス計算）の上限とする
+    private static let preparationBudget = Duration.milliseconds(200)
+
+    private static let queries = ["s", "sd", "sda", "fern", "openpath", "rgtf", "資料", "めも"]
     private static let words = [
         "openpath", "system", "doc", "agent", "fern", "config", "dotfiles", "notes",
         "api", "server", "client", "tools", "Documents", "Projects", "MyApp", "swift",
         "kit", "web", "infra", "sandbox", "design", "資料", "メモ", "playground",
     ]
     private static let owners = ["TamaT-LLC", "takehiro", "apple", "swiftlang", "junegunn", "ajeetdsouza"]
+    /// 正規化で Foundation を呼ぶ文字（NFD の濁点・半濁点、半角カナ、アクセント）を多く含む語
+    private static let japaneseWords = [
+        "資料", "議事録", "見積書", "プロジェクト", "しりょう", "Café",
+        "データ".decomposedStringWithCanonicalMapping, "ガイド".decomposedStringWithCanonicalMapping,
+        "ｼﾘｮｳ", "ﾊﾟｽﾎﾟｰﾄ",
+    ]
 
     private static let matcher = FuzzyMatcher()
     /// 候補の正規化はインデックス構築時に一度だけ行う想定なので、計測の外で済ませて全ケースで共有する
@@ -49,6 +61,30 @@ struct FuzzyMatcherBenchmarkTests {
             let owner = owners[index % owners.count]
             let name = "\(first)-\(second)-\(index)"
             return (name, "/Users/takehiro/repos/github.com/\(owner)/\(name)")
+        }
+    }
+
+    /// 日本語のファイル名が多いディレクトリ（roots 配下）を想定した name / path を決定的に生成する
+    private static func makeJapaneseCandidates() -> [(name: String, path: String)] {
+        (0..<candidateCount).map { index in
+            let first = japaneseWords[index % japaneseWords.count]
+            let second = japaneseWords[(index / japaneseWords.count) % japaneseWords.count]
+            let name = "\(first)_\(second)_\(index)"
+            return (name, "/Users/takehiro/Documents/\(first)/\(name)")
+        }
+    }
+
+    enum CandidateSet: String, CaseIterable, Sendable, CustomTestStringConvertible {
+        case repositories = "リポジトリ中心（ASCII）"
+        case japaneseDocuments = "日本語ファイル名中心"
+
+        var testDescription: String { rawValue }
+
+        var candidates: [(name: String, path: String)] {
+            switch self {
+            case .repositories: FuzzyMatcherBenchmarkTests.makeCandidates()
+            case .japaneseDocuments: FuzzyMatcherBenchmarkTests.makeJapaneseCandidates()
+            }
         }
     }
 
@@ -92,6 +128,30 @@ struct FuzzyMatcherBenchmarkTests {
         )
         #expect(Self.targets.count == Self.candidateCount)
         #expect(matchCount > 0)
+        #expect(cpuTime <= limit)
+    }
+
+    @Test("候補 5,000 件の前処理（name + path）が目標時間内に終わる", arguments: CandidateSet.allCases)
+    func preparesCandidatesWithinBudget(set: CandidateSet) throws {
+        let candidates = set.candidates
+        var preparedCount = 0
+
+        let measurements = (0..<Self.measurementCount).map { _ in
+            Self.measure {
+                let prepared = candidates.map { (name: Self.matcher.prepareTarget($0.name), path: Self.matcher.prepareTarget($0.path)) }
+                preparedCount = prepared.count
+            }
+        }
+        let cpuTime = try #require(measurements.map(\.cpuTime).min())
+        let wallTime = try #require(measurements.map(\.wallTime).min())
+        let limit = Self.preparationBudget * Self.budgetMultiplier
+
+        print(
+            "[FuzzyMatcherBenchmark] prepare set=\(set.rawValue) candidates=\(preparedCount)"
+                + " cpu=\(Self.milliseconds(cpuTime))ms wall=\(Self.milliseconds(wallTime))ms"
+                + " limit=\(Self.milliseconds(limit))ms"
+        )
+        #expect(preparedCount == Self.candidateCount)
         #expect(cpuTime <= limit)
     }
 }
