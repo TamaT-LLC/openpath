@@ -9,6 +9,32 @@ public enum OpenPanelVerdict: Equatable, Sendable {
     case missingElements(hasConfirmButton: Bool, hasFileList: Bool)
 }
 
+/// パネルの中で見つけたファイル一覧の要素。
+public struct FileListElement<Node> {
+    public let node: Node
+    /// `OpenPanelCriteria.fileListRoles` のいずれか。
+    public let role: String
+
+    public init(node: Node, role: String) {
+        self.node = node
+        self.role = role
+    }
+}
+
+extension FileListElement: Equatable where Node: Equatable {}
+
+/// `OpenPanelClassifier.classification(of:reader:search:)` の結果。
+public struct OpenPanelClassification<Node> {
+    public let verdict: OpenPanelVerdict
+    /// パネルの中身のファイル一覧。選択モードの推定（DSN-001 §2.3）に使う。
+    ///
+    /// パネルにはサイドバー（AXOutline）もファイル一覧のロールで現れる。サイドバーは中身の一覧より前（幅優先の順で先）に
+    /// 現れるため、最後に見つけたものを中身の一覧とみなす。見つからなければ nil。
+    public let fileList: FileListElement<Node>?
+}
+
+extension OpenPanelClassification: Equatable where Node: Equatable {}
+
 /// パネルの候補の子孫を調べ、NSOpenPanel かどうかを判定する（DSN-001 §2.2 の条件 2〜4）。
 public enum OpenPanelClassifier {
     /// candidate の子孫を幅優先で調べる。
@@ -25,7 +51,16 @@ public enum OpenPanelClassifier {
         reader: Reader,
         search: BoundedBreadthFirstSearch = BoundedBreadthFirstSearch()
     ) throws -> OpenPanelVerdict {
-        var findings = Findings()
+        try classification(of: candidate, reader: reader, search: search).verdict
+    }
+
+    /// `classify(_:reader:search:)` と同じ判定を行い、見つけたファイル一覧の要素も返す。AX の読み取りは増えない。
+    public static func classification<Reader: PanelTreeReader>(
+        of candidate: Reader.Node,
+        reader: Reader,
+        search: BoundedBreadthFirstSearch = BoundedBreadthFirstSearch()
+    ) throws -> OpenPanelClassification<Reader.Node> {
+        var findings = Findings<Reader.Node>()
         // ロールの読み取り（AX の往復）を 1 要素 1 回にするため、子を列挙するときにロールも読んで組にする
         _ = try search.descendants(
             of: ClassifiedNode(node: candidate, role: nil, isCandidate: true),
@@ -46,11 +81,16 @@ public enum OpenPanelClassifier {
                 return false
             }
         )
+        return OpenPanelClassification(verdict: verdict(from: findings), fileList: findings.fileList)
+    }
+
+    private static func verdict<Node>(from findings: Findings<Node>) -> OpenPanelVerdict {
         if findings.isSavePanel {
             return .savePanel
         }
-        guard findings.hasConfirmButton, findings.hasFileList else {
-            return .missingElements(hasConfirmButton: findings.hasConfirmButton, hasFileList: findings.hasFileList)
+        let hasFileList = findings.fileList != nil
+        guard findings.hasConfirmButton, hasFileList else {
+            return .missingElements(hasConfirmButton: findings.hasConfirmButton, hasFileList: hasFileList)
         }
         return .openPanel
     }
@@ -59,7 +99,7 @@ public enum OpenPanelClassifier {
     private static func inspect<Reader: PanelTreeReader>(
         _ element: ClassifiedNode<Reader.Node>,
         reader: Reader,
-        findings: inout Findings
+        findings: inout Findings<Reader.Node>
     ) throws {
         guard !findings.isSavePanel, let role = element.role else { return }
         switch role {
@@ -70,7 +110,7 @@ public enum OpenPanelClassifier {
             findings.isSavePanel = try isSaveField(element.node, reader: reader)
         default:
             if OpenPanelCriteria.fileListRoles.contains(role) {
-                findings.hasFileList = true
+                findings.fileList = FileListElement(node: element.node, role: role)
             }
         }
     }
@@ -95,9 +135,10 @@ public enum OpenPanelClassifier {
 }
 
 /// 判定の途中で見つかった条件。
-private struct Findings {
+private struct Findings<Node> {
     var hasConfirmButton = false
-    var hasFileList = false
+    /// 最後に見つけたファイル一覧
+    var fileList: FileListElement<Node>?
     var isSavePanel = false
 }
 

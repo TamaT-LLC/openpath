@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 import OpenPathCore
 
@@ -25,13 +26,26 @@ struct StubNode {
     var description: String?
     var frame: CGRect?
     var children: [StubNode] = []
+    /// `AXURL`
+    var url: URL?
+    /// `AXEnabled`
+    var isEnabled: Bool?
+    /// 名前の文字色の不透明度
+    var textOpacity: Double?
+    /// `AXTitleUIElement` の要素の id
+    var titleElementID: String?
+    /// `AXColumns` の要素の id（AXBrowser の列）
+    var columnIDs: [String] = []
 }
 
 /// AX ツリーのスタブ。読み取りを記録し、AX の往復回数や読んだ要素を検証できるようにする。
 /// ノードの差し替え（`replace`）で、描画途中のパネルが完成する・シートが閉じる等の変化を再現する。
 final class StubPanelTree: PanelTreeReader {
+    private static let rowRole = "AXRow"
+
     enum Attribute: Hashable {
         case role, subrole, title, description, children, frame
+        case visibleRows, visibleChildren, columns, titleElement, url, isEnabled, textOpacity
     }
 
     struct Read: Hashable {
@@ -46,6 +60,11 @@ final class StubPanelTree: PanelTreeReader {
         var description: String?
         var frame: CGRect?
         var children: [StubElement]
+        var url: URL?
+        var isEnabled: Bool?
+        var textOpacity: Double?
+        var titleElement: StubElement?
+        var columns: [StubElement]
     }
 
     private var attributes: [StubElement: Attributes] = [:]
@@ -121,6 +140,36 @@ final class StubPanelTree: PanelTreeReader {
         try read(node, .frame).frame
     }
 
+    /// 表示中の行。スタブでは子のうちロールが AXRow のものをすべて表示中とみなす。
+    func visibleRows(of node: StubElement) throws -> [StubElement] {
+        try read(node, .visibleRows).children.filter { attributes[$0]?.role == Self.rowRole }
+    }
+
+    /// 表示中の項目。スタブでは子をすべて表示中とみなす。
+    func visibleChildren(of node: StubElement) throws -> [StubElement] {
+        try read(node, .visibleChildren).children
+    }
+
+    func columns(of node: StubElement) throws -> [StubElement] {
+        try read(node, .columns).columns
+    }
+
+    func titleElement(of node: StubElement) throws -> StubElement? {
+        try read(node, .titleElement).titleElement
+    }
+
+    func url(of node: StubElement) throws -> URL? {
+        try read(node, .url).url
+    }
+
+    func isEnabled(of node: StubElement) throws -> Bool? {
+        try read(node, .isEnabled).isEnabled
+    }
+
+    func textOpacity(of node: StubElement) throws -> Double? {
+        try read(node, .textOpacity).textOpacity
+    }
+
     // MARK: - 内部
 
     private func read(_ element: StubElement, _ attribute: Attribute) throws -> Attributes {
@@ -146,7 +195,12 @@ final class StubPanelTree: PanelTreeReader {
             title: node.title,
             description: node.description,
             frame: node.frame,
-            children: children
+            children: children,
+            url: node.url,
+            isEnabled: node.isEnabled,
+            textOpacity: node.textOpacity,
+            titleElement: node.titleElementID.map(StubElement.init),
+            columns: node.columnIDs.map(StubElement.init)
         )
         return element
     }

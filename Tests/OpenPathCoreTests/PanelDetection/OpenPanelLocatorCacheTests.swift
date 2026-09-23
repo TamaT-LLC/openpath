@@ -190,7 +190,12 @@ struct OpenPanelLocatorCacheTests {
         harness.tree.failures[window] = .unavailable
         let lookup = harness.locate(window, at: .milliseconds(200))
 
-        let expected = LocatedOpenPanel(element: found.element, context: found.context, isNewlyClassified: false)
+        let expected = LocatedOpenPanel(
+            element: found.element,
+            context: found.context,
+            selectionMode: found.selectionMode,
+            isNewlyClassified: false
+        )
         #expect(lookup == .undetermined(lastKnown: expected))
 
         harness.tree.failures[window] = nil
