@@ -8,6 +8,7 @@ enum StatusMenuText {
     static let clearHistory = "履歴をクリア…"
     static let toggleLaunchAtLogin = "ログイン時に起動"
     static let openAccessibilitySettings = "アクセシビリティ設定を開く…"
+    static let showOnboarding = "はじめに…"
     static let quit = "終了"
 
     /// macOS の慣習（⌘, で設定、⌘Q で終了）に合わせる

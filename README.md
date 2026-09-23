@@ -77,6 +77,14 @@ open build/openpath.app   # Dock には出ず、メニューバーに常駐す�
 - バージョン: 正本は `Resources/Info.plist` の `CFBundleShortVersionString` で、スクリプトは書き換えません。上げるときは `Resources/Info.plist` と `Sources/OpenPathCore/AppInfo.swift` を一緒に更新してください（不一致はテストで検出されます）。`build.sh --version` と `release.sh` は、指定値や `vX.Y.Z` タグが Info.plist と一致しなければ止まります。
 - `build.sh` は毎回リンクをやり直し、埋め込まれた Info.plist が `Resources/Info.plist` と一致するかを検証します。このため `swift package clean` は不要です。
 
+### 初回起動の案内
+
+初めて起動すると、アクセシビリティ権限の用途の説明 → システム設定での許可 → 「試してみる」の順に案内するウインドウが出ます（UX-001 §7）。
+
+- 権限が既にあれば説明を飛ばし、「試してみる」から始まります。「試してみる」は `osascript` の `choose folder` でフォルダ選択のダイアログを出し、パレットが重なることを確かめられます（選んだフォルダは使いません）。
+- 案内を終える（「試してみる」「閉じる」「あとで」）と `~/Library/Preferences/jp.tamat.openpath.plist` の `onboardingFinished` に記録し、次の起動からは出ません。メニューの「はじめに…」でいつでも開き直せます。
+- 最初からやり直すには、openpath を終了してから `defaults delete jp.tamat.openpath onboardingFinished` を実行します。
+
 ### 配布（Developer ID 署名・Notarization・Homebrew cask）
 
 リリース担当者向けの手順です。Apple ID・パスワード・Team ID・証明書はスクリプトにもリポジトリにも書かず、keychain と環境変数で渡します。

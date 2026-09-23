@@ -17,6 +17,7 @@ struct StatusMenuLayoutTests {
             .clearHistory,
             .toggleLaunchAtLogin,
             .openAccessibilitySettings,
+            .showOnboarding,
             .quit,
         ])
     }
@@ -32,6 +33,7 @@ struct StatusMenuLayoutTests {
             "履歴をクリア…",
             "ログイン時に起動",
             "アクセシビリティ設定を開く…",
+            "はじめに…",
             "終了",
         ])
     }
@@ -51,6 +53,16 @@ struct StatusMenuLayoutTests {
         let item = try #require(state.item(for: .openAccessibilitySettings))
         #expect(item.isEnabled)
         #expect(item.checkState == nil)
+    }
+
+    @Test("はじめに…（初回起動の案内を開き直す）は権限の有無に関わらず出す", arguments: [AccessibilityPermissionStatus.granted, .notGranted])
+    func showsOnboarding(permission: AccessibilityPermissionStatus) throws {
+        let state = StatusMenuState(F.input(permission: permission))
+
+        let item = try #require(state.item(for: .showOnboarding))
+        #expect(item.isEnabled)
+        #expect(item.checkState == nil)
+        #expect(item.keyEquivalent.isEmpty)
     }
 
     @Test("終了は ⌘Q、設定ファイルを開く…は ⌘, で選べる")

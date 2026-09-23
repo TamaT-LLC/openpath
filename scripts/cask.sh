@@ -56,6 +56,7 @@ cask "${APP_NAME}" do
     "~/.config/openpath",
     "~/Library/Application Support/openpath",
     "~/Library/Logs/openpath",
+    "~/Library/Preferences/${bundle_id}.plist",
   ]
 end
 EOF

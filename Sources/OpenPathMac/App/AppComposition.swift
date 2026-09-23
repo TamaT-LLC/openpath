@@ -7,14 +7,17 @@ import OpenPathCore
 /// - 起動・終了の順番と、アクセシビリティ権限によるパネルの監視の開始・停止: OpenPathCore の `AppLifecycle`
 /// - 権限の変化の監視（`AccessibilityPermissionMonitor`）と、メニューバー（`StatusItemController`）はここで持つ。
 ///   監視の通知先は 1 つしか持てないため、AppLifecycle とメニューバーの両方へここで振り分ける。
-/// - メニューの操作（有効・候補を再構築・履歴をクリア）、設定エラーのバッジ（`ConfigStore.lastError`）、
+/// - メニューの操作（有効・候補を再構築・履歴をクリア・はじめに…）、設定エラーのバッジ（`ConfigStore.lastError`）、
 ///   自動確定の後のクリップボードの復元失敗のバッジをメニューバーへつなぐ。
+/// - 初回起動の案内（`OnboardingAssembly`、UX-001 §7）は起動処理を終えてから出す。
+///   設定ファイルの生成とパネルの監視の開始を済ませ、「試してみる」ですぐにパレットが出るようにするため。
 @MainActor
 public final class AppComposition {
     private let services: AppServices
     private let lifecycle: AppLifecycle
     private let permissionMonitor: AccessibilityPermissionMonitor
     private let statusItemController: StatusItemController
+    private let onboarding: OnboardingAssembly
     private let configErrorObservation: ObservationRelay<ConfigStoreError?>
     private var launchTask: Task<Void, Never>?
 
@@ -22,6 +25,7 @@ public final class AppComposition {
         let services = AppServices()
         let permissionMonitor = AccessibilityPermissionMonitor()
         let lifecycle = AppLifecycle(services: services, permission: permissionMonitor.status)
+        let onboarding = OnboardingAssembly(configStore: services.configStore, permission: permissionMonitor.status)
         let statusItemController = StatusItemController(
             configFileURL: services.configStore.fileURL,
             actions: StatusMenuActions(
@@ -32,7 +36,8 @@ public final class AppComposition {
                     // 保存できないまま終了すると次の起動で元の履歴に戻るため、ログだけでなく利用者に知らせる
                     guard !services.clearHistory() else { return }
                     StatusItemAlert.run(.clearHistoryFailure)
-                }
+                },
+                showOnboarding: { onboarding.reopen() }
             ),
             accessibilityPermission: permissionMonitor.status
         )
@@ -41,6 +46,7 @@ public final class AppComposition {
         self.permissionMonitor = permissionMonitor
         self.lifecycle = lifecycle
         self.statusItemController = statusItemController
+        self.onboarding = onboarding
         configErrorObservation = ObservationRelay(read: { configStore.lastError }) { [weak statusItemController] error in
             statusItemController?.setConfigError(error)
         }
@@ -59,8 +65,12 @@ public final class AppComposition {
         guard launchTask == nil else { return }
         permissionMonitor.start()
         let lifecycle = lifecycle
+        let onboarding = onboarding
         launchTask = Task {
             await lifecycle.launch()
+            // 起動処理の途中で終了した場合は案内を出さない
+            guard lifecycle.phase == .running else { return }
+            onboarding.launched()
         }
     }
 
@@ -69,11 +79,14 @@ public final class AppComposition {
     public func stop() {
         permissionMonitor.stop()
         configErrorObservation.cancel()
+        onboarding.stop()
         lifecycle.terminate()
     }
 
     private func permissionDidChange(_ status: AccessibilityPermissionStatus) {
         statusItemController.setAccessibilityPermission(status)
+        // パネルの監視を先に始め、案内の「試してみる」を出す時点で検知できるようにする
         lifecycle.permissionDidChange(status)
+        onboarding.permissionDidChange(status)
     }
 }

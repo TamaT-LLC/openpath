@@ -144,6 +144,9 @@ public final class StatusItemController: NSObject {
             toggleLaunchAtLogin()
         case .openAccessibilitySettings:
             actions.openAccessibilitySettings()
+        case .showOnboarding:
+            Log.info("メニューから初回起動の案内を開きました")
+            actions.showOnboarding?()
         case .quit:
             actions.quit()
         case .dismissClipboardNotice:
