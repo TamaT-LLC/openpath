@@ -10,16 +10,16 @@ upstream:
 - PROJ-DSN-002
 downstream: []
 owner: TakehiroT
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # テスト計画: openpath
 
 ## 1. 方針
 
-- `OpenPathCore`（ファジーマッチ、frecency、設定パース、状態機械）は Swift Testing によるユニットテストで網羅する。XCTest と違い Xcode を必要とせず Command Line Tools だけで実行できるため、Swift Testing を採用する。
+- `OpenPathCore`（ファジーマッチ、frecency、設定パース、状態機械）は Swift Testing によるユニットテストで網羅する。XCTest と違い Xcode を必要とせず Command Line Tools だけで実行できるため、Swift Testing を採用する。ローカルでは `./scripts/test.sh` を使う（Command Line Tools のみの環境では素の `swift test` が `no such module 'Testing'` で失敗するためのラッパー。CLT が選択されているときだけ `-F`・rpath・cross-import overlay の無効化を足し、Xcode 環境では素の `swift test` と同じ、PR #32）。
 - `OpenPathMac`（AX 観測、注入）は自動化が困難なため、手動シナリオテストと、Finder の「開く」ダイアログを使ったスモークスクリプト（AppleScript で `choose folder` を出す）で確認する。
-- CI（GitHub Actions, macOS runner）ではユニットテストと `swift build` のみ実行。AX を要するテストはローカル限定。
+- CI（GitHub Actions）は `macos-15` ランナー、Xcode 16.4（`DEVELOPER_DIR` で明示）でユニットテストと `swift build` のみ実行する。`macos-14` は既定の Xcode が 15.4（Swift 5.10）で swift-tools-version 6.0 のマニフェストを扱えず、2026-11-02 にサポートも終了するため採用しない（PR #33）。AX を要するテストはローカル限定。
 
 ## 2. ユニットテスト（OpenPathCoreTests）
 
@@ -72,7 +72,10 @@ updated: 2026-09-23
 | Idle → PanelShown | `panelAppeared` でパレット表示が呼ばれる |
 | PanelShown → Injecting → Idle | `confirm(path)` で注入が呼ばれ、成功後 Idle |
 | 注入タイムアウト | 1.5 秒で Idle に戻り、エラーがパレットに渡る |
-| パネル消滅 | PanelShown / Injecting どちらでも Idle に戻る |
+| 注入失敗（タイムアウト・`panelGone` 以外） | `PanelShown` に戻り、パレットにエラー表示が残る。Esc または `panelGone` で閉じる（PR #39） |
+| パネル消滅 | `PanelShown` では Idle に戻る。`Injecting` でも基本は Idle に戻るが、auto_confirm 開始後は例外的に注入の結果を待ってから Idle に戻る（ARCH-001 §5、PR #52） |
+| 注入成功後の再通知 | 成功したパネルの再検知（`panelAppeared`）ではパレットを出し直さない。成功後のホットキーでは再表示する（PR #52） |
+| 自動確定中の `panelGone` | 注入をキャンセルせず結果を待つ。injector が `panelGone` / `pasteboardRestoreFailed` で終えたら成功として履歴に記録する（PR #52） |
 | Esc | PanelShown のままパレットのみ非表示、ホットキーで再表示 |
 
 ## 3. 手動シナリオテスト（Phase 1 受け入れ）
@@ -95,6 +98,15 @@ updated: 2026-09-23
 | S-12 | 任意 | `disabled_apps` に対象アプリを追加 | そのアプリではパレットが出ない |
 | S-13 | 任意 | 権限を外す | メニューバーにバッジ、検知停止。再付与で 5 秒以内に復帰 |
 
+### 3.1 統合（#27）時の追加確認項目
+
+各 Issue の実装 PR は、この環境にアクセシビリティ権限が無く実機で確認できないため、申し送りとして次の確認項目を残している。#27（アプリ統合）で上記 S-01〜S-13 と合わせて確認する。
+
+- **検知（PanelWatcher、PR #46 / #56）**: Finder / TextEdit / Claude Desktop / Cursor 間の切り替えで観測が追従する。`disabled_apps` のアプリではパネルを開いても検知しない。シート型パネル（`beginSheetModal`、サンドボックスアプリ）を閉じたときも `panel gone` が出る。⌘⇧G でフォルダを移動しても `panel gone`→`panel detected` が出ない（`PanelContext.ID` が変わらない）。Safari の `input[type=file]`（S-06）で確定ボタンが「アップロード」と判定される。アイドル時の CPU（200ms ポーリング）が非機能要件の範囲に収まる。
+- **注入（PanelInjector、PR #45 / #54）**: 副方式が効くアプリがあるか。auto_confirm / Cmd+Enter の両方で動く。日本語パス（NFC / NFD）で正しく移動する。注入中にアプリを切り替えるとキー操作が送られない（`targetNotFrontmost`）。独自の確定ボタン名（「読み込む」等）を持つアプリでの挙動。
+- **再通知・履歴（AppCoordinator、PR #52）**: auto_confirm=false で Enter を押して注入に成功した後、パレットが出直さず、パネル側の Enter で確定できる（S-03）。その状態で Ctrl+Shift+O を押すとパレットを再表示できる。auto_confirm=true と Cmd+Enter のそれぞれで、パネルが閉じた後に履歴へ残る。
+- **ログ（PR #56）**: `panel detected` / `panel gone` が info でログに出る（`Log.configure` を起動時に呼ぶ必要がある）。debug ログの `open panel classified` に含まれる `axCalls` / `elapsedMs`（判定コストの実測値）を確認する。
+
 ## 4. スモークスクリプト
 
 ```bash
@@ -114,7 +126,9 @@ grep -q "panel detected" ~/Library/Logs/openpath/openpath.log && echo OK || echo
 | メモリ | 候補 20,000 件を読み込み | 50MB 以下 |
 | 検知レイテンシ | ログのタイムスタンプ（panel created → palette shown） | p95 300ms 以下 |
 | ネットワーク | Little Snitch / `nettop` で監視 | 通信ゼロ |
-| Notarization | `spctl -a -vv openpath.app` | accepted |
+| Notarization | `spctl -a -vv openpath.app`（`scripts/notarize.sh` 内で実行。提出前に ad-hoc 署名でないこと・`Developer ID Application:` 署名・`runtime` フラグの付与を確認してから提出する、PR #59） | accepted |
+
+- 各項目の実測値は実装 PR の「テスト」節に記録している（roots 走査・候補の前処理時間・常駐メモリ: DSN-002 §5 / §8、PR #40 / #47 / #51 / #57。CI 実行環境: PR #33）。本表は Phase 1 の合格基準を示すもので、実測値そのものは記載しない。
 
 ## 6. 完了条件
 

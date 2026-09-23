@@ -12,7 +12,7 @@ downstream:
 - PROJ-DSN-002
 - PROJ-TST-001
 owner: TakehiroT
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # アーキテクチャ設計: openpath
@@ -25,7 +25,7 @@ NSOpenPanel の出現を検知し、ファジー検索パレットを重ね、�
 
 - 言語: Swift（Swift 6.0+ ツールチェーン）。`OpenPathCore` は Swift 6 言語モード、AppKit 依存層（`OpenPathMac` と実行ターゲット `openpath`）は AX の C コールバックを扱うため Swift 5 言語モード
 - UI: SwiftUI（パレット内容）+ AppKit（NSPanel / NSStatusItem / イベント）
-- ビルド: Swift Package Manager（`swift build`）+ 最小限の Xcode プロジェクト（署名・Notarization 用）
+- ビルド: Swift Package Manager（`swift build`）+ `scripts/`（build / sign / notarize / cask 生成）。Xcode プロジェクトは持たない。署名は `codesign`、Notarization は `notarytool` / `stapler`（いずれも Command Line Tools に同梱、#59）
 - 依存: 標準フレームワークのみ（AppKit, ApplicationServices, Carbon.HIToolbox, ServiceManagement）。TOML パースは軽量な自前実装 or `TOMLDecoder` を検討（L4 で確定）
 - 配布: Developer ID 署名 + Notarization、Homebrew cask
 
@@ -79,16 +79,18 @@ NSOpenPanel の出現を検知し、ファジー検索パレットを重ね、�
 ## 5. 状態機械
 
 ```
-        パネル検知              Enter 確定             注入完了/失敗
+        パネル検知              Enter 確定        1.5秒タイムアウト / panelGone
 Idle ─────────────▶ PanelShown ─────────────▶ Injecting ─────────────▶ Idle
-  ▲                    │                                              
-  │   パネル消滅 / Esc  │                                              
-  └────────────────────┘                                              
+  ▲                    │  ▲                        │
+  │   パネル消滅 / Esc  │  └── 注入失敗（panelGone   └── 注入成功 → Idle（成功パネルを記憶）
+  └────────────────────┘      以外）はここへ戻り
+                               パレット残置
 ```
 
 - `PanelShown` では PaletteWindow を表示し、CandidateIndex に問い合わせる。
-- `Injecting` 中はパレット入力をロックし、1.5 秒のタイムアウトで `Idle` に戻す。
-- `auto_confirm` が有効な場合、`Injecting` の最後に「開く」ボタンの AXPress を行う。
+- `Injecting` 中はパレット入力をロックする。`Idle` に戻すのは 1.5 秒のタイムアウトと `panelGone` のみで、パレットも閉じる。injector が投げたそれ以外のエラー（timeout / axError 等）は `PanelShown` に戻し、パレットにエラー表示を残したままその場で再試行できるようにする（Esc または `panelGone` で閉じる、PR #39）。
+- 注入に成功したパネルは `Idle` の間だけ内部で記憶し、同じ id の `panelAppeared` によるパレットの再通知を抑止する。`Idle` 中のホットキーは通常無視するが、成功パネルを記憶している間だけは例外的にパレットを再表示できる（PR #52）。
+- `auto_confirm` が有効な場合、`Injecting` の最後に「開く」ボタンの AXPress を行う。自動確定の注入を開始した後に `panelGone` を受けても注入はキャンセルせず結果を待つ（パレットはその場で閉じる）。injector が `panelGone` または `pasteboardRestoreFailed` で終えた場合も、確定操作まで進んだとみなして成功扱いにし履歴へ記録する（PR #52）。
 
 ## 6. 検知方式の選定
 
@@ -120,8 +122,8 @@ Idle ─────────────▶ PanelShown ───────
 ## 8. データ
 
 - 設定: `~/.config/openpath/config.toml`（`roots`, `depth`, `include_files`, `auto_confirm`, `hotkey`, `disabled_apps`, `ghq`）
-- 履歴: `~/Library/Application Support/openpath/history.json`（`{ path, count, last_used }` の配列）
-- ログ: `~/Library/Logs/openpath/openpath.log`（`os.Logger` + ファイル出力）
+- 履歴: `~/Library/Application Support/openpath/history.json`（`{ path, count, last_used }` の配列。日付は UTC ISO 8601・秒精度）
+- ログ: `~/Library/Logs/openpath/openpath.log`（`os.Logger`（統合ログ）+ ファイル出力、5MiB 超過で `.1` に 1 世代ローテーション）。`Log.configure(_:)` を呼ぶまではファイルへ書き込まず統合ログにのみ出力する（アプリは起動直後に呼ぶ。Core のテストでも実ファイルに触れない、PR #36 / #53）。既定の最小レベルは DEBUG ビルドで `.debug`、リリースビルドで `.info`。info 以上のメッセージにはパス・ファイル名を含めない（NFR-05）。パスは `Log.debugPath` で別記録し、統合ログでは常に `.private`、ファイルには平文で出す
 
 ## 9. セキュリティ・権限
 
