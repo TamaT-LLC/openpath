@@ -10,7 +10,8 @@
 /// - AppCoordinator へ送るイベント: 走査で見つけたパネルを追跡し、出現・消滅を 1 回ずつ送る。
 ///   Idle に戻った後も同じパネルが開いたままなら、もう一度だけ `panelAppeared` を送る
 ///   （注入タイムアウトで Idle に戻ると AppCoordinator はパネルを見失い、ホットキーも受け付けないため）。
-///   通知済みのパネルのフォルダのみかどうかが推定し直しで変わったら、`panelContextChanged` を送る
+///   通知済みのパネルのフォルダのみかどうか（推定し直し）か位置が変わっていたら、`panelContextChanged` を送る。
+///   位置の変化は、走査したとき（AX 通知・ポーリング）に分かった分だけ送る（移動の通知は観測していない）
 public struct PanelWatchPolicy {
     /// `start` 済みで `stop` されていないか。
     public private(set) var isStarted = false
@@ -212,7 +213,8 @@ public struct PanelWatchPolicy {
         if let tracked = trackedPanel {
             if let current = panels.first(where: { $0.id == tracked.id }) {
                 trackedPanel = current
-                if !reannounceIfNeeded(current, effects: &effects), current.isDirectoriesOnly != tracked.isDirectoriesOnly {
+                let hasChanged = current.isDirectoriesOnly != tracked.isDirectoriesOnly || current.frame != tracked.frame
+                if !reannounceIfNeeded(current, effects: &effects), hasChanged {
                     effects.append(.send(.panelContextChanged(current)))
                 }
                 return

@@ -103,6 +103,18 @@ struct PanelWatchPolicySelectionModeTests {
         #expect(steps == [.send(.panelAppeared(Self.directoriesOnlyPanel))])
     }
 
+    @Test("PanelShown 中の走査で追跡中のパネルが動いていたら、新しい位置を知らせる")
+    func announcesMovedPanel() {
+        var driver = PolicyDriver()
+        driver.startWatching(initialPanels: [.finderPanel])
+        driver.send(.coordinatorStateChanged(.panelShown(.finderPanel, isPaletteVisible: true)))
+        driver.send(.axNotificationReceived(processID: finderPID))
+
+        let steps = driver.completeLatestScan(.found([.movedFinderPanel]))
+
+        #expect(steps == [.send(.panelContextChanged(.movedFinderPanel))])
+    }
+
     @Test("推定が済んだパネルの PanelShown 中はポーリングを止める（従来どおり）")
     func settledPanelStopsPolling() {
         var driver = PolicyDriver()
