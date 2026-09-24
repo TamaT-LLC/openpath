@@ -14,21 +14,39 @@ public protocol PanelElementOperating {
     func confirm() async throws
     /// 要素が消えたか。押下で閉じたシートやパネルの要素は消える。
     func hasDisappeared() async -> Bool
+    /// kAXValue の文字列（入力欄に入っている値）。値が無い・文字列でなければ nil。
+    func value() async throws -> String?
 }
 
-/// 副方式で値をセットする入力欄と、確定に押すボタン。
+/// 移動先シートの候補リスト（macOS 13 以降の移動先シートが入力欄の下に出す、移動先の候補）。
+@MainActor
+public protocol GoToSuggestionListReading {
+    /// 選ばれている候補が指すパス。選択が無い・パスを読めない行（見出し等）なら nil。
+    /// - Throws: 読めなければ投げる（リストが消えていれば `InjectionError.panelGone`、AX の失敗は `.axError`、
+    ///   読み取りの期限を超えたら `ScanCutoff.Reached`）。呼び出し側は選択を読めなかったものとして扱う。
+    func selectedPath() async throws -> String?
+}
+
+/// 移動先シートの入力欄と、確定に押すボタン・候補リスト。
 public struct GoToFieldControls {
     public let field: any PanelElementOperating
-    /// 「移動」/「Go」ボタン。無ければ入力欄を確定する（kAXConfirmAction）。
+    /// 「移動」/「Go」ボタン。無ければ Return で確定する（macOS 13 以降の移動先シートにはボタンが無い）。
     public let goButton: (any PanelElementOperating)?
+    /// 入力欄と同じシートの候補リスト。無ければ nil。
+    public let suggestionList: (any GoToSuggestionListReading)?
 
-    public init(field: any PanelElementOperating, goButton: (any PanelElementOperating)?) {
+    public init(
+        field: any PanelElementOperating,
+        goButton: (any PanelElementOperating)?,
+        suggestionList: (any GoToSuggestionListReading)? = nil
+    ) {
         self.field = field
         self.goButton = goButton
+        self.suggestionList = suggestionList
     }
 }
 
-/// 副方式: 移動先シートの入力欄を探す（DSN-001 §3.2 ステップ 1）。
+/// 移動先シートの入力欄を探す（副方式の DSN-001 §3.2 ステップ 1 と、主方式の確定前の確認）。
 @MainActor
 public protocol GoToFieldLocating {
     /// 注入の最初に記録したウィンドウ（とそのシート）から、移動先シートの入力欄を探す（どの要素を選ぶかは `GoToFieldSearch`）。

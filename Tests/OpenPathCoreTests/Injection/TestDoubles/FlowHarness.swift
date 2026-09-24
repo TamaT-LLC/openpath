@@ -17,6 +17,8 @@ final class FlowHarness {
     let goButton: PanelElementFake
     let openButton: PanelElementFake
     let goToFieldLocator: GoToFieldLocatorFake
+    /// 主方式の確定前の確認が入力欄を探す先（副方式の探し方と区別するため、探したことをログに残さない）。
+    let submitCheckLocator: GoToFieldLocatorFake
     let openButtonLocator: OpenButtonLocatorFake
     let flow: PathInjectionFlow
 
@@ -36,14 +38,24 @@ final class FlowHarness {
         goToFieldLocator = GoToFieldLocatorFake(clock: clock, log: log)
         goToFieldLocator.field = goToField
         goToFieldLocator.goButton = goButton
+        submitCheckLocator = GoToFieldLocatorFake(clock: clock, log: log)
+        submitCheckLocator.logsLookups = false
+        submitCheckLocator.field = goToField
         openButtonLocator = OpenButtonLocatorFake(clock: clock, log: log)
         openButtonLocator.button = openButton
+        // ⌘V で、そのときのペーストボードの文字列が入力欄に入る（OS の貼り付けを再現する）
+        keyboard.onPost = { [goToField, pasteboard] keyStroke in
+            guard keyStroke == .paste else { return }
+            goToField.simulateTyping(pasteboard.contents.plainText)
+        }
 
         let autoConfirm = OpenButtonAutoConfirm(locator: openButtonLocator, targetGuard: targetGuard, clock: clock)
         let didSubmit: PathInjectionHooks.DidSubmitGoToSheet = { isAutoConfirm in
             log.record(.didSubmitGoToSheet(autoConfirm: isAutoConfirm))
             try await autoConfirm.confirm(autoConfirm: isAutoConfirm)
         }
+        let prepareForKeyEvents: PathInjectionHooks.PrepareForKeyEvents = { log.record(.prepareForKeyEvents) }
+        let normalizer = InjectionPathNormalizer(homeDirectory: Self.homeDirectory)
         flow = PathInjectionFlow(
             targetGuard: targetGuard,
             primary: GoToFolderPasteSequencer(
@@ -51,19 +63,20 @@ final class FlowHarness {
                 keyboard: keyboard,
                 sheetDetector: sheetDetector,
                 targetGuard: targetGuard,
-                hooks: PathInjectionHooks(
-                    prepareForKeyEvents: { log.record(.prepareForKeyEvents) },
-                    didSubmitGoToSheet: didSubmit
-                ),
+                submitGate: GoToSheetSubmitGate(locator: submitCheckLocator, normalizer: normalizer, clock: clock),
+                hooks: PathInjectionHooks(prepareForKeyEvents: prepareForKeyEvents, didSubmitGoToSheet: didSubmit),
                 clock: clock
             ),
             secondary: GoToFieldDirectEntry(
                 locator: goToFieldLocator,
                 targetGuard: targetGuard,
+                keyboard: keyboard,
+                prepareForKeyEvents: prepareForKeyEvents,
+                submitGate: GoToSheetSubmitGate(locator: goToFieldLocator, normalizer: normalizer, clock: clock),
                 didSubmit: didSubmit,
                 clock: clock
             ),
-            normalizer: InjectionPathNormalizer(homeDirectory: Self.homeDirectory),
+            normalizer: normalizer,
             clock: clock
         )
     }

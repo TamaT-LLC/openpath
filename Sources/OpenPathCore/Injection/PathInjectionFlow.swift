@@ -7,6 +7,7 @@
 ///
 /// 前の注入が副方式まで終えるまで、次の注入は始めない。
 /// autoConfirm で「開く」を押す前にパネルが消えたら `.panelGoneBeforeConfirm` を投げ、押した後の消滅（成功）と区別する。
+/// 注入するパス（正規化の前後）・使った方式・結果を debug ログに残す（Issue #74 の切り分け用。パスは `Log.debugPath`）。
 @MainActor
 public final class PathInjectionFlow {
     /// 副方式へ切り替える主方式の失敗。どちらもシートの確定（Return）を送る前の失敗で、パネルはまだ移動していない。
@@ -56,15 +57,30 @@ public final class PathInjectionFlow {
         try Task.checkCancellation()
 
         let normalizedPath = normalizer.normalize(path)
-        try await InjectionTargetCheck.capture(targetGuard, on: ElapsedTimeline(clock: clock))
+        Log.debugPath("注入するパス（確定されたパス）", path: path)
+        if normalizedPath != path {
+            Log.debugPath("注入するパス（正規化後）", path: normalizedPath)
+        }
+        let timeline = ElapsedTimeline(clock: clock)
+        try await InjectionTargetCheck.capture(targetGuard, on: timeline)
         do {
+            Log.debug("注入を主方式（⌘⇧G + ペースト）で始めます（auto_confirm: \(autoConfirm)）")
             try await primary.run(path: normalizedPath, autoConfirm: autoConfirm)
+            Log.debug("主方式で注入しました（+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
         } catch let error as InjectionError {
             guard case .timeout(let step) = error, Self.fallbackSteps.contains(step) else {
+                Log.debug("主方式の注入に失敗しました（\(error)、+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
                 throw error
             }
             try Task.checkCancellation()
-            try await secondary.run(path: normalizedPath, autoConfirm: autoConfirm, fallingBackFrom: error)
+            Log.info("主方式が \(step.rawValue) で失敗したため、副方式（AX 直接セット）へ切り替えます")
+            do {
+                try await secondary.run(path: normalizedPath, autoConfirm: autoConfirm, fallingBackFrom: error)
+            } catch {
+                Log.debug("副方式の注入に失敗しました（\(error)、+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
+                throw error
+            }
+            Log.debug("副方式で注入しました（+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
         }
     }
 }

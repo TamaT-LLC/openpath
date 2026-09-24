@@ -2,7 +2,7 @@ import Testing
 
 import OpenPathCore
 
-@Suite("GoToFieldSearch: 副方式で値をセットする移動先シートの入力欄を探す（DSN-001 §3.2）")
+@Suite("GoToFieldSearch: 移動先シートの入力欄を探す（DSN-001 §3.2、Issue #74）")
 struct GoToFieldSearchTests {
     /// 旧来の移動先シート（「フォルダへ移動:」のコンボボックスと「移動」「キャンセル」ボタン）。
     private static func classicGoToSheet(goTitle: String = "移動") -> FakeAXElement {
@@ -29,6 +29,50 @@ struct GoToFieldSearchTests {
 
         #expect(match.field.name == "path")
         #expect(match.goButton?.name == "go")
+    }
+
+    @Test("macOS 13 以降の移動先シート（placeholder も「移動」ボタンも無い）の入力欄を AXIdentifier で見つけ、同じシートの候補リストと組にする")
+    func findsModernGoToFieldByIdentifier() throws {
+        let panel = FakeAXElement.standardWindow([
+            .group("toolbar", [.searchField("search")]),
+            .modernGoToSheet(rows: [.suggestionHeaderRow, .suggestionRow("/Users/me/Library")]),
+        ])
+
+        let match = try #require(try FakeAXSearch.goToField(in: panel))
+
+        #expect(match.field.name == "path")
+        #expect(match.goButton == nil)
+        #expect(match.suggestionList?.name == "suggestions")
+    }
+
+    @Test("AXIdentifier の入力欄を、placeholder だけで判定した入力欄や「移動」ボタンと組になる入力欄より優先する")
+    func prefersFieldWithGoToIdentifier() throws {
+        let panel = FakeAXElement.dialog([
+            .textField("accessory", placeholder: "Path"),
+            .sheet("legacy", [.comboBox("legacy-path"), .button("go", title: "移動")]),
+            .modernGoToSheet(),
+        ])
+
+        #expect(try FakeAXSearch.goToField(in: panel)?.field.name == "path")
+    }
+
+    @Test("別のシートにある候補リストは組にしない")
+    func doesNotPairSuggestionListInAnotherSheet() throws {
+        let panel = FakeAXElement.dialog([
+            .sheet("go-to", [.pathTextField("path")]),
+            .sheet("other", [.suggestionTable([])]),
+        ])
+
+        let match = try #require(try FakeAXSearch.goToField(in: panel))
+
+        #expect(match.suggestionList == nil)
+    }
+
+    @Test("通常のウィンドウでは、シートの外にある AXIdentifier の入力欄も使わない")
+    func ignoresIdentifiedFieldOutsideSheetsInStandardWindow() throws {
+        let hostWindow = FakeAXElement.standardWindow([.pathTextField("path")])
+
+        #expect(try FakeAXSearch.goToField(in: hostWindow) == nil)
     }
 
     @Test("「移動」ボタンが無くても、placeholder がパスを示す入力欄なら返す（ボタンは無し）")
@@ -118,6 +162,7 @@ struct GoToFieldSearchTests {
         let panel = FakeAXElement.dialog([
             .textField("accessory", placeholder: "検索"),
             .sheet("go-to", [.textField("path", placeholder: "パス"), .button("cancel", title: "キャンセル")]),
+            .sheet("modern", [.suggestionTable([])]),
         ])
         let fullScan = AXOperationCounter()
         #expect(try FakeAXSearch.goToField(in: panel, counter: fullScan) != nil)

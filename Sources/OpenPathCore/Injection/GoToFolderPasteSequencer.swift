@@ -5,7 +5,8 @@
 /// 2. `hooks.prepareForKeyEvents` でキー入力を NSOpenPanel へ向ける
 /// 3. ⌘⇧G を送り（3）、最大 600ms・50ms 間隔でシートの出現を待つ（4）
 /// 4. ペーストボードを退避してパスを書き込み（1, 2）、⌘A → ⌘V（5）
-/// 5. 100ms 待って（6）Return を送る（7）
+/// 5. 100ms 待って（6）、移動先シートの入力欄の値と候補の選択が移動先になったかを確かめてから（`GoToSheetSubmitGate`、Issue #74）
+///    Return を送る（7）。入力欄の値が移動先にならなければ Return を送らず `timeout(.waitPaste)` を投げる（副方式へ）
 /// 6. `hooks.didSubmitGoToSheet`（8: auto_confirm の差し込み口）
 /// 7. Return から 200ms 後にペーストボードを戻す（9）
 ///
@@ -17,12 +18,14 @@
 /// - キャンセルには各ステップの間と待機中に応じ、以降のキー操作は送らない。
 /// - AX の走査には期限（600ms）を設け、期限の到来かキャンセルで AX 操作の合間に打ち切る（`ScanCutoff`）。
 /// - 前の注入が後始末を終えるまで、次の注入は始めない（`InjectionSerialGate`）。
+/// - 各ステップを経過時間付きで debug ログに残す（Issue #74 の切り分け用）。
 @MainActor
 public final class GoToFolderPasteSequencer {
     private let pasteboard: any PasteboardAccessing
     private let keyboard: any KeyStrokePosting
     private let sheetDetector: any GoToSheetDetecting
     private let targetGuard: any InjectionTargetGuarding
+    private let submitGate: GoToSheetSubmitGate?
     private let hooks: PathInjectionHooks
     private let timing: PathInjectionTiming
     private let clock: any Clock<Duration>
@@ -30,12 +33,14 @@ public final class GoToFolderPasteSequencer {
 
     /// - Parameters:
     ///   - targetGuard: キーを送る直前ごとに注入先を確かめる。配線漏れで誤送出を防げなくならないよう、既定値を持たせない。
+    ///   - submitGate: Return の前に移動先シートの入力欄と候補の選択を確かめる。nil なら確かめずに Return を送る。
     ///   - clock: 待機に使う。テストでは実時間を待たない Clock を渡す。
     public init(
         pasteboard: any PasteboardAccessing,
         keyboard: any KeyStrokePosting,
         sheetDetector: any GoToSheetDetecting,
         targetGuard: any InjectionTargetGuarding,
+        submitGate: GoToSheetSubmitGate? = nil,
         hooks: PathInjectionHooks = .none,
         timing: PathInjectionTiming = .standard,
         clock: any Clock<Duration> = ContinuousClock()
@@ -44,6 +49,7 @@ public final class GoToFolderPasteSequencer {
         self.keyboard = keyboard
         self.sheetDetector = sheetDetector
         self.targetGuard = targetGuard
+        self.submitGate = submitGate
         self.hooks = hooks
         self.timing = timing
         self.clock = clock
@@ -62,18 +68,21 @@ public final class GoToFolderPasteSequencer {
         await hooks.prepareForKeyEvents()
         try Task.checkCancellation()
         try await post(.goToFolder, failingAs: .waitSheet, on: timeline)
+        Self.logStep("⌘⇧G を送りました", on: timeline)
         try await waitForSheet(probe, on: timeline)
         try Task.checkCancellation()
+        Self.logStep("移動先シートが出ました", on: timeline)
 
         // シートが出てから差し替えることで、⌘⇧G が効かない場合（副方式へのフォールバック）にペーストボードへ触れずに済む
         let swap = try replacePasteboard(with: path)
         do {
-            try await pasteAndSubmit(autoConfirm: autoConfirm, on: timeline)
+            try await pasteAndSubmit(path: path, autoConfirm: autoConfirm, on: timeline)
         } catch {
             try Self.restore(swap)
             throw error
         }
         try Self.restore(swap)
+        Self.logStep("ペーストボードを戻しました", on: timeline)
     }
 
     // MARK: - ステップ
@@ -128,15 +137,30 @@ public final class GoToFolderPasteSequencer {
     }
 
     /// ステップ 5〜9。ペーストボードは呼び出し元が戻す。
-    private func pasteAndSubmit(autoConfirm: Bool, on timeline: ElapsedTimeline) async throws {
+    private func pasteAndSubmit(path: String, autoConfirm: Bool, on timeline: ElapsedTimeline) async throws {
         try await post(.selectAll, failingAs: .waitPaste, on: timeline)
         try await post(.paste, failingAs: .waitPaste, on: timeline)
+        Self.logStep("⌘A と ⌘V を送りました", on: timeline)
         try await timeline.sleep(untilElapsed: timeline.elapsed + timing.pasteSettleDelay)
+        try await ensureReadyToSubmit(path: path, on: timeline)
         try await post(.returnKey, failingAs: .waitPaste, on: timeline)
+        Self.logStep("Return を送りました", on: timeline)
 
         let submittedAt = timeline.elapsed
         try await hooks.didSubmitGoToSheet(autoConfirm)
         try await timeline.sleep(untilElapsed: submittedAt + timing.restoreDelay)
+    }
+
+    /// 入力欄の値が移動先でないまま Return を送ると、移動先シートに残っていた前回の場所へ移動してしまう（Issue #74）。
+    /// その場合は Return を送らずに `timeout(.waitPaste)` を投げ、AX で値を直接セットする副方式に任せる。
+    private func ensureReadyToSubmit(path: String, on timeline: ElapsedTimeline) async throws {
+        guard let submitGate else { return }
+        let readiness = try await submitGate.waitUntilReady(path: path)
+        Self.logStep("確定前の確認を終えました（\(readiness.rawValue)）", on: timeline)
+        guard readiness != .fieldMismatch else {
+            Log.warning("移動先シートの入力欄が貼り付けたパスになっていないため、Return を送らずに副方式へ切り替えます")
+            throw InjectionError.timeout(step: .waitPaste)
+        }
     }
 
     /// キーはその時点のキーウィンドウに届くため、送る直前に注入先がまだ有効かを確かめる。
@@ -152,6 +176,11 @@ public final class GoToFolderPasteSequencer {
         } catch {
             throw Self.injectionError(from: error, failingAs: step)
         }
+    }
+
+    /// 手順の進み具合を、注入の開始からの経過時間付きで debug ログに残す。
+    private static func logStep(_ step: String, on timeline: ElapsedTimeline) {
+        Log.debug("主方式: \(step)（+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
     }
 
     /// 戻せなかったことは、元の注入の結果（成功・他のエラー）より優先して伝える。ユーザーのクリップボードが失われているため。
