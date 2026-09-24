@@ -61,6 +61,7 @@ app_path="${APP_BUNDLE}"
 log_file="${DEFAULT_LOG_FILE}"
 detect_timeout="${DEFAULT_DETECT_TIMEOUT_SECONDS}"
 start_offset=0
+start_identity=""
 dialog_pid=""
 dialog_stderr=""
 detected_entry=""
@@ -188,14 +189,15 @@ check_app_running() {
 
 # 最新の起動以降の行から「権限 監視」を求める（例: "granted watching"）。起動の記録が無ければ "missing"、
 # 最新の起動の後に終了が記録されていれば "terminated"（起動中のインスタンスがこのログに書いていない）。
-# ローテーションで起動の行が .1 に移っていることがあるため、.1 から続けて読む
+# ローテーションで起動の行が .1 に移っていることがあるため、.1 から続けて読む。
+# どちらかを読めなければ失敗を返す（$(...) の中では set -e が効かないため、.1 の失敗も明示して伝える）
 read_log_state() {
-  {
+  (
     if [[ -f "${log_file}.1" ]]; then
-      cat "${log_file}.1"
+      cat "${log_file}.1" || exit 1
     fi
     cat "${log_file}"
-  } | awk \
+  ) | awk \
     -v launch_prefix="${LAUNCH_PREFIX}" -v launch_suffix="${LAUNCH_SUFFIX}" \
     -v launched_yes="${LAUNCHED_WITH_PERMISSION}" -v launched_no="${LAUNCHED_WITHOUT_PERMISSION}" \
     -v granted="${PERMISSION_GRANTED}" -v revoked="${PERMISSION_REVOKED}" \
@@ -217,7 +219,8 @@ read_log_state() {
 check_log_state() {
   [[ -f "${log_file}" ]] || fail_precondition "ログファイル ${log_file} がありません。${APP_NAME}.app を起動してから実行してください"
   local state
-  state="$(read_log_state)"
+  # 読めないのはテストの失敗ではないため、set -e の終了コード 1 にせず前提不足にする
+  state="$(read_log_state)" || fail_precondition "ログファイル ${log_file}（または ${log_file}.1）を読めません"
   case "${state}" in
     missing)
       fail_precondition "ログに ${APP_NAME} の起動の記録がありません（${log_file}）"
@@ -250,18 +253,31 @@ file_size() {
   stat -f %z "$1"
 }
 
-# 開始時点のオフセット以降に追記された行を出す。途中でローテーションされたら .1 の残りから続けて出す
+# ファイルの識別子（inode）。ローテーションで名前が変わっても同じファイルかを判定するのに使う
+file_identity() {
+  stat -f %i "$1"
+}
+
+# 開始時点のオフセット以降に追記された行を出す。
+# ローテーション（FileLogSink は現在のファイルを .1 へ移して新しく作る）はサイズではなく inode で判定する。
+# 開始時のファイルが .1 に移っていればその残りから続けて出し、.1 が別のファイル（古いローテーション）なら読まない
 new_log_lines() {
-  local size
-  size="$(file_size "${log_file}" 2>/dev/null)" || size=0
-  if [[ "${size}" -lt "${start_offset}" ]]; then
-    if [[ -f "${log_file}.1" ]]; then
-      tail -c "+$((start_offset + 1))" "${log_file}.1" || true
+  local identity size
+  identity="$(file_identity "${log_file}" 2>/dev/null)" || identity=""
+  if [[ -n "${identity}" && "${identity}" == "${start_identity}" ]]; then
+    size="$(file_size "${log_file}" 2>/dev/null)" || size=0
+    if [[ "${size}" -ge "${start_offset}" ]]; then
+      tail -c "+$((start_offset + 1))" "${log_file}" || true
+    else
+      # 同じファイルが切り詰められた。先頭から読む
+      cat "${log_file}" 2>/dev/null || true
     fi
-    cat "${log_file}" 2>/dev/null || true
-  else
-    tail -c "+$((start_offset + 1))" "${log_file}" || true
+    return 0
   fi
+  if [[ -f "${log_file}.1" && "$(file_identity "${log_file}.1" 2>/dev/null)" == "${start_identity}" ]]; then
+    tail -c "+$((start_offset + 1))" "${log_file}.1" || true
+  fi
+  cat "${log_file}" 2>/dev/null || true
 }
 
 # 開始以降の after 行目より後で、message を含む最初の行を「行番号<TAB>行」で出す。無ければ何も出さない。
@@ -315,7 +331,8 @@ is_dialog_frontmost() {
 }
 
 open_dialog() {
-  start_offset="$(file_size "${log_file}")"
+  start_offset="$(file_size "${log_file}")" || fail_precondition "ログファイル ${log_file} の大きさを読めません"
+  start_identity="$(file_identity "${log_file}")" || fail_precondition "ログファイル ${log_file} の識別子を読めません"
   dialog_stderr="$(mktemp "${TMPDIR:-/tmp}/openpath-smoke-TASK-029.XXXXXX")"
   osascript -e "choose folder with prompt \"${DIALOG_PROMPT}\"" >/dev/null 2>"${dialog_stderr}" &
   dialog_pid=$!
