@@ -166,6 +166,57 @@ struct PathInjectionFlowTests {
         #expect(harness.pasteboard.contents == .userClipboard)
     }
 
+    @Test("貼り付けたパスが入力欄に入らなければ（前回の移動先が残った）、Return を送らずにペーストボードを戻し、副方式で値をセットして移動する（Issue #74）")
+    func fallsBackToDirectEntryWhenPastedPathIsNotInField() async throws {
+        let harness = FlowHarness()
+        // ⌘⇧G で開いた移動先シートには前回の移動先が入っており、⌘V が入力欄に届かない
+        harness.goToField.simulateTyping("/Users/me/前回の場所")
+        harness.keyboard.onPost = nil
+
+        try await harness.run(path: Self.rawPath)
+
+        #expect(harness.log.keyStrokes == [.goToFolder, .selectAll, .paste])
+        #expect(harness.pasteboard.writes == [.transientText(Self.normalizedPath), .userClipboard])
+        #expect(harness.elementOperations == [
+            .setValue(element: "path", value: Self.normalizedPath),
+            .press(element: "go"),
+        ])
+        #expect(harness.log.events.last == .didSubmitGoToSheet(autoConfirm: false))
+        // ペーストボードを戻してから副方式に切り替える
+        let restoreIndex = try #require(harness.log.events.firstIndex(of: .pasteboardWrite(.userClipboard)))
+        let lookupIndex = try #require(harness.log.events.firstIndex(of: .lookUpGoToField))
+        #expect(restoreIndex < lookupIndex)
+    }
+
+    @Test("副方式でも入力欄に値が入らなければ、確定せずに「パスの貼り付けに失敗」を出す")
+    func directEntryFailsWhenValueDoesNotStick() async {
+        let harness = FlowHarness(sheetAppearsAt: nil)
+        harness.goToField.valueProvider = { "/Users/me/前回の場所" }
+        var thrown: (any Error)?
+
+        do {
+            try await harness.run(path: Self.rawPath)
+        } catch {
+            thrown = error
+        }
+
+        #expect(thrown as? InjectionError == .timeout(step: .waitPaste))
+        #expect((thrown as? InjectionError)?.userMessage == "移動できませんでした（パスの貼り付けに失敗）")
+        #expect(!harness.log.events.contains(.press(element: "go")))
+    }
+
+    @Test("macOS 13 以降の移動先シート（「移動」ボタンが無い）では、副方式は値をセットして Return で確定する")
+    func directEntrySubmitsModernSheetWithReturn() async throws {
+        let harness = FlowHarness(sheetAppearsAt: nil)
+        harness.goToFieldLocator.goButton = nil
+
+        try await harness.run(path: Self.rawPath)
+
+        #expect(harness.log.keyStrokes == [.goToFolder, .returnKey])
+        #expect(harness.elementOperations == [.setValue(element: "path", value: Self.normalizedPath)])
+        #expect(harness.log.events.last == .didSubmitGoToSheet(autoConfirm: false))
+    }
+
     @Test("waitPaste から副方式に切り替えても入力欄が無ければ、「パスの貼り付けに失敗」を出す")
     func directEntryAlsoFailsAfterPasteFailure() async {
         let harness = FlowHarness()

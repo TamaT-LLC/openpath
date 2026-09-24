@@ -21,10 +21,12 @@ struct GoToFieldDirectEntryTests {
         let goButton: PanelElementFake
         let locator: GoToFieldLocatorFake
         let targetGuard: TargetGuardFake
+        let keyboard: KeyboardSpy
         let hooks: HooksSpy
         let entry: GoToFieldDirectEntry
 
-        init() {
+        /// - Parameter checksBeforeSubmit: 確定の前に入力欄の値と候補の選択を確かめるか（`GoToSheetSubmitGate`）。
+        init(checksBeforeSubmit: Bool = false) {
             let log = InjectionEventLog(clock: clock)
             self.log = log
             field = PanelElementFake("path", log: log)
@@ -34,10 +36,20 @@ struct GoToFieldDirectEntryTests {
             locator.goButton = goButton
             targetGuard = TargetGuardFake(log: log)
             targetGuard.logsChecks = true
+            keyboard = KeyboardSpy(log: log)
             hooks = HooksSpy(clock: clock, log: log)
             entry = GoToFieldDirectEntry(
                 locator: locator,
                 targetGuard: targetGuard,
+                keyboard: keyboard,
+                prepareForKeyEvents: hooks.hooks.prepareForKeyEvents,
+                submitGate: checksBeforeSubmit
+                    ? GoToSheetSubmitGate(
+                        locator: locator,
+                        normalizer: InjectionPathNormalizer(homeDirectory: "/Users/me"),
+                        clock: clock
+                    )
+                    : nil,
                 didSubmit: hooks.hooks.didSubmitGoToSheet,
                 timing: .standard,
                 clock: clock
@@ -78,10 +90,31 @@ struct GoToFieldDirectEntryTests {
         ])
     }
 
-    @Test("「移動」ボタンが無ければ、入力欄を確定する（kAXConfirmAction）")
-    func confirmsFieldWithoutGoButton() async throws {
+    @Test("「移動」ボタンが無ければ（macOS 13 以降の移動先シート）、パレットにキーを手放させてから Return を送る。入力欄の確定（kAXConfirmAction）は使わない")
+    func sendsReturnWithoutGoButton() async throws {
         let harness = Harness()
         harness.locator.goButton = nil
+
+        try await harness.run(autoConfirm: true)
+
+        // macOS 27 の移動先シートの入力欄は kAXConfirmAction に成功を返すが移動しない（Issue #74）
+        #expect(harness.log.events == [
+            .lookUpGoToField,
+            .targetCheck,
+            .setValue(element: "path", value: Self.path),
+            .targetCheck,
+            .prepareForKeyEvents,
+            .targetCheck,
+            .key(.returnKey),
+            .didSubmitGoToSheet(autoConfirm: true),
+        ])
+    }
+
+    @Test("「移動」ボタンが無く Return も送れなければ、入力欄を確定する（kAXConfirmAction）")
+    func confirmsFieldWhenReturnCannotBePosted() async throws {
+        let harness = Harness()
+        harness.locator.goButton = nil
+        harness.keyboard.failingKeyStrokes = [.returnKey]
 
         try await harness.run()
 
@@ -89,6 +122,65 @@ struct GoToFieldDirectEntryTests {
             .setValue(element: "path", value: Self.path),
             .confirmField(element: "path"),
         ])
+        #expect(harness.log.events.last == .didSubmitGoToSheet(autoConfirm: false))
+    }
+
+    @Test("Return を送る直前（パレットにキーを手放させた後）に注入先が無効になっていたら、Return を送らずに投げる")
+    func stopsBeforeReturnWhenTargetIsLost() async {
+        let harness = Harness()
+        harness.locator.goButton = nil
+        harness.targetGuard.invalidation = (fromCheck: 2, status: .notFrontmost)
+
+        await #expect(throws: InjectionError.targetNotFrontmost) {
+            try await harness.run()
+        }
+
+        #expect(harness.log.keyStrokes.isEmpty)
+        #expect(!harness.log.events.contains(.didSubmitGoToSheet(autoConfirm: false)))
+    }
+
+    @Test("確定前の確認: セットした値が入力欄に入っていれば、待たずに「移動」を押す")
+    func checksFieldBeforeSubmitting() async throws {
+        let harness = Harness(checksBeforeSubmit: true)
+
+        try await harness.run()
+
+        #expect(harness.elementOperations == [
+            .setValue(element: "path", value: Self.path),
+            .press(element: "go"),
+        ])
+        #expect(harness.field.valueReadCount == 1)
+        #expect(harness.clock.elapsed == .zero)
+    }
+
+    @Test("確定前の確認: セットした値が入力欄に入らなければ、確定せずに timeout(waitPaste) を投げる")
+    func doesNotSubmitWhenFieldKeepsOtherValue() async {
+        let harness = Harness(checksBeforeSubmit: true)
+        harness.field.valueProvider = { "/Users/me/前回の場所" }
+
+        await #expect(throws: InjectionError.timeout(step: .waitPaste)) {
+            try await harness.run()
+        }
+
+        #expect(harness.elementOperations == [.setValue(element: "path", value: Self.path)])
+        #expect(harness.log.keyStrokes.isEmpty)
+        #expect(!harness.log.events.contains(.didSubmitGoToSheet(autoConfirm: false)))
+    }
+
+    @Test("確定前の確認: 候補リストが前の値の候補を選んだままなら、移動先に追いつくまで待ってから確定する")
+    func waitsForSuggestionListBeforeSubmitting() async throws {
+        let harness = Harness(checksBeforeSubmit: true)
+        harness.locator.goButton = nil
+        let suggestions = SuggestionListFake()
+        suggestions.selectedPathProvider = { [clock = harness.clock] in
+            clock.elapsed >= .milliseconds(100) ? Self.path : "/Users/me/前回の場所"
+        }
+        harness.locator.suggestionList = suggestions
+
+        try await harness.run()
+
+        let returnTime = try #require(harness.log.entries.first { $0.event == .key(.returnKey) }?.time)
+        #expect(returnTime == .milliseconds(100))
     }
 
     @Test(
@@ -211,10 +303,11 @@ struct GoToFieldDirectEntryTests {
         #expect(harness.log.events.last == .didSubmitGoToSheet(autoConfirm: false))
     }
 
-    @Test("入力欄の確定が失敗し、入力欄が残っていれば axError を投げる")
+    @Test("Return を送れず、入力欄の確定も失敗し、入力欄が残っていれば axError を投げる")
     func throwsWhenConfirmFails() async {
         let harness = Harness()
         harness.locator.goButton = nil
+        harness.keyboard.failingKeyStrokes = [.returnKey]
         harness.field.confirmError = InjectionError.axError(code: Self.axCannotCompleteCode)
 
         await #expect(throws: InjectionError.axError(code: Self.axCannotCompleteCode)) {

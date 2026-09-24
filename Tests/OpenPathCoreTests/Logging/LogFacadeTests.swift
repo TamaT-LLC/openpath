@@ -133,4 +133,13 @@ struct LogFacadeTests {
             #expect(written == messages)
         }
     }
+
+    @Test("isDebugEnabled は共有ロガーの最小レベルが debug のときだけ true", arguments: LogLevel.allCases)
+    func isDebugEnabledFollowsMinimumLevel(level: LogLevel) {
+        let previous = Log.install(AppLogger(minimumLevel: level, sinks: [SpyLogSink()], clock: { fixedDate }))
+        defer { Log.install(previous) }
+
+        #expect(Log.isDebugEnabled == (level == .debug))
+    }
 }
+

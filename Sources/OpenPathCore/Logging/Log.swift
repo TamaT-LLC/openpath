@@ -10,6 +10,7 @@ import os
 /// - アプリは起動直後に `configure(_:)` を呼ぶこと。呼ぶまではファイルに出力されず、ログは統合ログにのみ残る。
 ///   既定の設定 `Log.configure(LogConfiguration())` では `~/Library/Logs/openpath/openpath.log` に出力し、
 ///   最小レベルは DEBUG ビルドで debug、リリースビルドで info になる。
+///   アプリは UserDefaults の `logLevel`（`LogConfiguration.minimumLevelPreferenceKey`）で最小レベルを変えられる（QA 用）。
 /// - Core のコードからも `Log` を使ってよい。ユニットテストは `configure(_:)` を呼ばないため、
 ///   テスト中のログが実ユーザーのログディレクトリに書き込まれることはない。
 ///
@@ -53,6 +54,11 @@ public enum Log {
         // 差し替え後に旧ロガーへ届いた書き込みも、FileLogSink の共有キューにより受け付け順で書き込まれる。
         previous.flush()
         return previous
+    }
+
+    /// debug ログを出力する設定か。debug ログのためだけの重い処理（AX の読み取り等）を、出力しない設定では省くために使う。
+    public static var isDebugEnabled: Bool {
+        logger.isEnabled(.debug)
     }
 
     /// 開発時の詳細を記録する。統合ログではメッセージを private として扱う。

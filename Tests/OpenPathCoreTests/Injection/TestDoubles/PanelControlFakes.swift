@@ -55,7 +55,14 @@ final class PanelElementFake: PanelElementOperating {
     var disappearsWhenActivated = false
     /// 要素が消えているか。
     var isGone = false
-    private(set) var value: String?
+    /// 入力欄に入っている値。setValue と `simulateTyping(_:)` で変わる。
+    private(set) var currentValue: String?
+    /// 設定すると、値の読み取り（`value()`）はこれの結果を返す（時間とともに変わる値を再現する）。
+    var valueProvider: (@MainActor () -> String?)?
+    /// 値の読み取りで投げるエラー。
+    var valueReadError: (any Error)?
+    /// 値を読み取った回数。
+    private(set) var valueReadCount = 0
 
     init(_ name: String, log: InjectionEventLog) {
         self.name = name
@@ -67,7 +74,12 @@ final class PanelElementFake: PanelElementOperating {
         if let setValueError {
             throw setValueError
         }
-        self.value = value
+        currentValue = value
+    }
+
+    /// キー入力（貼り付け）で値が変わったことにする。AX 操作ではないためログには残さない。
+    func simulateTyping(_ value: String?) {
+        currentValue = value
     }
 
     func press() async throws {
@@ -82,6 +94,14 @@ final class PanelElementFake: PanelElementOperating {
 
     func hasDisappeared() async -> Bool {
         isGone
+    }
+
+    func value() async throws -> String? {
+        valueReadCount += 1
+        if let valueReadError {
+            throw valueReadError
+        }
+        return valueProvider.map { $0() } ?? currentValue
     }
 
     private func activate(failingWith error: (any Error)?) throws {
@@ -109,13 +129,33 @@ private func simulateAXScan(clock: VirtualClock, log: InjectionEventLog, taking 
     }
 }
 
-/// 副方式の入力欄探し。field が nil なら見つからない。
+/// 移動先シートの候補リスト。選ばれている候補のパスを返す。
+@MainActor
+final class SuggestionListFake: GoToSuggestionListReading {
+    /// 選ばれている候補のパス。
+    var selectedPathProvider: @MainActor () -> String? = { nil }
+    /// 読み取りで投げるエラー。
+    var readError: (any Error)?
+
+    func selectedPath() async throws -> String? {
+        if let readError {
+            throw readError
+        }
+        return selectedPathProvider()
+    }
+}
+
+/// 移動先シートの入力欄探し。field が nil なら見つからない。
 @MainActor
 final class GoToFieldLocatorFake: GoToFieldLocating {
     private let clock: VirtualClock
     private let log: InjectionEventLog
     var field: PanelElementFake?
     var goButton: PanelElementFake?
+    var suggestionList: SuggestionListFake?
+    /// 探したことを共有のログに記録するか（主方式の確定前の確認に使う探し方は、副方式の探し方と区別するため記録しない）。
+    var logsLookups = true
+    private(set) var lookupCount = 0
     /// 1 回の走査にかかる時間。
     var lookupLatency: Duration = .zero
     var error: (any Error)?
@@ -128,7 +168,10 @@ final class GoToFieldLocatorFake: GoToFieldLocating {
     }
 
     func locateGoToField(cutoff: ScanCutoff) async throws -> GoToFieldControls? {
-        log.record(.lookUpGoToField)
+        lookupCount += 1
+        if logsLookups {
+            log.record(.lookUpGoToField)
+        }
         if let suspension {
             await suspension.suspend()
         }
@@ -137,7 +180,7 @@ final class GoToFieldLocatorFake: GoToFieldLocating {
         }
         try simulateAXScan(clock: clock, log: log, taking: lookupLatency, cutoff: cutoff)
         guard let field else { return nil }
-        return GoToFieldControls(field: field, goButton: goButton)
+        return GoToFieldControls(field: field, goButton: goButton, suggestionList: suggestionList)
     }
 }
 

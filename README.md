@@ -86,6 +86,22 @@ open build/openpath.app   # Dock には出ず、メニューバーに常駐す�
 - 最初からやり直すには、openpath を終了してから `defaults delete jp.tamat.openpath onboardingFinished` を実行します。
 - 設定ファイル `~/.config/openpath/config.toml` が無ければ、既定の内容で作ります（既存のファイルは上書きしません）。候補として走査するディレクトリ `roots` は、`ghq root` の結果を絶対パスに解決できればその root、できなければ（ghq が未インストール・実行に失敗した・結果が相対パスなど）ホーム（`~`）になります。ホームにした場合、`~/Desktop`・`~/Documents`・`~/Downloads` の中を初めて読むときに macOS がアクセスの許可を確認することがあります。
 
+### ログ
+
+- 出力先は `~/Library/Logs/openpath/openpath.log`（5 MiB を超えると `openpath.log.1` に退避）。統合ログ（Console.app、subsystem `jp.tamat.openpath`）にも出ます。
+- 最小レベルは DEBUG ビルド（`swift run` 等）で debug、リリースビルド（`build.sh`）で info です。パス（注入したパスなど）は debug でだけ記録します（NFR-05）。
+- QA などでリリースビルドの debug ログを出すには、openpath を終了してから次を実行し、起動し直します。注入したパス・使った方式（主方式 / 副方式）・各ステップの経過時間が残ります。確定前の移動先シートの入力欄の値と候補の選択は入力欄を AX で見つけられたとき、移動後のパネルの現在地（表示名）は自動確定しない注入の後に残ります（Issue #74）。
+
+  ```bash
+  defaults write jp.tamat.openpath logLevel debug
+  ```
+
+- debug ログはパスを含むため、確認が終わったら openpath を終了して既定に戻します。値は `debug` / `info` / `warning` / `error` で、不正な値なら既定のレベルのまま警告をログに残します。
+
+  ```bash
+  defaults delete jp.tamat.openpath logLevel
+  ```
+
 ### 配布（Developer ID 署名・Notarization・Homebrew cask）
 
 リリース担当者向けの手順です。Apple ID・パスワード・Team ID・証明書はスクリプトにもリポジトリにも書かず、keychain と環境変数で渡します。

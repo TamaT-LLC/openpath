@@ -8,7 +8,7 @@ public typealias InjectionTargetProcessID = @MainActor () -> pid_t?
 /// 注入先のウィンドウ（`InjectionTargetGuard.targetWindow`）。
 public typealias InjectionTargetWindow = @MainActor () -> AXUIElement?
 
-/// 副方式（DSN-001 §3.2）で、移動先シートの入力欄と「移動」/「Go」ボタンを AX で探す。
+/// 移動先シートの入力欄と「移動」/「Go」ボタン・候補リストを AX で探す（副方式の DSN-001 §3.2 と、主方式の確定前の確認）。
 ///
 /// 注入の最初に記録したウィンドウ（とそのシート）の中を探す。同じアプリの別のウィンドウの入力欄を書き換えないため。
 /// どの要素を入力欄とみなすかは OpenPathCore の `GoToFieldSearch` が持つ。
@@ -29,6 +29,7 @@ public final class GoToFieldLocator: GoToFieldLocating {
                 role: { $0.role },
                 subrole: { $0.subrole },
                 title: { $0.title },
+                identifier: { $0.attr(kAXIdentifierAttribute) },
                 placeholder: { $0.attr(kAXPlaceholderValueAttribute) },
                 children: PanelControlAX.children(of:)
             )
@@ -36,8 +37,72 @@ public final class GoToFieldLocator: GoToFieldLocating {
         guard let match else { return nil }
         return GoToFieldControls(
             field: AXPanelElement(match.field),
-            goButton: match.goButton.map { AXPanelElement($0) }
+            goButton: match.goButton.map { AXPanelElement($0) },
+            suggestionList: match.suggestionList.map { AXSuggestionList($0) }
         )
+    }
+}
+
+/// 移動先シートの候補リスト（AXTable）。選ばれている行の候補のパスを読む。どの要素がパスを持つかは `GoToSuggestionSearch` が持つ。
+@MainActor
+final class AXSuggestionList: GoToSuggestionListReading {
+    /// 1 回の読み取り（行から候補のパスまでたどる数回の AX 操作）の上限。応答しないアプリで確定前の確認が長引かないようにする。
+    private static let readLimit: Duration = .milliseconds(100)
+
+    private let table: AXUIElement
+
+    init(_ table: AXUIElement) {
+        self.table = table
+    }
+
+    /// - Throws: 期限を超えたら `ScanCutoff.Reached`（呼び出し側は選択を読めなかったものとして扱う）。
+    func selectedPath() async throws -> String? {
+        let table = table
+        let deadline = ContinuousClock.now.advanced(by: Self.readLimit)
+        let cutoff = ScanCutoff { ContinuousClock.now >= deadline }
+        return try await onAXQueue { () throws -> String? in
+            let rows: [AXUIElement]
+            do {
+                let value = try table.copyAttributeValue(kAXSelectedRowsAttribute)
+                rows = AXAttributeCast.cast(value, to: [AXUIElement].self) ?? []
+            } catch let error as AXElementError {
+                // 選択が無い（属性の値が無い）ことは失敗ではない
+                guard error.code != .noValue else { return nil }
+                throw GoToSheetAX.injectionError(for: error.code)
+            }
+            guard let row = rows.first.map(GoToSheetAX.limitingMessagingTimeout) else { return nil }
+            return try GoToSuggestionSearch.path(
+                inSelectedRow: row,
+                cutoff: cutoff,
+                role: { $0.role },
+                identifier: { $0.attr(kAXIdentifierAttribute) },
+                children: PanelControlAX.children(of:)
+            )
+        }
+    }
+}
+
+/// パネルが表示している現在地（フォルダの表示名）を AX で読む（Issue #74 の診断ログ用）。
+/// どの要素が現在地を持つかは OpenPathCore の `PanelLocationSearch` が持つ。
+enum PanelLocationReader {
+    /// 走査の上限。診断のためだけの走査で `axQueue` を塞ぎ、次の注入を待たせないため短く打ち切る。
+    private static let scanLimit: Duration = .milliseconds(300)
+
+    /// window（注入先のウィンドウ）の中のパネルの現在のフォルダの表示名。見つからない・読めない・期限を超えたら nil。
+    static func displayedFolderName(in window: AXUIElement) async -> String? {
+        let deadline = ContinuousClock.now.advanced(by: scanLimit)
+        let cutoff = ScanCutoff { ContinuousClock.now >= deadline }
+        return await onAXQueue { () -> String? in
+            try? PanelLocationSearch.displayedFolderName(
+                in: window,
+                cutoff: cutoff,
+                role: { $0.role },
+                subrole: { $0.subrole },
+                identifier: { $0.attr(kAXIdentifierAttribute) },
+                value: { $0.attr(kAXValueAttribute) },
+                children: PanelControlAX.children(of:)
+            )
+        }
     }
 }
 
@@ -96,6 +161,19 @@ final class AXPanelElement: PanelElementOperating {
         return await onAXQueue { () -> Bool in
             // 確かめられなかった（応答が無い等）場合は、消えたとはみなさない
             (try? PanelControlAX.exists(element)) == false
+        }
+    }
+
+    func value() async throws -> String? {
+        let element = element
+        return try await onAXQueue { () throws -> String? in
+            do {
+                let value = try element.copyAttributeValue(kAXValueAttribute)
+                return AXAttributeCast.cast(value, to: String.self)
+            } catch let error as AXElementError {
+                guard error.code != .noValue else { return nil }
+                throw GoToSheetAX.injectionError(for: error.code)
+            }
         }
     }
 

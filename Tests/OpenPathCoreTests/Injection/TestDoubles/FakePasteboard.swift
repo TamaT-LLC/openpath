@@ -96,6 +96,11 @@ final class FakePasteboard: PasteboardAccessing {
 }
 
 extension PasteboardSnapshot {
+    /// 最初のアイテムの文字列（貼り付けで入力欄に入る値）。文字列が無ければ nil。
+    var plainText: String? {
+        items.first?.representations.first { $0.type == Self.plainTextType }.flatMap { String(data: $0.data, encoding: .utf8) }
+    }
+
     /// ユーザーが元々コピーしていた内容の例（リッチテキストと、その文字列表現の 2 アイテム）。
     static let userClipboard = PasteboardSnapshot(items: [
         Item(representations: [
