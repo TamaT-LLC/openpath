@@ -164,4 +164,16 @@ struct GoToFolderPasteSequencerTests {
             .transientText(Self.japanesePath), .userClipboard,
         ])
     }
+
+    @Test("元のクリップボードが機密（パスワードマネージャー等）なら、注入後に戻さずに空にし、失敗にもしない")
+    func clearsConcealedClipboardAfterInjection() async throws {
+        let harness = SequencerHarness(clipboard: .concealedPassword)
+
+        try await harness.run(path: Self.path)
+
+        #expect(harness.pasteboard.writes == [.transientText(Self.path), .empty])
+        #expect(harness.pasteboard.contents == .empty)
+        #expect(harness.pasteboard.readTypes.isEmpty)
+    }
 }
+

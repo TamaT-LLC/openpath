@@ -148,6 +148,18 @@ struct GoToFolderPasteSequencerFailureTests {
         #expect(harness.pasteboard.contents == .newerUserCopy)
     }
 
+    @Test("元のクリップボードが機密なら、失敗経路でも戻さずに空にし、元のエラーをそのまま投げる")
+    func concealedClipboardIsClearedOnFailure() async {
+        let harness = SequencerHarness(clipboard: .concealedPassword)
+        harness.keyboard.failingKeyStrokes = [.returnKey]
+
+        await #expect(throws: InjectionError.timeout(step: .waitPaste)) {
+            try await harness.run(path: Self.path)
+        }
+        #expect(harness.pasteboard.contents == .empty)
+        #expect(harness.pasteboard.writes == [.transientText(Self.path), .empty])
+    }
+
     // MARK: - キャンセル
 
     @Test("開始前にキャンセルされていたら、何もせずに CancellationError を投げる")
