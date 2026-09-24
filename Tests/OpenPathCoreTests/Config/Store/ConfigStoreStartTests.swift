@@ -86,15 +86,37 @@ struct ConfigStoreStartTests {
         #expect(result.warnings.isEmpty)
     }
 
-    @Test("ghq root が取れなければ（無効・未インストール）roots を空にして生成する")
+    @Test("ghq root が取れなければ roots をホーム（~）にして生成し、ホームディレクトリを走査する設定で読み込む")
     func generatesDefaultFileWithoutGhqRoot() async throws {
         let (store, _) = F.makeStore(directory: directory, ghqRoot: nil)
         defer { store.stop() }
 
         await store.start()
 
-        #expect(try ConfigFileWriter.read(fileURL) == DefaultConfigFile.contents(ghqRoot: nil, homeDirectory: F.homeDirectory))
-        #expect(store.config == .default)
+        let contents = try ConfigFileWriter.read(fileURL)
+        #expect(contents == DefaultConfigFile.contents(ghqRoot: nil, homeDirectory: F.homeDirectory))
+        #expect(contents.contains("\nroots = [\"~\"]\n"))
+        #expect(store.config == Config(roots: [F.homeDirectory]))
+        #expect(store.lastError == nil)
+        #expect(store.warnings.isEmpty)
+    }
+
+    @Test(
+        "ghq が無効・未インストール・失敗のときは roots をホーム（~）にして生成する（実際の GhqRepositoryLister で確かめる）",
+        arguments: GhqUnavailability.allCases
+    )
+    func generatesHomeRootsWhenGhqIsUnavailable(unavailability: GhqUnavailability) async throws {
+        let store = ConfigStore(
+            directory: directory,
+            homeDirectory: F.homeDirectory,
+            ghqRootProvider: unavailability.makeLister()
+        )
+        defer { store.stop() }
+
+        await store.start()
+
+        #expect(try ConfigFileWriter.read(fileURL).contains("\nroots = [\"~\"]\n"))
+        #expect(store.config == Config(roots: [F.homeDirectory]))
         #expect(store.lastError == nil)
     }
 
