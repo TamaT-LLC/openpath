@@ -134,14 +134,24 @@ struct FileListSampleTests {
         #expect(tree.reads.count - leadingReads == expected, "\(label)")
     }
 
-    @Test("末尾の行まで読む場合の、推定 1 回の AX の呼び出し回数（先頭 20 行がディレクトリ・末尾 10 行が選べないファイル）", arguments: [
+    @Test("末尾の行まで読む場合の、推定 1 回の AX の呼び出し回数（先頭 20 行がディレクトリ・末尾 10 行が選べないファイル。文字色を読めないファイルが上限）", arguments: [
         // 先頭: 列 1 + 最後の列の子 1 + 子のロール 1 + 表示中の項目 1 + ディレクトリ 20 行 × 2。末尾: 2 + ファイル 10 行 × 3
-        ("カラム表示", "AXBrowser", 4 + 20 * 2 + 2 + 10 * 3),
+        ("カラム表示・文字色を読める", "AXBrowser", true, 4 + 20 * 2 + 2 + 10 * 3),
         // 先頭: 表示中の行 1 + 見出しの行 2 + ディレクトリ 19 行 × 3。末尾: 2 + ファイル 10 行 × 4
-        ("リスト表示", "AXOutline", 1 + 2 + 19 * 3 + 2 + 10 * 4),
+        ("リスト表示・文字色を読める", "AXOutline", true, 1 + 2 + 19 * 3 + 2 + 10 * 4),
+        // 文字色を読めないファイルの行は AXEnabled も読み、選べるか分からないまま 10 行すべてを読む（上限）
+        ("カラム表示・文字色を読めない", "AXBrowser", false, 4 + 20 * 2 + 2 + 10 * 4),
+        ("リスト表示・文字色を読めない", "AXOutline", false, 1 + 2 + 19 * 3 + 2 + 10 * 5),
     ])
-    func worstCaseAXCallCount(label: String, role: String, expected: Int) throws {
-        let items = Self.directoriesFirst(directories: 25, files: (1...10).map { FileListItem.dimmedFile("f\($0).txt") })
+    func worstCaseAXCallCount(label: String, role: String, hasTextColor: Bool, expected: Int) throws {
+        let files = (1...10).map { index in
+            var file = FileListItem.dimmedFile("f\(index).txt")
+            if !hasTextColor {
+                file.textOpacity = nil
+            }
+            return file
+        }
+        let items = Self.directoriesFirst(directories: 25, files: files)
         let node = role == "AXBrowser"
             ? Fixtures.columnView(ancestors: [], items: items, visibleItemCount: 20)
             : Fixtures.listView(items: items, visibleItemCount: 20)
@@ -149,7 +159,8 @@ struct FileListSampleTests {
 
         let sample = try Self.sample(node, in: tree)
 
-        #expect(sample.trailingRows == Array(repeating: Self.dimmedFileRow, count: 10), "\(label)")
+        let fileRow = hasTextColor ? Self.dimmedFileRow : FileListRow(isDirectory: false, isEnabled: true)
+        #expect(sample.trailingRows == Array(repeating: fileRow, count: 10), "\(label)")
         #expect(tree.reads.count == expected, "\(label)")
     }
 
