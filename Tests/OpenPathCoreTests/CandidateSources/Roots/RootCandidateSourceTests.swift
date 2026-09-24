@@ -63,4 +63,56 @@ struct RootCandidateSourceTests {
             try await CancelledTaskRunner.run { try await source.snapshot() }
         }
     }
+
+    // MARK: - 変更の検知（Issue #78）
+
+    @Test("trackedSnapshot は snapshot と同じ候補に、変更を確かめる記録を添えて返す")
+    func trackedSnapshotReturnsMarker() async throws {
+        try tree.makeDirectories("a/b", "c")
+        let source = RootCandidateSource(root: tree.root, options: RootScanOptions(depth: 2))
+
+        let tracked = try await source.trackedSnapshot()
+        let plain = try await source.snapshot()
+
+        #expect(tracked.snapshot.itemSet == plain.itemSet)
+        #expect(tracked.marker != nil)
+    }
+
+    @Test("hasChanged は記録の後の変化を確かめる")
+    func hasChangedChecksMarker() async throws {
+        try tree.makeDirectories("a/b")
+        let source = RootCandidateSource(root: tree.root, options: RootScanOptions(depth: 2))
+        let marker = try #require(try await source.trackedSnapshot().marker)
+        #expect(await !source.hasChanged(since: marker))
+
+        try tree.makeDirectories("a/new")
+
+        #expect(await source.hasChanged(since: marker))
+    }
+
+    @Test("別のルート・別の走査条件で作った記録は、変わったものとして扱う")
+    func markerFromOtherSourceIsTreatedAsChanged() async throws {
+        let other = tree.outsidePath("other")
+        try tree.makeDirectories("a")
+        try FileTreeFixture.makeDirectory(atPath: other)
+        let source = RootCandidateSource(root: tree.root, options: RootScanOptions(depth: 2))
+        let otherRoot = RootCandidateSource(root: other, options: RootScanOptions(depth: 2))
+        let otherDepth = RootCandidateSource(root: tree.root, options: RootScanOptions(depth: 3))
+
+        let otherRootMarker = try #require(try await otherRoot.trackedSnapshot().marker)
+        let otherDepthMarker = try #require(try await otherDepth.trackedSnapshot().marker)
+
+        #expect(await source.hasChanged(since: otherRootMarker))
+        #expect(await source.hasChanged(since: otherDepthMarker))
+    }
+
+    @Test("キャンセルされたタスクから trackedSnapshot を呼ぶと CancellationError を投げる")
+    func trackedSnapshotThrowsWhenCancelled() async throws {
+        try tree.makeDirectories("a")
+        let source = RootCandidateSource(root: tree.root, options: RootScanOptions())
+
+        await #expect(throws: CancellationError.self) {
+            try await CancelledTaskRunner.run { try await source.trackedSnapshot().snapshot }
+        }
+    }
 }

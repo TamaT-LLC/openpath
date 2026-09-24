@@ -1,9 +1,19 @@
 /// マッチに使う前処理済みの対象（name / path）と、前置フィルタ用の文字集合。
 /// パスだけで決まるため、同じパスを持つ別のソースや再走査の結果で共有する。
-struct CandidateTargets: Sendable {
+///
+/// 参照型にして、ソースごとの前処理済みの候補（PreparedCandidate）と統合後の候補（CandidateCatalog.Entry）には
+/// 参照（8 バイト）だけを持たせる。値（64 バイト）で持つと、差し替えのたびに作り直す両方の配列が
+/// 候補 20,000 件で計 2.5MB ほど大きくなり、再構築の間のメモリのピークを押し上げるため（Issue #78）。
+final class CandidateTargets: Sendable {
     let name: FuzzyTarget
     let path: FuzzyTarget
     let signature: CharacterSignature
+
+    init(name: FuzzyTarget, path: FuzzyTarget, signature: CharacterSignature) {
+        self.name = name
+        self.path = path
+        self.signature = signature
+    }
 }
 
 /// ソースから受け取った 1 件を、統合とマッチに使える形にしたもの。
@@ -25,6 +35,8 @@ struct CandidatePreparer: Sendable {
         var prepared: [PreparedCandidate] = []
         prepared.reserveCapacity(items.count)
         var indexByPath: [String: Int] = [:]
+        // 伸ばしながら作り直すと、途中の大きさの表が一時的に重なってメモリのピークを押し上げるため、先に確保する
+        indexByPath.reserveCapacity(items.count)
         for item in items {
             guard let path = CandidatePath.normalized(item.path) else {
                 // 手編集された履歴など想定外の入力として記録する

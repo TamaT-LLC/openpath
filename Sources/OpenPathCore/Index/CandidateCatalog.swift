@@ -14,17 +14,19 @@ struct CandidateCatalog: Sendable {
 
     /// 前置フィルタに使うクエリの先頭の文字数（DSN-002 §5）
     static let prefilterCharacterCount = 2
-    static let empty = CandidateCatalog(entries: [])
+    static let empty = CandidateCatalog(entries: [], indexByPath: [:])
 
     /// パスの昇順
     let entries: [Entry]
     /// パスから `entries` の添字を引く表。履歴の表引きと、差し替え時の前処理の使い回しに使う
     private let indexByPath: [String: Int]
 
-    /// - Parameter entries: パスの昇順・重複なし
-    private init(entries: [Entry]) {
+    /// - Parameters:
+    ///   - entries: パスの昇順・重複なし
+    ///   - indexByPath: `entries` の各パスから添字を引く表
+    private init(entries: [Entry], indexByPath: [String: Int]) {
         self.entries = entries
-        indexByPath = Dictionary(entries.indices.lazy.map { (entries[$0].path, $0) }, uniquingKeysWith: { first, _ in first })
+        self.indexByPath = indexByPath
     }
 
     /// ソースごとの候補を、同じパスは 1 件にまとめて統合する（DSN-002 §3）。
@@ -33,8 +35,13 @@ struct CandidateCatalog: Sendable {
     /// isDirectory が食い違う場合はファイルとして扱う。種別が走査の間に変わった可能性があり、
     /// フォルダ選択のパネル（FR-SOURCE-05）にファイルを出すより、ディレクトリを 1 件出し損ねる方が害が小さいため。
     init(merging sources: [CandidateSourceKind: [PreparedCandidate]]) {
+        // 伸ばしながら作り直すと、途中の大きさの配列・表が一時的に重なり、再構築の間のメモリのピークを
+        // 押し上げるため（候補 20,000 件で数 MB。Issue #78）、上限（重複が無い場合の件数）で先に確保する
+        let maximumCount = sources.values.reduce(0) { $0 + $1.count }
         var entries: [Entry] = []
+        entries.reserveCapacity(maximumCount)
         var indexByPath: [String: Int] = [:]
+        indexByPath.reserveCapacity(maximumCount)
         for (kind, candidates) in sources.sorted(by: { CandidateSourceKind.mergesBefore($0.key, $1.key) }) {
             for candidate in candidates {
                 if let index = indexByPath[candidate.path] {
@@ -46,7 +53,11 @@ struct CandidateCatalog: Sendable {
             }
         }
         entries.sort { $0.path < $1.path }
-        self.init(entries: entries)
+        // 統合に使った表を、並べ替えた後の添字に書き換えて使い回す（作り直すと一時的に表が 2 つ重なるため）
+        for (position, entry) in entries.enumerated() {
+            indexByPath[entry.path] = position
+        }
+        self.init(entries: entries, indexByPath: indexByPath)
     }
 
     /// 前置フィルタを通る候補の添字（昇順）。

@@ -11,7 +11,11 @@ import OpenPathCore
 ///
 /// `release(_:)` は待っている呼び出しがまだ無ければ次の呼び出しのために取っておくため、
 /// 「呼ばれたこと」を待ってから `release` しても取りこぼさない。
-final class ScriptedCandidateSource: CandidateSource {
+///
+/// 変更の検知（ChangeTrackingCandidateSource、Issue #78）: 既定では記録を返さず、周期の再構築でも毎回収集される。
+/// `setTracksChanges(true)` にすると収集のたびに版（`markChanged()` で進む整数）を記録として返し、
+/// `hasChanged(since:)` は記録の版が今の版と違うときだけ true を返す。
+final class ScriptedCandidateSource: ChangeTrackingCandidateSource {
     private struct Gate: Sendable {
         let callID: Int
         let continuation: CheckedContinuation<CandidateSourceSnapshot?, Never>
@@ -39,6 +43,10 @@ final class ScriptedCandidateSource: CandidateSource {
         var startWaiters: [CountWaiter] = []
         var nextCallID = 0
         var nextWaiterID = 0
+        var tracksChanges = false
+        var version = 0
+        var changeCheckCount = 0
+        var checkedChangesOnMainThread = false
     }
 
     let kind: CandidateSourceKind
@@ -69,6 +77,16 @@ final class ScriptedCandidateSource: CandidateSource {
     /// 以降の呼び出しでこのエラーを投げる（契約外のエラーの再現）
     func setFailure(_ failure: (any Error & Sendable)?) {
         state.withLock { $0.failure = failure }
+    }
+
+    /// true にすると、収集のたびに今の版を変更の記録として返す
+    func setTracksChanges(_ tracksChanges: Bool) {
+        state.withLock { $0.tracksChanges = tracksChanges }
+    }
+
+    /// 版を進める。以降、それより前の記録に対する `hasChanged(since:)` は true を返す
+    func markChanged() {
+        state.withLock { $0.version += 1 }
     }
 
     /// 最も古い待ちの呼び出しに `items` を返させる。待ちが無ければ次の呼び出しのために取っておく
@@ -104,6 +122,16 @@ final class ScriptedCandidateSource: CandidateSource {
 
     var priorities: [TaskPriority] {
         state.withLock { $0.priorities }
+    }
+
+    /// `hasChanged(since:)` が呼ばれた回数
+    var changeCheckCount: Int {
+        state.withLock { $0.changeCheckCount }
+    }
+
+    /// `hasChanged(since:)` が一度でもメインスレッドで呼ばれたか
+    var checkedChangesOnMainThread: Bool {
+        state.withLock { $0.checkedChangesOnMainThread }
     }
 
     /// 通算 `count` 回呼ばれるまで待つ。
@@ -171,6 +199,24 @@ final class ScriptedCandidateSource: CandidateSource {
             throw CancellationError()
         }
         return released
+    }
+
+    // MARK: - ChangeTrackingCandidateSource
+
+    func trackedSnapshot() async throws -> (snapshot: CandidateSourceSnapshot, marker: Int?) {
+        // 本番の roots と同じく、収集の前の状態を記録する（収集中の変化を次の確認で取りこぼさないため）
+        let (tracksChanges, version) = state.withLock { ($0.tracksChanges, $0.version) }
+        let snapshot = try await snapshot()
+        return (snapshot, tracksChanges ? version : nil)
+    }
+
+    func hasChanged(since marker: Int) async -> Bool {
+        let isMainThread = pthread_main_np() != 0
+        return state.withLock { state in
+            state.changeCheckCount += 1
+            state.checkedChangesOnMainThread = state.checkedChangesOnMainThread || isMainThread
+            return state.version != marker
+        }
     }
 
     /// `release` された結果を返す。キャンセルを尊重する設定でキャンセルされたら nil

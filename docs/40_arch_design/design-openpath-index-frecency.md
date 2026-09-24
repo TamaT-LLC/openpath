@@ -11,7 +11,7 @@ upstream:
 downstream:
 - PROJ-TST-001
 owner: TakehiroT
-updated: 2026-09-24
+updated: 2026-09-25
 ---
 
 # 詳細設計: 候補インデックスと frecency（CandidateIndex / HistoryStore / ConfigStore）
@@ -54,22 +54,36 @@ protocol CandidateSource: Sendable {
     var kind: Source { get }
     func snapshot() async throws -> CandidateSourceSnapshot  // { items: [SourceItem(path, isDirectory)], warnings }
 }
+
+// 前回の収集から変わったかを安価に確かめられるソース（roots が準拠。Issue #78）
+protocol ChangeTrackingCandidateSource: CandidateSource {
+    associatedtype ChangeMarker: Sendable
+    func trackedSnapshot() async throws -> (snapshot: CandidateSourceSnapshot, marker: ChangeMarker?)
+    func hasChanged(since marker: ChangeMarker) async -> Bool
+}
 ```
 
 | ソース | 収集方法 | 更新契機 |
 | --- | --- | --- |
 | history | `HistoryCandidateSource(store:)` → `HistoryStore.entries` | 確定のたび（`CandidateIndexRebuilder.refreshHistory()` 経由。全件再構築のカウントには含めない） |
-| roots | `RootCandidateSource.sources(for: config)` が **ルートごとに 1 ソース**を生成。`RootDirectoryScanner`（`FileManager.enumerator` を同期 API でラップ）で `config.depth` まで走査。`.skipsHiddenFiles`（名前が `.` で始まる項目と、隠し属性 UF_HIDDEN の項目。ホームの `~/Library` も後者として配下ごと除外される）、`node_modules` / `.git` / `target` / `DerivedData` / `.build` は既定で除外（`config.ignore` で変更可） | 起動時、全件再構築が終わってから 5 分後、メニューの「候補を再構築」、`roots` / `depth` / `ignore` / `ghq.enabled` の設定変更 |
-| ghq | `GhqCandidateSource(lister:)` → `GhqRepositoryLister` が `Process` で `ghq root` → `ghq list -p` を実行。`PATH` は `LoginShellPathResolver`（login shell から取得するキャッシュ持ちの actor）で解決し、候補ソースと ConfigStore（§6）で 1 インスタンスを共有する | 同上 |
+| roots | `RootCandidateSource.sources(for: config)` が **ルートごとに 1 ソース**を生成。`RootDirectoryScanner`（`FileManager.enumerator` を同期 API でラップ）で `config.depth` まで走査。`.skipsHiddenFiles`（名前が `.` で始まる項目と、隠し属性 UF_HIDDEN の項目。ホームの `~/Library` も後者として配下ごと除外される）、`node_modules` / `.git` / `target` / `DerivedData` / `.build` は既定で除外（`config.ignore` で変更可） | 起動時、全件再構築が終わってから 5 分後（変更が無ければ走査しない。下記）、メニューの「候補を再構築」、`roots` / `depth` / `ignore` / `ghq.enabled` の設定変更 |
+| ghq | `GhqCandidateSource(lister:)` → `GhqRepositoryLister` が `Process` で `ghq root` → `ghq list -p` を実行。`PATH` は `LoginShellPathResolver`（login shell から取得するキャッシュ持ちの actor）で解決し、候補ソースと ConfigStore（§6）で 1 インスタンスを共有する | 起動時、全件再構築が終わってから 5 分後（結果が前回と同じなら差し替えない。下記）、メニューの「候補を再構築」、設定変更 |
 
 - 走査は `Task.detached(priority: .utility)` から `snapshot()` を呼び、完了した時点で `CandidateIndex.replace(source:with:)` によりアトミックに差し替える（同一ソースの走査は直列）。ルートが設定から外れた場合は空配列で `replace` する。
 - roots は 1 ルートあたり 20,000 件で打ち切る（`RootDirectoryScanner` が発生元で警告ログを出す）。パッケージ（`.app` 等）判定は `includingPropertiesForKeys: [.isPackageKey]` を先読みせず、**拡張子のあるディレクトリにだけ個別に問い合わせる**（先読みは LaunchServices を引くため 5,000 件の列挙だけで数百 ms かかった。ベンチの最小値が 289ms → 45ms に改善、PR #51）。
 - ghq: login shell から取れた PATH に既定 PATH（`/opt/homebrew/bin` 等）の不足分を補う。`ghq root` が空なら `emptyRoot` として失敗扱いにし、`ghq list -p` は実行しない（`ghq list -p` の出力が空なのは失敗ではなく空の一覧として返す）。login shell 起動のフォールバック結果はキャッシュする（5 分ごとの再構築のたびに待たないため）。既定 config 生成（§6）には、`ghq root` だけを実行する `root()` を `GhqRootProviding` として使う（`ghq list -p` は実行しない。PR #43 / #50）。
 - 全件の再構築は「5 分ごと」の固定時刻ではなく「前回の再構築を終えてから 5 分」で数える。設定の変更ではどの設定に依存するソースかを問わず全ソースを走査し直す（対応表を持つ複雑さを避けるため。候補ソースに関わらない設定（hotkey・auto_confirm・disabled_apps）では再構築しない）。roots から外れたルート・無効にした ghq の除去は、次の再構築の冒頭で直列に行う（設定変更時に即座に `replace(source:with: [])` すると、走査中の差し替えと並行して後勝ちで候補が復活しうるため、PR #61）。
+- **周期の再構築では、変更の無いソースを走査も差し替えもしない**（Issue #78。FR-SOURCE-04 の 5 分間隔は維持する）。起動時・手動の「候補を再構築」・設定変更では従来どおり全ソースを必ず走査し直す。判定はソース単位で、再構築 1 回で収集するソースの決定と直近の記録の保持は `CandidateSourceMarkers` が行う。
+  - roots: 走査のときに、中身を読むディレクトリ（ルートと depth 未満の各ディレクトリ。除外・隠し・パッケージ・シンボリックリンクは中身を読まないため含まない）の状態を、中身を読む前に `stat` で記録する（`RootScanMarker`。デバイス・inode・mtime・ctime）。周期のたびにそれらだけを `stat` し直し、どれも同じなら走査しない。ディレクトリの mtime は直下の追加・削除・改名で変わり、ctime は権限・隠し属性の変更でも変わるため、候補（depth までの一覧）が変わりうる変化はここに現れる。検知しないのは、シンボリックリンクのリンク先の中や種別の変化と、depth の階層の項目の隠し属性の変化（手動の「候補を再構築」で反映する）。
+  - roots の記録の数と上限: 記録するディレクトリはルートを除けば候補に含まれるディレクトリの一部なので、ルートあたりの上限（20,000 件）で数が抑えられる。`stat` は 1 回約 1.3µs で、最悪（depth 未満のディレクトリだけで 20,000 件）でも約 25ms と、全件の走査（約 90ms）と差し替え（約 65ms）より軽いため、別の上限は設けない（計測はいずれも Apple M5 Pro・リリースビルド、PROJ-TST-003 §3.2）。ホームを depth 2 で走査する既定の roots（`["~"]`、§6）では、記録するのはホームと直下の表示されるディレクトリだけで、その数は候補の数（開発者のホームで 147 件、§6）より少なく、確認は 1 回 1ms 未満。上限で打ち切った走査も、読んだディレクトリが同じなら同じ候補になるため記録する。ルートを走査できなかったときと、中身を読めないディレクトリがあったとき（権限が無い、プライバシーの許可が無い `~/Documents` 等）は記録を作らず、次の周期も走査する（読めるようになってもディレクトリの状態が変わるとは限らないため）。隠しファイルの置き換え（ホーム直下の dotfile 等）でもルートの mtime は変わるため走査し直すが、候補が同じなら差し替えない（下記）。
+  - ghq: `ghq list -p` の結果の比較で判定し、`ghq root` 配下の構造（host/owner/repo）の mtime は使わない。リポジトリかどうかは ghq が VCS のディレクトリ（`.git` 等）の有無で決め、階層も任意（サブグループ等）のため、既存のディレクトリをリポジトリにした場合などを構造の mtime では捉えられないため。子プロセス（`ghq root` → `ghq list -p`）の CPU 時間は 1 回約 37ms（リポジトリ 104 件）、本体側は約 1.4ms で、5 分ごとなら 0.02% 未満。
+  - history: 現状どおり、確定のたびの `refreshHistory()` と周期のたびに取り直す。
+  - `CandidateIndex.replace(source:with:)` は、前処理した候補（パスと種別の並び）が今のソースの候補と同じなら何もせず false を返す。統合し直すと全ソースの候補数に比例した CPU（候補 20,000 件で約 65ms。同じと分かれば約 0.9ms）と一時的なメモリを使うため。
+- 再構築のメモリのピークを抑える（Issue #78）: 走査の列挙で得る URL・リソース値は autorelease されるため、1 件ごとに `autoreleasepool` で解放する（スレッドのプールに任せると走査の後もしばらく全件分が残り、候補 20,000 件の走査の後の phys_footprint が約 6MB 多かった）。前処理済みの対象（`CandidateTargets`、64 バイト）は参照型にして、`PreparedCandidate` と `CandidateCatalog.Entry` には参照だけを持たせる（1 件あたり 96→32 バイト、112→48 バイト）。統合の配列と表は先に確保し、統合に使った表を並べ替えた後の添字に書き換えて使い回す（伸ばしながらの作り直しや表の作り直しで一時的に重なる分を避ける）。
 - 同一パスが複数ソースにある場合は 1 件に統合し、`source` は優先度 history > ghq > roots で決める。統合キーはファイルシステムを引かない字句的な正規化（末尾 `/`・`//`・`.`・`..`。`RootPathResolver` と同じ規則）を使う。isDirectory の判定が食い違う場合はファイル扱いにする（フォルダ選択のパネルにファイルを誤って出すより、ディレクトリを 1 件出し損ねる方が害が小さいため）。絶対パスにできない候補は含めない。frecency / `lastUsed` は同じ正規化をかけた上で `HistoryStore` から引く（PR #57）。
 - 空クエリで履歴（frecency > 0）が 8 件未満のときは、frecency 0 の候補をパスの昇順で補う（初回起動で履歴が空のときに「一致する候補がありません」を出さないため、PR #57）。
 - 候補数が 10,000 件以上のときの前置フィルタは「取りこぼさない」よう、先頭 2 文字（正規化後）のどちらかを含まない候補を外す判定として実装する（候補ごとに含む文字を 256 ビットへ畳んで 1 回の AND で判定。ファジーマッチはクエリを部分列として含む必要があるため結果は変わらない、PR #57）。
-- 履歴をクリアしたときは `CandidateIndexRebuilder.historyDidClear()` を呼ぶ。全件の再構築の走査中なら取り消して走査し直し、それ以外は履歴だけを取り直す（走査の終わりまで待つと、消した場所が全件走査の間ずっと候補に残るため、PR #65）。
+- 履歴をクリアしたときは `CandidateIndexRebuilder.historyDidClear()` を呼ぶ。全件の再構築の走査中なら取り消して走査し直し（周期の再構築の途中なら周期の再構築として。Issue #78）、それ以外は履歴だけを取り直す（走査の終わりまで待つと、消した場所が全件走査の間ずっと候補に残るため、PR #65）。
 - 検索語が `/` または `~/` で始まり末尾が `/` でないときは、`RootPathResolver`（roots と同じ字句的な正規化）で正規化した上で存在と種別（ディレクトリに絞るときはディレクトリ。パッケージはファイル扱い）を確かめ、候補の先頭に加える（`DirectPathEntry`、UX-001 §5「Tab でパスを直接入力」）。同じパスの候補は除き、その最終使用日時を引き継ぐ。存在確認はクエリと同じく MainActor の外で行い、取り消された検索では行わない（PR #65）。
 
 ## 4. frecency スコア
@@ -203,4 +217,5 @@ enabled = true
 | 1 文字入力ごとのマッチ（候補 5,000 件） | 16ms 以内（メインスレッドをブロックしない） |
 | 候補の前処理（正規化・`FuzzyTarget` 構築） | 200ms 以内（独自追加の目標。roots 走査目標の 1 割として設定。デバッグビルドは 10 倍まで緩和、PR #47） |
 | roots 走査（2 階層、5,000 件） | 2 秒以内、バックグラウンド |
-| 常駐メモリ | 候補 20,000 件で 30MB 以下（`CandidateIndex` が保持する分・ヒープ増分として計測。実測は `FuzzyTarget` 圧縮後で 8.6MB、PR #57。アプリ全体の常駐量は #27 の統合後に実機で確認する） |
+| 常駐メモリ | 候補 20,000 件で 30MB 以下（`CandidateIndex` が保持する分・ヒープ増分として計測。実測は `FuzzyTarget` 圧縮後で 8.6MB、PR #57）。アプリ全体（phys_footprint）は REQ-001 NFR-03 の 50MB 以下を、起動時の構築中・再構築の直後も含めて満たす（Issue #78 の後の実測は起動時のピーク 39.2〜39.6MB、変更を検知した再構築の直後 43.8MB、PROJ-TST-003 §3.1） |
+| 周期の再構築（変更なし） | 走査も差し替えもしない。roots は記録したディレクトリの `stat` だけ（候補 20,000 件・depth 2 で 102 個、約 0.1ms）。アイドル CPU は候補 20,000 件で 0.1% 未満（実測 0.0049%、PROJ-TST-003 §3.2） |

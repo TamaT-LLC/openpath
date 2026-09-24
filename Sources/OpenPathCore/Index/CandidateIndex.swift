@@ -82,9 +82,22 @@ public final class CandidateIndex: Sendable {
     /// 前処理（正規化）は 1 件あたり数十 µs かかるため、呼び出し元のスレッドではなく並行実行用のスレッドで行う。
     /// 異なるソースの差し替えが並行しても、すべての差し替えを反映した候補が最後に残る。
     /// 同じソースの差し替えが並行した場合は後に反映した方が残るため、同じソースの走査は直列にすること。
-    public func replace(source: CandidateSourceKind, with items: [SourceItem]) async {
-        let previous = state.withLock { $0.catalog }
+    ///
+    /// 前処理した候補（パスと種別の並び）が今の `source` の候補と同じなら、何もせずに false を返す。
+    /// 統合し直すと全ソースの候補数に比例した CPU と一時的なメモリを使うため、周期の再構築で前回と同じ候補を
+    /// 返したソースでは省く（Issue #78）。
+    /// - Returns: 候補を差し替えたか。
+    @discardableResult
+    public func replace(source: CandidateSourceKind, with items: [SourceItem]) async -> Bool {
+        let (previous, current) = state.withLock { ($0.catalog, $0.sources[source] ?? []) }
+        // 大半は正規化済み・重複なしの同じ並びで届くため、前処理の前に比べて前処理も省く
+        if current.elementsEqual(items, by: { $0.path == $1.path && $0.isDirectory == $1.isDirectory }) {
+            return false
+        }
         let prepared = preparer.prepare(items, reusing: previous)
+        if current.elementsEqual(prepared, by: { $0.path == $1.path && $0.isDirectory == $1.isDirectory }) {
+            return false
+        }
         let (sources, revision) = state.withLock { state in
             state.sources[source] = prepared.isEmpty ? nil : prepared
             state.revision += 1
@@ -97,6 +110,7 @@ public final class CandidateIndex: Sendable {
             state.catalog = catalog
             state.catalogRevision = revision
         }
+        return true
     }
 
     /// `text` にマッチする候補を、総合スコア `fuzzyScore × (1 + log1p(frecency))` の降順で最大 `limit` 件返す。
