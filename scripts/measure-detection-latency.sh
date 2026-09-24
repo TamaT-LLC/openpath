@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # ログのタイムスタンプから、パネルの検知からパレット表示までのレイテンシを集計する
 # （FR-DETECT-03「300ms 以下」、TST-001 §5「p95 300ms 以下」）。
+# 始点の panel detected は PanelWatcher がパネルを検知した直後に出るため、パネルが生成されてから検知されるまで
+# （AX 通知の遅れや 200ms ポーリングの待ち）の時間は含まれない。
 #
 # 使い方: scripts/measure-detection-latency.sh [--log FILE]... [--start-pattern TEXT] [--end-pattern TEXT] [--threshold-ms MS]
 #   --log FILE           読むログ。繰り返し指定すると指定した順に続けて読む。省略時は ~/Library/Logs/openpath/ の
