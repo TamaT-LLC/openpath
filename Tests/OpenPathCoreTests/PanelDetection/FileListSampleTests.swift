@@ -134,6 +134,25 @@ struct FileListSampleTests {
         #expect(tree.reads.count - leadingReads == expected, "\(label)")
     }
 
+    @Test("末尾の行まで読む場合の、推定 1 回の AX の呼び出し回数（先頭 20 行がディレクトリ・末尾 10 行が選べないファイル）", arguments: [
+        // 先頭: 列 1 + 最後の列の子 1 + 子のロール 1 + 表示中の項目 1 + ディレクトリ 20 行 × 2。末尾: 2 + ファイル 10 行 × 3
+        ("カラム表示", "AXBrowser", 4 + 20 * 2 + 2 + 10 * 3),
+        // 先頭: 表示中の行 1 + 見出しの行 2 + ディレクトリ 19 行 × 3。末尾: 2 + ファイル 10 行 × 4
+        ("リスト表示", "AXOutline", 1 + 2 + 19 * 3 + 2 + 10 * 4),
+    ])
+    func worstCaseAXCallCount(label: String, role: String, expected: Int) throws {
+        let items = Self.directoriesFirst(directories: 25, files: (1...10).map { FileListItem.dimmedFile("f\($0).txt") })
+        let node = role == "AXBrowser"
+            ? Fixtures.columnView(ancestors: [], items: items, visibleItemCount: 20)
+            : Fixtures.listView(items: items, visibleItemCount: 20)
+        let tree = StubPanelTree()
+
+        let sample = try Self.sample(node, in: tree)
+
+        #expect(sample.trailingRows == Array(repeating: Self.dimmedFileRow, count: 10), "\(label)")
+        #expect(tree.reads.count == expected, "\(label)")
+    }
+
     // MARK: - 表示範囲の外にある今のフォルダの列
 
     @Test("カラム表示で今のフォルダの列が表示範囲の外（表示中の項目がない）なら、列の先頭の項目を読む")
