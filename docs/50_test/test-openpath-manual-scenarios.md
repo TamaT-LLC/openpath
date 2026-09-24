@@ -91,6 +91,9 @@ TST-001 §3 と PR #65 の手順のうち、そのままでは実施できない
 | PRE-01 | `./scripts/build.sh && ./scripts/sign.sh` | 警告なく `build/openpath.app` ができ、署名の検証が通る |  |  |
 | PRE-02 | 起動中の openpath（インストール版・別の場所のビルド）を終了する。初回の状態に戻す: `tccutil reset Accessibility jp.tamat.openpath`、`defaults delete jp.tamat.openpath onboardingFinished`、`defaults delete jp.tamat.openpath enabled`（「有効」の記録）、`~/.config/openpath/config.toml` を退避する | 同じ bundle id の openpath が残っていない（ログを共有するため、スモークテストは複数起動を前提不足にする）。ad-hoc 署名は再ビルドのたびに権限の付け直しが要る。`defaults delete` は記録が無ければエラーになるが問題ない |  |  |
 | PRE-03 | 別の端末で `tail -f ~/Library/Logs/openpath/openpath.log` | 以降の項目でログを確かめられる |  |  |
+| PRE-04 | 注入（§6・§9）を切り分けられるよう、リリースビルドでも debug ログを出す: openpath を終了し、`defaults write jp.tamat.openpath logLevel debug` を実行してから起動し直す | 起動時のログに `設定 logLevel により、ログの最小レベルを debug にしました` が出る。注入のたびに `注入するパス`・`主方式:` / `副方式:` の各ステップ（経過時間付き）・`確定前の確認:` と `確定前の移動先シートの入力欄` / `候補の選択`・`移動後のパネルの現在地（表示名）` が出る（Issue #74） |  |  |
+
+debug ログは注入したパスなどを含む。実施が終わったら openpath を終了し、`defaults delete jp.tamat.openpath logLevel` で既定（info）に戻す。ログを共有する前に、パスを含む行（`[DEBUG]`）を取り除くか、共有してよい範囲か確かめる。
 
 ## 4. 初回起動と権限（ONB / PERM）
 
