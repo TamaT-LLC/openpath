@@ -72,7 +72,7 @@ scripts/measure-memory.sh --pid "$OPENPATH_PID"
 scripts/measure-isolated.sh stop "$OPENPATH_MEASURE_DIR"
 ```
 
-1 回だけ測るなら `scripts/measure-memory.sh --candidates 20000` でもよい（起動から停止までを行い、落ち着いた直後に測る）。
+1 回だけ測るなら `scripts/measure-memory.sh --candidates 20000` でもよい（起動から停止までを行い、落ち着いてから `--measure-delay`（既定 30 秒）後に測るため、上の手順と同じ時点の値になる）。
 
 候補 20,000 件、落ち着いてから 30 秒後（`footprint` で取得。1 MB = 1,048,576 バイト）:
 
@@ -85,6 +85,8 @@ scripts/measure-isolated.sh stop "$OPENPATH_MEASURE_DIR"
 | 5 | 15:43:00 | 39.95 MB | 50.27 MB | 87.12 MB | PASS |
 
 現在値の中央値は 40.08 MB、最大は 41.06 MB（基準まで 8.94 MB）。起動時の構築中のピークは 5 回とも 50 MB を少し超えた（50.27〜50.70 MB）。
+
+このほか、`--measure-delay` の動作確認として `scripts/measure-memory.sh --candidates 20000` で 1 回測った値（16:27:51、main 95089e4 の .app）は、現在値 44.06 MB・ピーク 52.34 MB だった（PASS）。この回は構築が落ち着くまで起動から約 56 秒（普段は 6〜15 秒）かかっており、原因は調べていない。落ち着くまでの経過によっては、同じ手順でも 5 回の範囲より 3 MB ほど高くなることがある。
 
 周期の再構築（構築完了から 5 分ごと）を経た後と、候補数を変えたときの値（参考）:
 

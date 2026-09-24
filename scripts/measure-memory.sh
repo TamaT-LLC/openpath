@@ -3,10 +3,13 @@
 #
 # 使い方:
 #   scripts/measure-memory.sh [--pid PID] [--threshold-mb MB] [--method auto|footprint|top]
-#   scripts/measure-memory.sh --candidates N [--settle-seconds S] [--app PATH] [--threshold-mb MB] [--method ...]
+#   scripts/measure-memory.sh --candidates N [--measure-delay S] [--settle-seconds S] [--app PATH] [--threshold-mb MB] [--method ...]
 #   --pid             計測するプロセス。省略時は openpath という名前のプロセスがちょうど 1 つならそれを使う
 #   --candidates N    scripts/measure-isolated.sh start --candidates N で計測用のインスタンスを起動して計測し、
 #                     終わったら（失敗・中断したときも）stop で止める。--pid とは併用できない
+#   --measure-delay S --candidates のとき、候補の構築が落ち着いてから測るまで待つ秒数（整数）。既定 30。
+#                     構築の直後は一時的に確保したメモリがまだ解放されていないことがあるため、TST-001 §5 の手順
+#                     （落ち着いてから 30 秒後に --pid で測る）と同じ時点で測る
 #   --settle-seconds S, --app PATH
 #                     --candidates のとき measure-isolated.sh start にそのまま渡す
 #   --threshold-mb MB 合格とする phys_footprint の上限（以下なら PASS）。既定 50（1 MB = 1,048,576 バイト）
@@ -32,6 +35,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 readonly SCRIPT_DIR
 
 readonly DEFAULT_THRESHOLD_MB=50
+readonly DEFAULT_MEASURE_DELAY_SECONDS=30
 readonly METHOD_AUTO="auto"
 readonly METHOD_FOOTPRINT="footprint"
 readonly METHOD_TOP="top"
@@ -97,6 +101,7 @@ ISOLATED_START_OUTPUT=""
 ISOLATED_MEASURE_DIR=""
 ISOLATED_CANDIDATES=""
 ISOLATED_LIMIT_WARNING=""
+ISOLATED_MEASURE_DELAY=""
 
 measure_with_footprint() {
   local pid="$1"
@@ -212,8 +217,8 @@ print_report() {
     if [[ "${ISOLATED_LIMIT_WARNING}" == "yes" ]]; then
       warning_label="あり"
     fi
-    printf '計測用インスタンス: 候補 %s 件（measure-isolated.sh。ログの上限到達の警告: %s）\n' \
-      "${ISOLATED_CANDIDATES}" "${warning_label}"
+    printf '計測用インスタンス: 候補 %s 件（measure-isolated.sh。ログの上限到達の警告: %s。構築が落ち着いてから %s 秒後に計測）\n' \
+      "${ISOLATED_CANDIDATES}" "${warning_label}" "${ISOLATED_MEASURE_DELAY}"
   fi
   printf '計測時刻: %s\n' "$(now_iso8601)"
   printf '取得方法: %s\n' "${METHOD_LABEL}"
@@ -235,6 +240,7 @@ main() {
   local pid_option=""
   local candidates=""
   local settle_seconds=""
+  local measure_delay_seconds=""
   local app_path=""
   local threshold_mb="${DEFAULT_THRESHOLD_MB}"
   local method="${METHOD_AUTO}"
@@ -248,6 +254,11 @@ main() {
       --candidates)
         require_option_value "$1" "$#"
         candidates="$2"
+        shift 2
+        ;;
+      --measure-delay)
+        require_option_value "$1" "$#"
+        measure_delay_seconds="$2"
         shift 2
         ;;
       --settle-seconds)
@@ -288,16 +299,22 @@ main() {
   if [[ -n "${candidates}" && -n "${pid_option}" ]]; then
     die_unmeasurable "--candidates と --pid は併用できません"
   fi
-  if [[ -z "${candidates}" && ( -n "${settle_seconds}" || -n "${app_path}" ) ]]; then
-    die_unmeasurable "--settle-seconds と --app は --candidates と一緒に指定してください"
+  if [[ -z "${candidates}" && ( -n "${settle_seconds}" || -n "${measure_delay_seconds}" || -n "${app_path}" ) ]]; then
+    die_unmeasurable "--settle-seconds・--measure-delay・--app は --candidates と一緒に指定してください"
   fi
 
   if [[ -n "${candidates}" ]]; then
+    measure_delay_seconds="${measure_delay_seconds:-${DEFAULT_MEASURE_DELAY_SECONDS}}"
+    is_non_negative_integer "${measure_delay_seconds}" \
+      || die_unmeasurable "--measure-delay は 0 以上の整数で指定してください: ${measure_delay_seconds}"
     STARTED_PID=""
     trap stop_isolated_instance EXIT
     exit_on_signals
     start_isolated_instance "${candidates}" "${settle_seconds}" "${app_path}"
     pid_option="${STARTED_PID}"
+    ISOLATED_MEASURE_DELAY="${measure_delay_seconds}"
+    log "候補の構築が落ち着いてから ${measure_delay_seconds} 秒待って計測します"
+    sleep "${measure_delay_seconds}"
   fi
 
   resolve_target_pid "${pid_option}"
