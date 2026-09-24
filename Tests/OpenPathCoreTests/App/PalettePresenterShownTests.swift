@@ -33,7 +33,8 @@ struct PalettePresenterShownTests {
             viewModel: PaletteViewModel(homeDirectory: "/Users/example"),
             window: window,
             includeFiles: { false },
-            search: ScriptedPaletteSearch().search,
+            // 表示の知らせは候補の結果を待たないため、検索はすぐに空で返して保留中の検索を残さない
+            search: { _, _, _ in [] },
             didShow: { context in
                 recorder.record(Notification(panelID: context.id, lastWindowCall: window.calls.last))
             }
