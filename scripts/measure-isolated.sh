@@ -8,6 +8,8 @@
 # start: 一時ディレクトリ（$TMPDIR/openpath-measure-TASK-030.XXXXXX）の home/ を一時 HOME にして設定ファイルを置き、
 #   `open -n -g --env CFFIXED_USER_HOME=<一時 HOME>` で起動する。CoreFoundation のホーム（NSHomeDirectory）は
 #   HOME ではなく CFFIXED_USER_HOME で差し替わるため、設定・履歴・ログはすべて一時 HOME 配下になる。ghq は無効にする。
+#   起動引数 `-onboardingFinished YES -enabled YES`（UserDefaults の引数ドメイン。保存はされない）を渡し、初回起動の案内
+#   （アプリを前面に出すウインドウ）を出さず、メニューの「有効」の記録にかかわらず有効の状態で、常用時と同じ状態を測る。
 #   --candidates N      roots から読み込ませる候補の数（ルート自身を含む）。既定 0（roots は空）。
 #                       depth 2 以内のディレクトリだけのツリーを作る。ルートあたりの上限（20000 件）以上を指定すると、
 #                       上限を少し超えるツリーを作って上限まで読み込ませ、ログに上限到達の警告が出たかを確かめる
@@ -223,8 +225,11 @@ launch_app() {
   LAUNCH_EXECUTABLE="${executable}"
   LAUNCH_HOME="${home}"
   LAUNCHED_AT_SECONDS=${SECONDS}
-  log "open -n -g --env ${HOME_OVERRIDE_VARIABLE}=${home} ${app_dir}"
-  open -n -g --env "${HOME_OVERRIDE_VARIABLE}=${home}" "${app_dir}" || die "open で起動できません: ${app_dir}"
+  # UserDefaults の引数ドメインで上書きする（UserDefaultsOnboardingRecord.finishedKey・EnabledStateRecording.enabledKey）
+  local app_arguments=(-onboardingFinished YES -enabled YES)
+  log "open -n -g --env ${HOME_OVERRIDE_VARIABLE}=${home} ${app_dir} --args ${app_arguments[*]}"
+  open -n -g --env "${HOME_OVERRIDE_VARIABLE}=${home}" "${app_dir}" --args "${app_arguments[@]}" \
+    || die "open で起動できません: ${app_dir}"
 
   local deadline=$((SECONDS + LAUNCH_TIMEOUT_SECONDS))
   local new_pids=""
