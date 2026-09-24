@@ -22,6 +22,8 @@ final class AXPanelWatchEnvironment: PanelWatchEnvironment {
     private var observer: AXApplicationObserver?
     /// attach / detach のたびに増やす。axQueue での登録中に張り替えが起きた場合、古い登録を捨てるために使う
     private var attachGeneration = 0
+    /// 直前の走査で見つけたパネルの選択モードの推定結果（パネルの ID ごと）
+    private var selectionEstimates: [PanelContext.ID: PanelSelectionEstimate] = [:]
 
     init(detector: any PanelDetecting) {
         self.detector = detector
@@ -93,13 +95,24 @@ final class AXPanelWatchEnvironment: PanelWatchEnvironment {
         let detector = detector
         // 張り替え中なら、別のアプリの observer にパネルの要素を登録しない
         let observer = observer.flatMap { $0.processID == processID ? $0 : nil }
-        return await onAXQueue {
+        let (outcome, estimates) = await onAXQueue {
             let scan = PanelScanner.scan(processID: processID, detector: detector)
             for element in scan.panelElements {
                 observer?.observeDestruction(of: element)
             }
-            return scan.outcome
+            return (scan.outcome, scan.selectionEstimates)
         }
+        // ウィンドウ一覧を読めなかった走査では、追跡中のパネルを消えたとみなさないため、直前の推定結果も残す
+        if case .found = outcome {
+            selectionEstimates = estimates
+        }
+        return outcome
+    }
+
+    /// 直前の走査で見つけたパネルの選択モードの推定結果。PanelWatcher がログ（`panel detected` 等）に出すために使う。
+    /// 走査の結果を返す前に更新するため、その走査で送られるイベントのログには、同じ走査の推定結果が出る。
+    func selectionEstimate(for panelID: PanelContext.ID) -> PanelSelectionEstimate? {
+        selectionEstimates[panelID]
     }
 }
 

@@ -41,6 +41,19 @@ public protocol PanelTreeReader {
     /// 文字列の先頭の文字色の不透明度（0〜1）。`AXAttributedStringForRange` の `AXForegroundColor` から読む。
     /// 文字列を持たない要素や、色の指定がない場合は nil。
     func textOpacity(of node: Node) throws -> Double?
+    /// 配列の属性の要素数（`AXUIElementGetAttributeValueCount`）。属性を持たなければ 0。
+    func itemCount(_ attribute: PanelTreeItemsAttribute, of node: Node) throws -> Int
+    /// 配列の属性のうち range の範囲の要素（`AXUIElementCopyAttributeValues`）。要素数を超える分は切り詰める。
+    /// フォルダの項目がすべて返る属性（`AXRows` / `AXChildren`）を、表示範囲の外の数件だけ読むのに使う。
+    func items(_ attribute: PanelTreeItemsAttribute, of node: Node, in range: Range<Int>) throws -> [Node]
+}
+
+/// 表示範囲の外の要素も含む、行・項目の配列の属性（DSN-001 §2.3）。
+public enum PanelTreeItemsAttribute: Hashable, Sendable {
+    /// `AXRows`。AXOutline / AXTable の行（上から順）。
+    case rows
+    /// `AXChildren`。カラム表示の列の AXList の項目（並び順どおり）。
+    case children
 }
 
 /// AX ツリーを読めなかった理由。

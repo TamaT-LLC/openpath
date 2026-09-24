@@ -68,16 +68,25 @@ enum FileListFixtures {
     /// - Parameters:
     ///   - ancestors: 今のフォルダより左の列（親フォルダ）の項目。
     ///   - hasPreviewColumn: ファイルを選んだときに右に出るプレビューの列（AXList を持たない）を付けるか。
+    ///   - visibleItemCount: 今のフォルダの列で表示中の項目の数（先頭から）。nil ならすべて表示中。
+    ///     0 は、今のフォルダの列がブラウザの表示範囲の外にある（横にスクロールされていない）場合。
     static func columnView(
         id: String = fileListID,
         ancestors: [[FileListItem]] = [[.directory("Users")]],
         items: [FileListItem],
-        hasPreviewColumn: Bool = false
+        hasPreviewColumn: Bool = false,
+        visibleItemCount: Int? = nil
     ) -> StubNode {
+        let currentIndex = ancestors.count
         var columns = (ancestors + [items]).enumerated().map { index, columnItems in
             let columnID = "\(id)/column/\(index)"
             return StubNode(id: columnID, role: "AXScrollArea", children: [
-                StubNode(role: "AXList", children: columnItems.map { browserItem($0, listID: columnID) }),
+                StubNode(
+                    id: listID(ofColumn: index, in: id),
+                    role: "AXList",
+                    children: columnItems.map { browserItem($0, listID: columnID) },
+                    visibleItemCount: index == currentIndex ? visibleItemCount : nil
+                ),
                 StubNode(role: "AXScrollBar"),
             ])
         }
@@ -94,6 +103,11 @@ enum FileListFixtures {
         )
     }
 
+    /// カラム表示の列の中の一覧（AXList）の id。
+    static func listID(ofColumn index: Int, in id: String = fileListID) -> String {
+        "\(id)/column/\(index)/list"
+    }
+
     /// カラム表示の項目。AXGroup の AXTitleUIElement が名前の AXTextField。
     private static func browserItem(_ item: FileListItem, listID: String) -> StubNode {
         let nameElementID = nameID(item.name, in: listID)
@@ -106,7 +120,13 @@ enum FileListFixtures {
     // MARK: - リスト表示
 
     /// リスト表示（AXOutline）。先頭に並べ替えの見出しの行（名前の要素を持たない）があり、行の後に列と見出しが続く。
-    static func listView(id: String = fileListID, role: String = "AXOutline", items: [FileListItem]) -> StubNode {
+    /// - Parameter visibleItemCount: 表示中の項目の行の数（先頭から。見出しの行は数えない）。nil ならすべて表示中。
+    static func listView(
+        id: String = fileListID,
+        role: String = "AXOutline",
+        items: [FileListItem],
+        visibleItemCount: Int? = nil
+    ) -> StubNode {
         let headingRow = StubNode(role: "AXRow", children: [
             StubNode(role: "AXCell", children: [
                 StubNode(role: "AXStaticText", title: "名前"),
@@ -127,7 +147,12 @@ enum FileListFixtures {
             ])
         }
         let columns = (0..<3).map { _ in StubNode(role: "AXColumn") }
-        return StubNode(id: id, role: role, children: [headingRow] + rows + columns + [StubNode(role: "AXGroup")])
+        return StubNode(
+            id: id,
+            role: role,
+            children: [headingRow] + rows + columns + [StubNode(role: "AXGroup")],
+            visibleItemCount: visibleItemCount.map { $0 + 1 }
+        )
     }
 
     // MARK: - アイコン表示
@@ -135,14 +160,20 @@ enum FileListFixtures {
     /// アイコン表示（NSCollectionView）。ロールが AXList でサブロールが AXCollectionList。
     /// AXVisibleChildren はセクション（AXList / AXSectionList）で、セクションの AXVisibleChildren が項目（AXGroup）。
     /// 「グループ分け」を使うと、セクションが複数になる。
-    static func iconView(id: String = fileListID, sections: [[FileListItem]]) -> StubNode {
+    /// - Parameter visibleItemCount: 各セクションで表示中の項目の数（先頭から）。nil ならすべて表示中。
+    static func iconView(id: String = fileListID, sections: [[FileListItem]], visibleItemCount: Int? = nil) -> StubNode {
         StubNode(id: id, role: "AXList", subrole: "AXCollectionList", description: "icon view", children: sections.map { items in
-            StubNode(role: "AXList", subrole: "AXSectionList", children: items.map { iconItem($0, listID: id) })
+            StubNode(
+                role: "AXList",
+                subrole: "AXSectionList",
+                children: items.map { iconItem($0, listID: id) },
+                visibleItemCount: visibleItemCount
+            )
         })
     }
 
-    static func iconView(id: String = fileListID, items: [FileListItem]) -> StubNode {
-        iconView(id: id, sections: [items])
+    static func iconView(id: String = fileListID, items: [FileListItem], visibleItemCount: Int? = nil) -> StubNode {
+        iconView(id: id, sections: [items], visibleItemCount: visibleItemCount)
     }
 
     /// アイコン表示の項目。AXGroup（AXTitleUIElement を持たない）の子の AXImage が、AXURL と AXEnabled を持つ。
