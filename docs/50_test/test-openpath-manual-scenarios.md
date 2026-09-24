@@ -103,7 +103,7 @@ debug ログは注入したパスなどを含む。実施が終わったら open
 | --- | --- | --- | --- | --- |
 | ONB-01 | `open build/openpath.app` | `lsappinfo info -app jp.tamat.openpath` の type が `UIElement`（Dock に出ない。macOS 27 では `type="UIElement"`、26 までは `"type"="UIElement"` と出る）。ログに `openpath 0.1.0 を起動します` → `起動処理を終えました（アクセシビリティ権限: なし、有効: はい）` → `ホットキー ctrl+shift+o を登録しました` → `初回起動の案内: notShown → explainingPermission` |  |  |
 | ONB-02 | 案内を見る | 「openpath へようこそ」が画面中央に前面で出る。本文が 3 行（用途 / キー操作とパスを送る / アクセシビリティだけ・通信しない・保存しない） |  |  |
-| ONB-03 | `~/.config/openpath/config.toml` を見る | 起動時に既定値で作られている（ghq があれば `roots` に ghq root） |  |  |
+| ONB-03 | `~/.config/openpath/config.toml` を見る | 起動時に既定値で作られている（ghq があれば `roots` に ghq root。ghq の root が取れなければ `roots = ["~"]`）。`roots` の上のコメントが、どちらを検索対象にしたかに合っている。`roots = ["~"]` の場合は、起動直後にデスクトップ・書類・ダウンロードのアクセス確認が出ることがある（ONB-20） |  |  |
 | PERM-01 | 案内を出したまま、メニューバーのフォルダアイコンを開く | アイコンにバッジ。先頭に通知「アクセシビリティ権限がありません」。項目が「有効 / 候補を再構築 / 設定ファイルを開く… / 履歴をクリア…」「ログイン時に起動 / アクセシビリティ設定を開く… / はじめに…」「終了」の 3 グループで、どれも選べる |  |  |
 | PERM-02 | TextEdit で ⌘O | パレットが出ない |  |  |
 | PERM-03 | メニュー先頭の通知、または「アクセシビリティ設定を開く…」を選ぶ（開いたシステム設定は閉じておく） | システム設定の「プライバシーとセキュリティ > アクセシビリティ」が開く |  |  |
@@ -112,7 +112,7 @@ debug ログは注入したパスなどを含む。実施が終わったら open
 | ONB-06 | 案内の「システム設定をもう一度開く」 | システム設定が前面に来る |  |  |
 | ONB-07 | config.toml を消してから、openpath をオンにする | 5 秒以内に案内が「準備ができました」に替わって前面に出る。ログに `awaitingPermission → completed`、`アクセシビリティ権限が付与されました`、`パネルの監視を始めました`、`設定ファイルが無かったため既定の内容で作成しました`。バッジと先頭の通知が消える |  |  |
 | ONB-08 | 「試してみる」 | 案内が閉じ、フォルダ選択のダイアログ（「選択」ボタン、案内の文言付き）が前面に出る。ログに `「試してみる」のダイアログを出しました` |  |  |
-| ONB-09 | ダイアログを見る | パレットが重なり、ディレクトリだけが候補に出る（ログ `panel detected (… directoriesOnly: true)`）。同じパネル ID の `palette shown` までが 300ms 以内（S-01 と同じ測り方）。前面に出なかった場合は、ログに `前面に出せませんでした` / `登録されませんでした` が無いか、ダイアログをクリックするとパレットが出るかを備考に書く |  |  |
+| ONB-09 | ダイアログを見る | パレットが重なり、ディレクトリだけが候補に出る（ログ `panel detected (… directoriesOnly: true)`）。同じパネル ID の `palette shown` までが 300ms 以内（S-01 と同じ測り方）。ログに `「試してみる」のダイアログを前面に出しました（試行 N 回、…ms）` が出る（試行回数と ms を備考に写す）。前面に出なかった場合は、ログの `「試してみる」のダイアログを前面に出せませんでした（試行 N 回、…ms、最後の状態: …）` を備考に写し、案内のとおりダイアログを一度クリックするとパレットが出るかも書く（PR #77） |  |  |
 | ONB-10 | フォルダ名か `~/Library` のようなパスを打って Enter → 最後にキャンセル | ダイアログがそこへ移動する。キャンセルで閉じるとパレットも消える |  |  |
 | ONB-11 | ONB-08〜ONB-10 の間を通して | オートメーションの許可ダイアログ（「openpath が "…" を制御しようとしています」）が出ない |  |  |
 
@@ -228,6 +228,7 @@ debug ログは注入したパスなどを含む。実施が終わったら open
 | ONB-17 | 権限を残したまま `defaults delete jp.tamat.openpath onboardingFinished` → 起動し直す | 説明を飛ばして「準備ができました」から出る。既にある config.toml は書き換わらない（SMK-01 で変えた内容のまま） |  |  |
 | ONB-18 | 「準備ができました」の表示中に権限を取り消す | 説明のページに戻る |  |  |
 | ONB-19 | `./scripts/cask.sh` の出力を見る | zap に `~/Library/Preferences/jp.tamat.openpath.plist` が入っている |  |  |
+| ONB-20 | 先に確認用のフォルダを作り、できたことを確かめる（`mkdir ~/{Desktop,Documents,Downloads}/openpath-onb20` → `ls -d ~/{Desktop,Documents,Downloads}/openpath-onb20` で 3 つとも出る。ターミナル自身のアクセス確認が出たら許可する）。次に openpath を終了し、保護フォルダの記録を消す（`tccutil reset SystemPolicyDesktopFolder jp.tamat.openpath`。`SystemPolicyDocumentsFolder`・`SystemPolicyDownloadsFolder` も同様）。config.toml の `roots` を `["~"]` にして（ghq の root が取れない環境では ONB-03 の既定のまま）起動し、確認の 1 つで「許可しない」、ほかで「許可」を選ぶ。パレットで `onb20` と打ち、次に拒否したフォルダの名前（`Desktop` など）を打つ。確かめたら確認用のフォルダを消し（`rmdir ~/{Desktop,Documents,Downloads}/openpath-onb20`）、`roots` を戻す | デスクトップ・書類・ダウンロードのアクセス確認が 1 つずつ（最大 3 回）出て、用途の説明（「openpath は、ファイル選択ダイアログで目的の場所へ素早く移動できるよう…」）が表示される。Full Disk Access を求める案内は出ない。どう答えても openpath は落ちず、候補の構築が終わる。`onb20` の候補には、許可したフォルダの `openpath-onb20` だけが出て、許可しなかったフォルダの `openpath-onb20` は出ない。許可しなかったフォルダ自体（`~/Desktop` など）は、その名前で打つと候補に出る。「システム設定 > プライバシーとセキュリティ > ファイルとフォルダ」の openpath が答えたとおりになっている。起動し直しても確認は出ない（ad-hoc 署名は再ビルド後に出直すことがある）。確認に答えるまでの間の挙動（パレットの「候補を構築中…」、ほかのダイアログでの検知）を備考に書く（NFR-02、2026-09-24 オーナー判断） |  |  |
 
 ## 12. 権限の取り消しと復帰（S-13）
 
@@ -264,7 +265,7 @@ DEBUG ビルド（`swift run openpath` など）の debug ログや、プロセ�
 | 候補・履歴（`CandidateSources`、`Index`、`History`） | S-05、FLOW-02、FLOW-07、MENU-03〜MENU-06、CFG-03 |
 | 設定（`Config`） | CFG-01〜CFG-03、S-12、SMK-01 |
 | メニューバー（`StatusItem`） | PERM-01、PERM-03、MENU-01〜MENU-09、CLIP-03、S-13 |
-| 権限・起動・初回起動（`Accessibility`、`App`、`Onboarding`） | ONB-01〜ONB-19、PERM-01〜PERM-03、S-13、SMK-02 |
+| 権限・起動・初回起動（`Accessibility`、`App`、`Onboarding`） | ONB-01〜ONB-20、PERM-01〜PERM-03、S-13、SMK-02 |
 | ホットキー（`Hotkey`） | S-08、MENU-01、CFG-02 |
 | ログ（`Logging`） | SMK-02、SMK-03 |
 | 配布スクリプト（`scripts/`） | PRE-01、ONB-19。`scripts/smoke-open-panel.sh` を変えたら SMK-02、SMK-03 |
