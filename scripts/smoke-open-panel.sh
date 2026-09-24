@@ -9,16 +9,17 @@
 # 前提: アクセシビリティ権限を付与した openpath.app を起動しておくこと。このスクリプトはアプリを起動も終了もしない。
 #
 # 手順:
-#   1. openpath が起動していて、ログの最新の起動以降で権限があり、パネルを監視中であることを確かめる
+#   1. 指定の openpath.app が 1 つだけ起動していて、ログの最新の起動以降で権限があり、パネルを監視中であることを確かめる
 #   2. osascript の `choose folder` でフォルダ選択のダイアログを別プロセスで出す
 #      （初回起動の案内の「試してみる」と同じ方式。キー操作の送出や他のアプリへの Apple Events は使わない）
-#   3. 開始時点以降のログに panel detected が出るまで待つ。palette shown も出れば、検知からの時間を出す
+#   3. 開始時点以降のログに panel detected が出るまで待つ。ダイアログが最前面でない間の行は別のアプリのパネルと
+#      みなして読み飛ばす。palette shown も出れば、検知からの時間を出す
 #   4. osascript を終了してダイアログを閉じ、panel gone が出ることを確かめる
 #
 # openpath は最前面のアプリのパネルだけを検知する。端末から起動した osascript は最前面にならないことがあるため、
 # ダイアログが最前面でなければクリックして前面に出すよう案内して待つ。
 #
-# 終了コード: 0 = OK / 1 = NG / 2 = 前提不足（アプリ未起動・ログ無し・権限なし・監視停止中・引数の誤り）
+# 終了コード: 0 = OK / 1 = NG / 2 = 前提不足（アプリ未起動・複数起動・ログ無し・権限なし・監視停止中・引数の誤り）
 set -euo pipefail
 
 # shellcheck source=scripts/lib/common.sh
@@ -125,7 +126,24 @@ require_tools() {
   done
 }
 
-# 指定の .app が起動していることを確かめる。同じ bundle id の別の場所の .app が起動していたら前提不足とする
+# 同じ bundle id で起動中のインスタンスを「pid<TAB>実行ファイルの場所」で 1 行ずつ出す（場所が分からなければ空）。
+# lsappinfo info -app <bundle id> は、同じ bundle id のインスタンスが複数あると何も返さないため、find で列挙する
+list_running_instances() {
+  local bundle_id="$1"
+  local asn info pid path
+  for asn in $(lsappinfo find "bundleid=${bundle_id}" | grep -oE 'ASN:0x[0-9a-fA-F]+-0x[0-9a-fA-F]+' || true); do
+    info="$(lsappinfo info -only pid,executablepath "${asn}:")" || continue
+    pid="$(printf '%s\n' "${info}" | sed -n 's/^"pid"=\([0-9][0-9]*\)$/\1/p')"
+    path="$(printf '%s\n' "${info}" | sed -n 's/^"CFBundleExecutablePath"="\(.*\)"$/\1/p')"
+    # 終了済みのインスタンスが一覧に残っていることがあるため、プロセスがあるものだけにする
+    if [[ -n "${pid}" ]] && ps -p "${pid}" >/dev/null 2>&1; then
+      printf '%s\t%s\n' "${pid}" "${path}"
+    fi
+  done
+}
+
+# 指定の .app が 1 つだけ起動していることを確かめる。
+# openpath は同じログファイルに書くため、複数起動していると、どのインスタンスの記録か区別できない
 check_app_running() {
   [[ -d "${app_path}" ]] || fail_precondition "${app_path} がありません。scripts/build.sh && scripts/sign.sh でビルドするか、--app で指定してください"
   local info_plist="${app_path}/Contents/Info.plist"
@@ -134,14 +152,22 @@ check_app_running() {
   executable="$(plist_value "${info_plist}" CFBundleExecutable)" || fail_precondition "${info_plist} から実行ファイル名を読めません"
   version="$(plist_value "${info_plist}" CFBundleShortVersionString)" || version="不明"
 
-  local pid
-  pid="$(lsappinfo info -only pid -app "${bundle_id}" | sed -n 's/^"pid"=\([0-9][0-9]*\)$/\1/p')" || pid=""
-  [[ -n "${pid}" ]] || fail_precondition "${app_path##*/} が起動していません。open ${app_path} で起動してから実行してください"
+  local instances
+  instances="$(list_running_instances "${bundle_id}")"
+  [[ -n "${instances}" ]] || fail_precondition "${app_path##*/} が起動していません。open ${app_path} で起動してから実行してください"
+  local count
+  count="$(printf '%s\n' "${instances}" | grep -c '')"
+  if [[ "${count}" -gt 1 ]]; then
+    fail_precondition "${bundle_id} が ${count} つ起動しています（pid: $(printf '%s\n' "${instances}" | cut -f1 | paste -s -d ' ' -)）。ログを共有するため、指定の .app の 1 つだけにしてください"
+  fi
 
-  local expected running
+  local pid="${instances%%$'\t'*}"
+  local running="${instances#*$'\t'}"
+  local expected
   expected="$(cd "${app_path}" && pwd -P)/Contents/MacOS/${executable}"
-  running="$(lsappinfo info -only executablepath -app "${bundle_id}" | sed -n 's/^"CFBundleExecutablePath"="\(.*\)"$/\1/p')" || running=""
-  if [[ -n "${running}" && "${running}" != "${expected}" ]]; then
+  # 場所を確かめられないまま進むと、別の場所の .app を指定の .app として検証してしまうため止める
+  [[ -n "${running}" ]] || fail_precondition "起動中の ${APP_NAME}（pid ${pid}）の実行ファイルの場所を lsappinfo で確かめられません"
+  if [[ "${running}" != "${expected}" ]]; then
     fail_precondition "起動中の ${APP_NAME} は別の場所のものです（${running%/Contents/MacOS/*}）。その .app を --app で指定してください"
   fi
   log "${app_path##*/} ${version}（pid ${pid}）が起動しています / macOS $(sw_vers -productVersion)"
@@ -311,17 +337,26 @@ deadline_after() {
   printf '%d\n' "$((SECONDS + $1 + 1))"
 }
 
-# panel detected の行を detected_entry に入れる。時間内に出なければ空のまま。
+# 出したダイアログの panel detected の行を detected_entry に入れる。時間内に出なければ空のまま。
+# ログにはどのアプリのパネルかが出ない。openpath は最前面のアプリのパネルだけを検知するため、行を見つけた時点で
+# ダイアログが最前面でなければ別のアプリのパネルとみなして読み飛ばす。
 # 検知より先にダイアログが閉じたら dialog_exited_early で終える（子プロセスを wait するため、$(...) で呼ばない）
 wait_for_detection() {
-  local deadline hint_at
+  local deadline hint_at candidate
   deadline="$(deadline_after "${detect_timeout}")"
   hint_at="$(deadline_after "${FRONTMOST_HINT_DELAY_SECONDS}")"
   local is_hinted=0
+  local after=0
   while [[ "${SECONDS}" -lt "${deadline}" ]]; do
-    detected_entry="$(find_line_after "${PANEL_DETECTED}" 0)"
-    if [[ -n "${detected_entry}" ]]; then
-      return 0
+    candidate="$(find_line_after "${PANEL_DETECTED}" "${after}")"
+    if [[ -n "${candidate}" ]]; then
+      if is_dialog_frontmost; then
+        detected_entry="${candidate}"
+        return 0
+      fi
+      warn "ダイアログが最前面でない間の ${PANEL_DETECTED}（$(timestamp_of "${candidate}")）は、別のアプリのパネルとみなして読み飛ばします"
+      after="$(line_number_of "${candidate}")"
+      continue
     fi
     if ! is_dialog_running; then
       dialog_exited_early
@@ -406,7 +441,7 @@ main() {
 
   wait_for_detection
   if [[ -z "${detected_entry}" ]]; then
-    fail_ng "${detect_timeout} 秒以内に ${PANEL_DETECTED} がログに出ませんでした（ダイアログを最前面にしたか、disabled_apps・ログのレベルを確かめてください）"
+    fail_ng "${detect_timeout} 秒以内に、出したダイアログの ${PANEL_DETECTED} がログに出ませんでした（ダイアログを最前面にしたか、disabled_apps・ログのレベルを確かめてください）"
   fi
   local detected_text
   detected_text="$(line_text_of "${detected_entry}")"
@@ -415,6 +450,8 @@ main() {
   report_palette_latency "${detected_entry}"
 
   close_dialog
+  # openpath は同時に 1 つのパネルだけを追跡し、次の panel detected の前に必ず panel gone を出す（PanelWatchPolicy）。
+  # そのため、受け入れた panel detected の後の最初の panel gone がこのダイアログのもの
   local gone_entry
   gone_entry="$(wait_for_line_after "${PANEL_GONE}" "$(line_number_of "${detected_entry}")" "${GONE_TIMEOUT_SECONDS}")"
   if [[ -z "${gone_entry}" ]]; then
