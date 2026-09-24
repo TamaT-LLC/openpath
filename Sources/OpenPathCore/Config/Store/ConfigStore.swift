@@ -79,7 +79,7 @@ public final class ConfigStore {
     public func start() async {
         guard lifecycle == .idle else { return }
         lifecycle = .starting
-        let generationError = await createDefaultFileIfMissing()
+        let generation = await createDefaultFileIfMissing(during: .starting)
         // 生成を待つ間に stop された場合は監視を始めない
         guard lifecycle == .starting else { return }
         lifecycle = .running
@@ -91,13 +91,31 @@ public final class ConfigStore {
         self.monitor = monitor
         monitor.start()
 
-        if let generationError {
+        if case .failed(let generationError) = generation {
             // 読み込み直すとファイルが無いというエラーで上書きされるため、生成の失敗を公開したままにする
             logConfigError(generationError)
             lastError = generationError
             return
         }
         reload()
+    }
+
+    /// 設定ファイルが無ければ既定値で生成して読み込み直す（初回起動の案内で権限を付与した後、UX-001 §7）。
+    /// 起動時にも生成するが、その後に消された場合に備える。既存のファイルは上書きしない。
+    /// 監視中（`start()` の後、`stop()` の前）でなければ何もしない
+    public func createFileIfMissing() async {
+        guard lifecycle == .running else { return }
+        switch await createDefaultFileIfMissing(during: .running) {
+        case .created:
+            Log.info("設定ファイルが無かったため既定の内容で作成しました")
+            // 監視も生成を拾って読み込み直すが、呼び出し側が待った後に反映済みであるよう、ここでも読み込む
+            reload()
+        case .failed(let generationError):
+            logConfigError(generationError)
+            lastError = generationError
+        case .skipped:
+            break
+        }
     }
 
     /// 設定ファイルを読み込み直す。監視から自動で呼ばれるほか、手動の再読み込みにも使える。
@@ -230,27 +248,35 @@ public final class ConfigStore {
 
     // MARK: - 既定値の生成（UX-001 §7）
 
-    /// ファイルが無ければ既定値で生成する。失敗したら理由を返す
-    private func createDefaultFileIfMissing() async -> ConfigStoreError? {
-        guard !FileManager.default.fileExists(atPath: filePath) else { return nil }
+    private enum DefaultFileGeneration {
+        case created
+        /// ファイルがあった、または ghq root を待つ間に段階が変わった（stop された等）
+        case skipped
+        case failed(ConfigStoreError)
+    }
+
+    /// ファイルが無ければ既定値で生成する
+    /// - Parameter expectedLifecycle: 呼び出し時の段階。ghq root を待つ間に変わったら生成しない
+    private func createDefaultFileIfMissing(during expectedLifecycle: Lifecycle) async -> DefaultFileGeneration {
+        guard !FileManager.default.fileExists(atPath: filePath) else { return .skipped }
 
         let ghqRoot = await ghqRootProvider.root()
-        guard lifecycle == .starting else { return nil }
+        guard lifecycle == expectedLifecycle else { return .skipped }
         let contents = DefaultConfigFile.contents(ghqRoot: ghqRoot, homeDirectory: homeDirectory)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         } catch {
-            return .generationFailed(path: filePath, reason: error.localizedDescription)
+            return .failed(.generationFailed(path: filePath, reason: error.localizedDescription))
         }
         do {
             // ghq を待つ間に利用者が作ったファイルや、リンク先の無いシンボリックリンクも上書きしないよう、
             // 存在すれば失敗する書き込みにする
             try Data(contents.utf8).write(to: fileURL, options: .withoutOverwriting)
         } catch CocoaError.fileWriteFileExists {
-            return nil
+            return .skipped
         } catch {
-            return .generationFailed(path: filePath, reason: error.localizedDescription)
+            return .failed(.generationFailed(path: filePath, reason: error.localizedDescription))
         }
-        return nil
+        return .created
     }
 }

@@ -6,7 +6,7 @@
 /// 1. 通知（権限なし → 設定エラー → クリップボードの復元失敗の順）と区切り線。通知が無ければ省く
 /// 2. 有効
 /// 3. 候補を再構築 / 設定ファイルを開く… / 履歴をクリア…
-/// 4. ログイン時に起動 / アクセシビリティ設定を開く…（未付与時のみ）
+/// 4. ログイン時に起動 / アクセシビリティ設定を開く…（未付与時のみ）/ はじめに…
 /// 5. 終了
 public struct StatusMenuState: Sendable, Equatable {
     public let icon: StatusIconState
@@ -80,6 +80,8 @@ public struct StatusMenuState: Sendable, Equatable {
         if !input.accessibilityPermission.isGranted {
             entries.append(.command(StatusMenuItem(command: .openAccessibilitySettings)))
         }
+        // 案内をスキップ・終えた後も、権限の案内と「試してみる」を開き直せるようにする
+        entries.append(.command(StatusMenuItem(command: .showOnboarding)))
         entries.append(.separator)
 
         entries.append(.command(StatusMenuItem(command: .quit)))

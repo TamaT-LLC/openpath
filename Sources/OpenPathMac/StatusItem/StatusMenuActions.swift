@@ -16,6 +16,8 @@ public struct StatusMenuActions {
     public var clearHistory: (@MainActor () -> Void)?
     /// 「アクセシビリティ設定を開く…」とメニュー先頭の権限の通知
     public var openAccessibilitySettings: @MainActor () -> Void
+    /// 「はじめに…」（初回起動の案内を開き直す）
+    public var showOnboarding: (@MainActor () -> Void)?
     /// 「終了」
     public var quit: @MainActor () -> Void
 
@@ -24,12 +26,14 @@ public struct StatusMenuActions {
         rebuildCandidates: (@MainActor () -> Void)? = nil,
         clearHistory: (@MainActor () -> Void)? = nil,
         openAccessibilitySettings: @escaping @MainActor () -> Void = { AccessibilityPermission.openSystemSettings() },
+        showOnboarding: (@MainActor () -> Void)? = nil,
         quit: @escaping @MainActor () -> Void = { NSApplication.shared.terminate(nil) }
     ) {
         self.setEnabled = setEnabled
         self.rebuildCandidates = rebuildCandidates
         self.clearHistory = clearHistory
         self.openAccessibilitySettings = openAccessibilitySettings
+        self.showOnboarding = showOnboarding
         self.quit = quit
     }
 
@@ -39,6 +43,7 @@ public struct StatusMenuActions {
         case .toggleEnabled: setEnabled != nil
         case .rebuildCandidates: rebuildCandidates != nil
         case .clearHistory: clearHistory != nil
+        case .showOnboarding: showOnboarding != nil
         case .openConfigFile, .toggleLaunchAtLogin, .openAccessibilitySettings, .quit, .dismissClipboardNotice: true
         }
     }

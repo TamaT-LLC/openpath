@@ -13,6 +13,8 @@ public enum StatusMenuCommand: Sendable, Hashable, CaseIterable {
     case toggleLaunchAtLogin
     /// アクセシビリティ設定を開く…（未付与時のみ）
     case openAccessibilitySettings
+    /// はじめに…（初回起動の案内を開き直す。UX-001 §7）
+    case showOnboarding
     /// 終了
     case quit
     /// クリップボードの復元失敗の通知を消す。通知を選んだときだけ行い、メニューの項目には並ばない
@@ -31,6 +33,7 @@ public enum StatusMenuCommand: Sendable, Hashable, CaseIterable {
         case .clearHistory: StatusMenuText.clearHistory
         case .toggleLaunchAtLogin: StatusMenuText.toggleLaunchAtLogin
         case .openAccessibilitySettings: StatusMenuText.openAccessibilitySettings
+        case .showOnboarding: StatusMenuText.showOnboarding
         case .quit: StatusMenuText.quit
         case .dismissClipboardNotice: StatusMenuText.dismissNotice
         }
@@ -42,7 +45,7 @@ public enum StatusMenuCommand: Sendable, Hashable, CaseIterable {
         case .openConfigFile: StatusMenuText.settingsKeyEquivalent
         case .quit: StatusMenuText.quitKeyEquivalent
         case .toggleEnabled, .rebuildCandidates, .clearHistory, .toggleLaunchAtLogin, .openAccessibilitySettings,
-             .dismissClipboardNotice: ""
+             .showOnboarding, .dismissClipboardNotice: ""
         }
     }
 }
