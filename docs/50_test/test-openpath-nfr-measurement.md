@@ -34,7 +34,7 @@ TST-001 §5 の非機能テストを `scripts/measure-*.sh` で計測した手�
 | 日時 | 2026-09-24 15:23〜16:14（JST） |
 | マシン | MacBook Air（Mac15,13）、Apple M3（高性能 4 + 高効率 4 コア）、メモリ 24 GB |
 | macOS | **27.0（26A428）**。前回の計測（§5）は 26.3.1 (a)（25D771280a） |
-| ビルド | `./scripts/build.sh && ./scripts/sign.sh` でビルドした universal（x86_64 + arm64）の release ビルド。ad-hoc 署名（Hardened Runtime 有効）、version 0.1.0。§3.1〜§3.3 の計測は main の 8f61b11（#67 初回起動フロー・#69 `palette shown` を含む）、§3.1 のメモリの時系列は main の 95089e4（#71）。8f61b11 と 95089e4 の本体の差は `FileListRowSampler`（パネルの一覧の行の判定）だけで、この処理はアクセシビリティ権限があり PanelWatcher が動くときにしか通らない |
+| ビルド | `./scripts/build.sh && ./scripts/sign.sh` でビルドした universal（x86_64 + arm64）の release ビルド。ad-hoc 署名（Hardened Runtime 有効）、version 0.1.0。§3.1〜§3.3 の計測は main の 8f61b11（#67 初回起動フロー・#69 `palette shown` を含む）、§3.1 のメモリの時系列は main の 95089e4（#71）。8f61b11 と 95089e4 の本体の差は `FileListRowSampler`（パネルの一覧の行の判定）だけで、この処理はアクセシビリティ権限があり PanelWatcher が動くときにしか通らない。その後の main の 6763b74（#70）はスクリプトとドキュメントだけの変更で、本体は 95089e4 と同じ |
 | 計測用インスタンス | `scripts/measure-isolated.sh start` で起動（下記） |
 
 計測用インスタンスは、一時ディレクトリ（`$TMPDIR/openpath-measure-TASK-030.XXXXXX`）の `home/` を一時 HOME にして、次のように起動する。
@@ -213,7 +213,8 @@ PR #69 以降の main（`palette shown` を出す）で行う。実ユーザー�
 eval "$(scripts/measure-isolated.sh start --candidates 20000)"
 # システム設定 > プライバシーとセキュリティ > アクセシビリティ で build/openpath.app を許可する（5 秒以内に反映される）
 grep 'アクセシビリティ権限' "$OPENPATH_LOG"   # 「アクセシビリティ権限が付与されました」か、起動時の「あり」が出ていること
-# Finder で Cmd+O → パレットが出たのを確かめて「キャンセル」、を 20 回程度繰り返す（TST-001 §3 の S-01）
+# TextEdit で「ファイル > 開く…」（⌘O）→ パレットが出たのを確かめて「キャンセル」、を 20 回程度繰り返す
+# （TST-001 §3 の S-01。Finder の ⌘O では「開く」ダイアログが出ない）
 scripts/measure-detection-latency.sh --log "$OPENPATH_LOG"
 scripts/measure-isolated.sh stop "$OPENPATH_MEASURE_DIR"
 ```
