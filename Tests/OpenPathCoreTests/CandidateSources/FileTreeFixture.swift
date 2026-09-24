@@ -58,6 +58,20 @@ final class FileTreeFixture {
         try FileManager.default.createSymbolicLink(atPath: path(relativePath), withDestinationPath: destination)
     }
 
+    /// `chflags hidden` と同じく隠し属性（UF_HIDDEN）を付ける。ホームの `~/Library` と同じく、名前が . で始まらない隠し項目にする
+    func setHiddenFlag(_ relativePath: String) throws {
+        let absolutePath = path(relativePath)
+        var info = stat()
+        guard lstat(absolutePath, &info) == 0, chflags(absolutePath, info.st_flags | UInt32(UF_HIDDEN)) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+
+    /// Foundation から見て隠し項目か（隠し属性または . で始まる名前）
+    func isHidden(_ relativePath: String) throws -> Bool {
+        try URL(filePath: path(relativePath)).resourceValues(forKeys: [.isHiddenKey]).isHidden == true
+    }
+
     static func makeDirectory(atPath path: String) throws {
         try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
     }

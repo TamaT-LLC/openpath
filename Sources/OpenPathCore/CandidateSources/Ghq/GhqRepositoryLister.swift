@@ -62,7 +62,7 @@ public struct GhqRepositoryLister: Sendable {
     }
 
     /// `ghq root` の結果を返す。既定の config.toml の roots に使う（UX-001 §7）。
-    /// 無効化されている・未インストール・失敗した場合は nil。`ghq list` は実行しない。
+    /// 無効化されている・未インストール・失敗した場合は nil（既定の roots はホームになる）。`ghq list` は実行しない。
     public func root() async -> String? {
         guard isEnabled else { return nil }
         do throws(GhqError) {

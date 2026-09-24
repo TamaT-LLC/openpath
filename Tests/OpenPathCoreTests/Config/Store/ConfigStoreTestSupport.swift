@@ -1,4 +1,5 @@
 import Foundation
+import Testing
 
 import OpenPathCore
 
@@ -94,6 +95,40 @@ actor GhqRootProviderStub: GhqRootProviding {
     func root() async -> String? {
         callCount += 1
         return rootPath
+    }
+}
+
+/// ghq の root が取れない状況。既定の config.toml の roots がホーム（~）になることを、
+/// 実際の GhqRepositoryLister（ghq の実行はモック）で確かめる。
+enum GhqUnavailability: CaseIterable, Sendable, CustomTestStringConvertible {
+    /// 設定 `ghq.enabled = false` 相当
+    case disabled
+    /// 検索パスに ghq が無い
+    case notInstalled
+    /// `ghq root` が非ゼロで終了する
+    case failed
+
+    private typealias G = GhqFixtures
+
+    var testDescription: String {
+        switch self {
+        case .disabled: "無効"
+        case .notInstalled: "未インストール"
+        case .failed: "失敗"
+        }
+    }
+
+    func makeLister() -> GhqRepositoryLister {
+        switch self {
+        case .disabled:
+            G.makeLister(runner: G.makeRunner(listOutput: ""), isEnabled: false)
+        case .notInstalled:
+            G.makeLister(runner: G.makeRunner(listOutput: ""), installedDirectory: nil)
+        case .failed:
+            G.makeLister(runner: CommandRunnerMock { _ in
+                CommandResult(exitCode: G.failureExitCode, standardOutput: "", standardError: "error")
+            })
+        }
     }
 }
 
