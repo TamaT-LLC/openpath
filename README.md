@@ -84,6 +84,7 @@ open build/openpath.app   # Dock には出ず、メニューバーに常駐す�
 - 権限が既にあれば説明を飛ばし、「試してみる」から始まります。「試してみる」は `osascript` の `choose folder` でフォルダ選択のダイアログを出し、パレットが重なることを確かめられます（選んだフォルダは使いません）。
 - 案内を終える（「試してみる」「閉じる」「あとで」）と `~/Library/Preferences/jp.tamat.openpath.plist` の `onboardingFinished` に記録し、次の起動からは出ません。メニューの「はじめに…」でいつでも開き直せます。
 - 最初からやり直すには、openpath を終了してから `defaults delete jp.tamat.openpath onboardingFinished` を実行します。
+- 設定ファイル `~/.config/openpath/config.toml` が無ければ、既定の内容で作ります（既存のファイルは上書きしません）。候補として走査するディレクトリ `roots` は、`ghq root` の結果を絶対パスに解決できればその root、できなければ（ghq が未インストール・実行に失敗した・結果が相対パスなど）ホーム（`~`）になります。ホームにした場合、`~/Desktop`・`~/Documents`・`~/Downloads` の中を初めて読むときに macOS がアクセスの許可を確認することがあります。
 
 ### ログ
 

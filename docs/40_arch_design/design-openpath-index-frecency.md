@@ -59,12 +59,12 @@ protocol CandidateSource: Sendable {
 | ソース | 収集方法 | 更新契機 |
 | --- | --- | --- |
 | history | `HistoryCandidateSource(store:)` → `HistoryStore.entries` | 確定のたび（`CandidateIndexRebuilder.refreshHistory()` 経由。全件再構築のカウントには含めない） |
-| roots | `RootCandidateSource.sources(for: config)` が **ルートごとに 1 ソース**を生成。`RootDirectoryScanner`（`FileManager.enumerator` を同期 API でラップ）で `config.depth` まで走査。`.skipsHiddenFiles`、`node_modules` / `.git` / `target` / `DerivedData` は既定で除外（`config.ignore` で変更可） | 起動時、全件再構築が終わってから 5 分後、メニューの「候補を再構築」、`roots` / `depth` / `ignore` / `ghq.enabled` の設定変更 |
+| roots | `RootCandidateSource.sources(for: config)` が **ルートごとに 1 ソース**を生成。`RootDirectoryScanner`（`FileManager.enumerator` を同期 API でラップ）で `config.depth` まで走査。`.skipsHiddenFiles`（名前が `.` で始まる項目と、隠し属性 UF_HIDDEN の項目。ホームの `~/Library` も後者として配下ごと除外される）、`node_modules` / `.git` / `target` / `DerivedData` / `.build` は既定で除外（`config.ignore` で変更可） | 起動時、全件再構築が終わってから 5 分後、メニューの「候補を再構築」、`roots` / `depth` / `ignore` / `ghq.enabled` の設定変更 |
 | ghq | `GhqCandidateSource(lister:)` → `GhqRepositoryLister` が `Process` で `ghq root` → `ghq list -p` を実行。`PATH` は `LoginShellPathResolver`（login shell から取得するキャッシュ持ちの actor）で解決し、候補ソースと ConfigStore（§6）で 1 インスタンスを共有する | 同上 |
 
 - 走査は `Task.detached(priority: .utility)` から `snapshot()` を呼び、完了した時点で `CandidateIndex.replace(source:with:)` によりアトミックに差し替える（同一ソースの走査は直列）。ルートが設定から外れた場合は空配列で `replace` する。
 - roots は 1 ルートあたり 20,000 件で打ち切る（`RootDirectoryScanner` が発生元で警告ログを出す）。パッケージ（`.app` 等）判定は `includingPropertiesForKeys: [.isPackageKey]` を先読みせず、**拡張子のあるディレクトリにだけ個別に問い合わせる**（先読みは LaunchServices を引くため 5,000 件の列挙だけで数百 ms かかった。ベンチの最小値が 289ms → 45ms に改善、PR #51）。
-- ghq: login shell から取れた PATH に既定 PATH（`/opt/homebrew/bin` 等）の不足分を補う。`ghq root` が空なら `emptyRoot` として失敗扱いにし、`ghq list -p` は実行しない（`ghq list -p` の出力が空なのは失敗ではなく空の一覧として返す）。login shell 起動のフォールバック結果はキャッシュする（5 分ごとの再構築のたびに待たないため）。`fetchRoot` は内部実装に留め、既定 config 生成（§6）との関係は未確定（PR #43）。
+- ghq: login shell から取れた PATH に既定 PATH（`/opt/homebrew/bin` 等）の不足分を補う。`ghq root` が空なら `emptyRoot` として失敗扱いにし、`ghq list -p` は実行しない（`ghq list -p` の出力が空なのは失敗ではなく空の一覧として返す）。login shell 起動のフォールバック結果はキャッシュする（5 分ごとの再構築のたびに待たないため）。既定 config 生成（§6）には、`ghq root` だけを実行する `root()` を `GhqRootProviding` として使う（`ghq list -p` は実行しない。PR #43 / #50）。
 - 全件の再構築は「5 分ごと」の固定時刻ではなく「前回の再構築を終えてから 5 分」で数える。設定の変更ではどの設定に依存するソースかを問わず全ソースを走査し直す（対応表を持つ複雑さを避けるため。候補ソースに関わらない設定（hotkey・auto_confirm・disabled_apps）では再構築しない）。roots から外れたルート・無効にした ghq の除去は、次の再構築の冒頭で直列に行う（設定変更時に即座に `replace(source:with: [])` すると、走査中の差し替えと並行して後勝ちで候補が復活しうるため、PR #61）。
 - 同一パスが複数ソースにある場合は 1 件に統合し、`source` は優先度 history > ghq > roots で決める。統合キーはファイルシステムを引かない字句的な正規化（末尾 `/`・`//`・`.`・`..`。`RootPathResolver` と同じ規則）を使う。isDirectory の判定が食い違う場合はファイル扱いにする（フォルダ選択のパネルにファイルを誤って出すより、ディレクトリを 1 件出し損ねる方が害が小さいため）。絶対パスにできない候補は含めない。frecency / `lastUsed` は同じ正規化をかけた上で `HistoryStore` から引く（PR #57）。
 - 空クエリで履歴（frecency > 0）が 8 件未満のときは、frecency 0 の候補をパスの昇順で補う（初回起動で履歴が空のときに「一致する候補がありません」を出さないため、PR #57）。
@@ -116,7 +116,7 @@ struct FuzzyMatcher {
 
 ## 6. ConfigStore
 
-`~/.config/openpath/config.toml`（記入例。実際の既定生成では `roots` は空、`disabled_apps` も空になる。以下は値の書き方のサンプルであって既定値ではない、PR #41）:
+`~/.config/openpath/config.toml`（記入例。以下は値の書き方のサンプルであって既定値ではない。初回に生成するファイルの内容は後述の「既定値の生成」を参照、PR #41）:
 
 ```toml
 roots = ["~/repos", "~/Documents"]
@@ -131,12 +131,59 @@ ignore = ["node_modules", ".git", "target", "DerivedData", ".build"]
 enabled = true
 ```
 
-- **既定値**: `roots` は空配列（環境によっては `~/repos` 等が存在しないため。既定ファイル生成時に ConfigStore が `ghq root` を書き込む運用に任せる）。`disabled_apps` も空（REQ-001 FR-DETECT-04「既定は全アプリ有効」のため。Finder を既定で無効にすると UX-001 §7 の「試してみる」が成立しない）。`disabledApps` は `Set<String>`（包含判定にしか使わないため）、`ignore` は `[String]` のまま（PR #41）。
+- **既定値**（キーを省略したときの値）: `roots` は空配列（環境によっては `~/repos` 等が存在しないため。初回に生成するファイルには ghq root かホームを明示して書く。省略時の値をそれに合わせない理由は「既定値の生成」を参照）。`disabled_apps` も空（REQ-001 FR-DETECT-04「既定は全アプリ有効」のため。サンプルの `com.apple.finder` は記入例）。`disabledApps` は `Set<String>`（包含判定にしか使わないため）、`ignore` は `[String]` のまま（PR #41）。
 - `roots` の正規化は字句的（空要素・`.`・`..`・末尾 `/` を除く。ファイルシステムは参照せずシンボリックリンクも解決しない）。相対パス・`~user` 形式・空文字は `invalidRootPath` エラーにする。正規化後の重複は先に書かれたものを残す。`depth` は下限 0（負値はエラー）、上限なし（roots 走査自体が 1 ルート 20,000 件で打ち切られるため、PR #41）。
 - **ホットキーの文法**: 修飾キーは `ctrl`/`control`、`shift`、`opt`/`option`/`alt`、`cmd`/`command`。キーは A–Z・0–9・記号 11 種（`-` `=` `[` `]` `\` `;` `'` `,` `.` `/` とグレーブアクセント）・`space`・`return`/`enter`・`tab`・`delete`/`backspace`・`escape`/`esc`・矢印・`f1`–`f12`。大文字小文字・順序・前後の空白は区別しない。**修飾キーが shift だけの場合はエラー**（`shiftOnlyModifier`。大文字入力そのものを奪うため）。値は Carbon の `kVK_*` / 修飾キー定数と同じ表現で持ち（`RegisterEventHotKey` に変換なしで渡せる）、`Hotkey.description` は `ctrl+opt+shift+cmd+<key>` の順で正規表記を返す（PR #41）。
 - 読み込み: 起動時 + ファイルのディレクトリ監視（`DispatchSource`、メインキューで配送）。`rename` / `delete` 後にまだファイルが無ければ 200ms 間隔で最大 10 回（約 2 秒）リトライし、それでも無ければ `lastError = .fileNotFound` を公開する。以降の再作成は親ディレクトリの書き込みイベントで拾う。デバウンスは 100ms（PR #50）。
 - パース失敗時: 直前の有効設定を維持し、StatusItem にバッジ + ログ出力。エラーはキーパス（`ghq.enabled` 等。`TOMLTable` は出現位置を持たないため行番号の代わり）で示す。複数の誤りがあれば `roots → depth → include_files → auto_confirm → hotkey → disabled_apps → ignore → ghq` の順で最初の 1 件を報告する。未知のキーはエラーにせず `ConfigWarning.unknownKey(キーパス)` として警告する（PR #41）。
-- 既定値の生成: ファイルが無い場合に生成する。`roots` は `ghq root` が絶対パスに解決できればホーム配下を `~` で書いて含める（dotfiles で別マシンと共有しやすくするため）。解決できない場合（相対パス・`~user`）は `roots` に含めない。既存ファイルは上書きしない（`.withoutOverwriting`）。
+- 既定値の生成: ファイルが無い場合に生成する（UX-001 §7）。既存ファイルは上書きしない（`.withoutOverwriting`）ため、生成済みの環境の `roots` は、生成の規則が変わっても変わらない。
+  - `roots` は、`ghq root` が絶対パスに解決できればそれにする。ホーム配下なら `~` で書く（dotfiles で別マシンと共有しやすくするため）。
+  - ghq が無効・未インストール・失敗した場合と、`ghq root` の結果が絶対パスに解決できない場合（相対パス・`~user`）は `["~"]` にし、ホーム配下を検索対象にする。ghq を使わない利用者でも、初回から候補が 0 件にならないようにするため（2026-09-24 オーナー判断。それまでは空で生成していた）。`~` を絶対パスに展開できないホーム（通常は起きない）では、生成したファイルが読めなくならないよう空にする。
+  - `roots` の上のコメントで、ghq root とホームのどちらを検索対象にしたかと、絞り込むには `roots` を書き換えればよいことを伝える。
+  - キーを省略したときの `roots`（`Config.defaultRoots`）は空のまま変えない。生成するファイルは `roots` を必ず書くため、省略されるのは利用者が消した・自分で書いた場合に限られ、その意図（ghq の候補だけでよい等）を優先する。また、ghq の有無で既定値を変えるにはデコードの中で ghq を実行する必要がある。`Config.default` は設定ファイルを読めない・生成できないときの設定でもあり、その状態でホーム全体の走査を始めないようにする意味もある。
+
+  ghq root が無いときに生成する内容（ghq root があるときは、`roots` の値が ghq root になり、ホームにした理由を書いた 2 行が「ghq の root を検索対象にしています。ほかのディレクトリも候補にしたいときは追加してください」の 1 行に替わる）:
+
+  ```toml
+  # openpath の設定ファイル
+  # 保存すると自動で読み込み直します。誤りがあるときは直前の設定のまま動作します。
+
+  # 候補として走査するディレクトリ。~ はホームディレクトリを表します
+  # ghq の root が見つからなかったため、ホームディレクトリ（~）を検索対象にしています。
+  # 絞り込みたいときは、roots をよく使うディレクトリに書き換えてください
+  # 例: roots = ["~/repos", "~/Documents"]
+  roots = ["~"]
+
+  # roots を走査する深さ（0 以上）
+  depth = 2
+
+  # ディレクトリに加えてファイルも候補に含めるか（パネルがファイル選択か推定できないときに使います）
+  include_files = false
+
+  # パスを入力した後に「開く」まで自動で押すか
+  auto_confirm = false
+
+  # パレットを再表示するグローバルホットキー。修飾キー（ctrl / opt / shift / cmd）とキーを + でつなぎます
+  hotkey = "ctrl+shift+o"
+
+  # パレットを出さないアプリの bundle id
+  # 例: disabled_apps = ["com.apple.finder"]
+  disabled_apps = []
+
+  # roots の走査で除外するディレクトリ名
+  ignore = ["node_modules", ".git", "target", "DerivedData", ".build"]
+
+  [ghq]
+  # ghq 管理下のリポジトリ（ghq list -p）を候補に含めるか
+  enabled = true
+  ```
+
+- ホームを検索対象にしたときの走査（macOS 27 で確認）:
+  - `~/Library` は隠し属性（UF_HIDDEN）付きのため、`.skipsHiddenFiles` で配下ごと除外される（`~/Library/CloudStorage` や iCloud Drive の `~/Library/Mobile Documents` にも潜らない）。`ignore` の既定に `Library` は加えない（`ignore` は名前の一致でどの階層にも効くため、ホーム以外の `Library` という名前のディレクトリまで除外してしまう）。
+  - `~/Pictures` の `.photoslibrary` や `~/Applications` の `.app` はパッケージとしてファイル扱いになり、中に潜らない（`include_files = false` では候補にも含めない）。
+  - depth 2 のため、候補は `~/Documents/<フォルダ>` の階層まで。
+  - 実測（開発者のホーム、depth 2・既定の `ignore`、`-O` でビルド）: 147 件、初回 約 200ms、2 回目以降 約 10ms。1 ルート 20,000 件の打ち切りには遠い。
+  - `~/Desktop`・`~/Documents`・`~/Downloads` は macOS のプライバシー保護（TCC）の対象で、openpath が初めてその中を読むときに、フォルダへのアクセスを許可するかの確認が出る想定。許可しなくても走査は続き、そのフォルダ自体は候補に残って中が候補に入らないだけになる。確認への応答を待つ間の挙動も含め、実機の初回起動で確認する。
 - TOML ライブラリ: 上記キーのみをサポートする自前パーサ（文字列 / 真偽 / 整数 / 文字列配列 / 1 階層テーブル）。サポート外の構文（浮動小数・日時・インラインテーブル・ネストテーブル・ドット区切りキー・複数行文字列・16/8/2 進整数・文字列以外の配列）は TOML として正しくても `unsupported(...)` として明示的にエラーにする（黙って誤読しない）。外部依存を避ける（PR #35）。
 
 ## 7. HistoryStore の永続化

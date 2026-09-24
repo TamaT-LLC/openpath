@@ -55,7 +55,7 @@ public final class ConfigStore {
     ///   - directory: 設定ファイルを置くディレクトリ。テストで実ユーザーのファイルに触れないよう、既定値を持たせず明示させる。
     ///     アプリでは `ConfigStore.defaultDirectory()` を渡す
     ///   - homeDirectory: roots の `~` の展開先。既定の設定ファイルでは ghq root を `~` で書くのにも使う
-    ///   - ghqRootProvider: 既定の設定ファイルを生成するときに roots へ含める ghq root の取得元
+    ///   - ghqRootProvider: 既定の設定ファイルを生成するときに roots へ含める ghq root の取得元。取れなければ roots はホーム（`~`）になる
     ///   - watchTiming: ファイル監視の開き直しとデバウンスのタイミング
     public init(
         directory: URL,

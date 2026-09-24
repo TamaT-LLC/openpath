@@ -132,6 +132,27 @@ struct RootDirectoryScannerTests {
         #expect(snapshot.pathSet == [tree.path(".config"), tree.path(".config/app")])
     }
 
+    @Test("隠し属性（chflags hidden）のディレクトリは、名前が . で始まらなくても配下ごと除外する（ホームの Library を想定）")
+    func excludesDirectoriesWithHiddenFlag() throws {
+        try tree.makeDirectories("Library/CloudStorage", "Documents/project")
+        try tree.setHiddenFlag("Library")
+        #expect(try tree.isHidden("Library"), "隠し属性を付けられていない")
+
+        let snapshot = try scan(depth: 2)
+
+        #expect(snapshot.pathSet == [tree.root, tree.path("Documents"), tree.path("Documents/project")])
+    }
+
+    @Test("隠し属性のディレクトリをルートに指定した場合は、その配下を走査する")
+    func scansRootWithHiddenFlag() throws {
+        try tree.makeDirectories("Library/Application Support")
+        try tree.setHiddenFlag("Library")
+
+        let snapshot = try scan(root: tree.path("Library"), depth: 1)
+
+        #expect(snapshot.pathSet == [tree.path("Library"), tree.path("Library/Application Support")])
+    }
+
     // MARK: - includeFiles
 
     @Test("includeFiles=false ならディレクトリだけを返す")

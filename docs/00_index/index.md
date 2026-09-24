@@ -10,3 +10,4 @@
 | PROJ-TST-001 | L5 | openpath | global | テスト計画: openpath | Draft |
 | PROJ-TST-002 | L5 | openpath | global | 手動シナリオテスト: openpath（実機確認チェックリスト） | Draft |
 | PROJ-BUS-001 | L1 | global | global | プロダクト概要（openpath / OSS 方針） | Draft |
+| PROJ-TST-003 | L5 | openpath | global | 非機能テストの計測結果: openpath | Draft |
