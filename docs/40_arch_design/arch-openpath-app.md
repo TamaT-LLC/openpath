@@ -76,7 +76,7 @@ NSOpenPanel の出現を検知し、ファジー検索パレットを重ね、�
 | `PanelInjector` | Cmd+Shift+G → ペースト → Enter の送出、AX 直接セットのフォールバック | `CGEvent`, `AXUIElementSetAttributeValue` |
 | `StatusItem` | メニューバー UI、権限案内、自動起動 | `NSStatusBar`, `SMAppService` |
 
-`OpenPathMac` 側の生成と配線はコンポジションルート `AppComposition` に集約する。各モジュールの実体の生成と、`AppLifecycleServices` としての段階ごとの開始・停止は `AppServices`、パレットの部品（`PaletteViewModel` / `PaletteWindow` / `PaletteKeyController` / `PalettePresenter`）の生成は `PaletteAssembly` が担う。起動・終了の段階と順番、アクセシビリティ権限とメニューの「有効」状態によるパネル監視・ホットキーの開始と停止は、AppKit に依存しない `OpenPathCore` の `AppLifecycle` に切り出してテストする（起動: 設定の読み込み → 候補の構築 → パネルの監視 → ホットキーの順、終了: パネルの監視 → ホットキー → 終了処理（設定変更の購読停止・履歴の保存・候補構築とファイル監視の停止）の順。パネルの監視は権限と「有効」の両方がある間だけ動かし、ホットキーは「有効」の間だけ登録する（権限が無くてもホットキーの登録自体は止めず、パネルの監視だけ止める。候補の構築はどちらの状態でも続け、有効に戻したときすぐ使えるようにする、PR #63 / #65）。
+`OpenPathMac` 側の生成と配線はコンポジションルート `AppComposition` に集約する。各モジュールの実体の生成と、`AppLifecycleServices` としての段階ごとの開始・停止は `AppServices`、パレットの部品（`PaletteViewModel` / `PaletteWindow` / `PaletteKeyController` / `PalettePresenter`）の生成は `PaletteAssembly` が担う。起動・終了の段階と順番、アクセシビリティ権限とメニューの「有効」状態によるパネル監視・ホットキーの開始と停止は、AppKit に依存しない `OpenPathCore` の `AppLifecycle` に切り出してテストする（起動: 設定の読み込み → 候補の構築 → パネルの監視 → ホットキーの順、終了: パネルの監視 → ホットキー → 終了処理（設定変更の購読停止・履歴の保存・候補構築とファイル監視の停止）の順。パネルの監視は権限と「有効」の両方がある間だけ動かし、ホットキーは「有効」の間だけ登録する（権限が無くてもホットキーの登録自体は止めず、パネルの監視だけ止める。候補の構築はどちらの状態でも続け、有効に戻したときすぐ使えるようにする、PR #63 / #65）。「有効」は切り替えるたびに `AppLifecycle` が UserDefaults（キー `enabled`、`UserDefaultsEnabledState`）へ記録し、次の起動は前回の値で始める。無効で起動した場合はパネルの監視もホットキーも始めない（保存先は注入し、テストでは実 UserDefaults を使わない）。
 
 ## 5. 状態機械
 
