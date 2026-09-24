@@ -9,7 +9,7 @@ import OpenPathCore
 /// - AXObserver の通知（ウィンドウ生成・要素破棄・フォーカスウィンドウ変更）と、AppCoordinator が Idle の間の
 ///   200ms 間隔の補助ポーリングでウィンドウを走査し、`detector` でパネルかどうかを判定する
 /// - パネルの出現・消滅は `onEvent` に `CoordinatorEvent.panelAppeared` / `.panelGone` として渡し、ログにも残す
-///   （`panel detected` はスモークテストとレイテンシ計測に使う。TST-001 §4）
+///   （`panel detected` はスモークテストとレイテンシ計測に使う。TST-001 §4。文言は `PanelWatchLogMessage`）
 ///
 /// どのアプリに張り付くか、ポーリングの開始・停止、重複通知の抑止は OpenPathCore の `PanelWatchPolicy` で決める。
 /// このクラスはそれを NSWorkspace と AX に接続するだけにしている。
@@ -61,7 +61,7 @@ public final class PanelWatcher {
         self.environment = environment
         self.engine = engine
         engine.onEvent = { [weak self] event in
-            Self.log(event)
+            self?.log(event)
             self?.onEvent?(event)
         }
     }
@@ -143,14 +143,15 @@ public final class PanelWatcher {
     // MARK: - ログ
 
     /// 検知の時刻はログのタイムスタンプ（ミリ秒）で分かる。パスは含まない。
-    private static func log(_ event: CoordinatorEvent) {
+    /// 選択モードの推定結果（「推定できない」とその理由）も出し、リリースビルドの info ログだけで QA が見分けられるようにする。
+    private func log(_ event: CoordinatorEvent) {
         switch event {
         case .panelAppeared(let panel):
-            Log.info("panel detected (id: \(panel.id.rawValue), directoriesOnly: \(panel.isDirectoriesOnly))")
+            Log.info(PanelWatchLogMessage.panelDetected(panel, estimate: environment.selectionEstimate(for: panel.id)))
         case .panelGone:
-            Log.info("panel gone")
+            Log.info(PanelWatchLogMessage.panelGone)
         case .panelContextChanged(let panel):
-            Log.info("panel updated (id: \(panel.id.rawValue), directoriesOnly: \(panel.isDirectoriesOnly))")
+            Log.info(PanelWatchLogMessage.panelUpdated(panel, estimate: environment.selectionEstimate(for: panel.id)))
         case .confirm, .escape, .hotkey:
             break
         }

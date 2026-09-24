@@ -36,6 +36,8 @@ struct StubNode {
     var titleElementID: String?
     /// `AXColumns` の要素の id（AXBrowser の列）
     var columnIDs: [String] = []
+    /// 表示中とみなす先頭の行・項目の数（`AXVisibleRows` は AXRow の子、`AXVisibleChildren` は子のうち）。nil ならすべて表示中
+    var visibleItemCount: Int?
 }
 
 /// AX ツリーのスタブ。読み取りを記録し、AX の往復回数や読んだ要素を検証できるようにする。
@@ -46,6 +48,10 @@ final class StubPanelTree: PanelTreeReader {
     enum Attribute: Hashable {
         case role, subrole, title, description, children, frame
         case visibleRows, visibleChildren, columns, titleElement, url, isEnabled, textOpacity
+        /// `itemCount(_:of:)`（AXUIElementGetAttributeValueCount）
+        case itemCount(PanelTreeItemsAttribute)
+        /// `items(_:of:in:)`（AXUIElementCopyAttributeValues）
+        case items(PanelTreeItemsAttribute)
     }
 
     struct Read: Hashable {
@@ -65,6 +71,7 @@ final class StubPanelTree: PanelTreeReader {
         var textOpacity: Double?
         var titleElement: StubElement?
         var columns: [StubElement]
+        var visibleItemCount: Int?
     }
 
     private var attributes: [StubElement: Attributes] = [:]
@@ -140,14 +147,16 @@ final class StubPanelTree: PanelTreeReader {
         try read(node, .frame).frame
     }
 
-    /// 表示中の行。スタブでは子のうちロールが AXRow のものをすべて表示中とみなす。
+    /// 表示中の行。スタブでは子のうちロールが AXRow のものを、先頭から `visibleItemCount` 行（nil ならすべて）表示中とみなす。
     func visibleRows(of node: StubElement) throws -> [StubElement] {
-        try read(node, .visibleRows).children.filter { attributes[$0]?.role == Self.rowRole }
+        let found = try read(node, .visibleRows)
+        return Array(rows(in: found).prefix(found.visibleItemCount ?? .max))
     }
 
-    /// 表示中の項目。スタブでは子をすべて表示中とみなす。
+    /// 表示中の項目。スタブでは子を、先頭から `visibleItemCount` 個（nil ならすべて）表示中とみなす。
     func visibleChildren(of node: StubElement) throws -> [StubElement] {
-        try read(node, .visibleChildren).children
+        let found = try read(node, .visibleChildren)
+        return Array(found.children.prefix(found.visibleItemCount ?? .max))
     }
 
     func columns(of node: StubElement) throws -> [StubElement] {
@@ -170,7 +179,31 @@ final class StubPanelTree: PanelTreeReader {
         try read(node, .textOpacity).textOpacity
     }
 
+    func itemCount(_ attribute: PanelTreeItemsAttribute, of node: StubElement) throws -> Int {
+        items(attribute, in: try read(node, .itemCount(attribute))).count
+    }
+
+    /// 要素数を超える範囲は切り詰める（AXUIElementCopyAttributeValues と同じ）。
+    func items(_ attribute: PanelTreeItemsAttribute, of node: StubElement, in range: Range<Int>) throws -> [StubElement] {
+        let all = items(attribute, in: try read(node, .items(attribute)))
+        return Array(all[range.clamped(to: all.indices)])
+    }
+
     // MARK: - 内部
+
+    /// 子のうちロールが AXRow のもの（`AXRows`）。
+    private func rows(in found: Attributes) -> [StubElement] {
+        found.children.filter { attributes[$0]?.role == Self.rowRole }
+    }
+
+    private func items(_ attribute: PanelTreeItemsAttribute, in found: Attributes) -> [StubElement] {
+        switch attribute {
+        case .rows:
+            rows(in: found)
+        case .children:
+            found.children
+        }
+    }
 
     private func read(_ element: StubElement, _ attribute: Attribute) throws -> Attributes {
         reads.append(Read(element: element, attribute: attribute))
@@ -200,7 +233,8 @@ final class StubPanelTree: PanelTreeReader {
             isEnabled: node.isEnabled,
             textOpacity: node.textOpacity,
             titleElement: node.titleElementID.map(StubElement.init),
-            columns: node.columnIDs.map(StubElement.init)
+            columns: node.columnIDs.map(StubElement.init),
+            visibleItemCount: node.visibleItemCount
         )
         return element
     }

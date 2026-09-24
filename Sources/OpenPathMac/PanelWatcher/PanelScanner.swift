@@ -11,6 +11,8 @@ enum PanelScanner {
         let outcome: PanelScanOutcome
         /// 見つけたパネルの要素。破棄の通知を登録するために使う
         let panelElements: [AXUIElement]
+        /// 見つけたパネルの選択モードの推定結果。ログ（`panel detected` 等）に出すために使う
+        let selectionEstimates: [PanelContext.ID: PanelSelectionEstimate]
     }
 
     static func scan(processID: pid_t, detector: any PanelDetecting) -> Scan {
@@ -20,13 +22,16 @@ enum PanelScanner {
         // アプリの終了（invalidUIElement）は NSWorkspace の終了通知で扱う
         guard let windowsValue = try? application.copyAttributeValue(kAXWindowsAttribute),
               let windows = AXAttributeCast.cast(windowsValue, to: [AXUIElement].self) else {
-            return Scan(outcome: .unavailable, panelElements: [])
+            return Scan(outcome: .unavailable, panelElements: [], selectionEstimates: [:])
         }
         let panels = windows.compactMap(detector.detectPanel(in:))
         let converter = ScreenCoordinateConverter.forCurrentDisplays()
         let contexts = panels.map { panel in
             panel.context.withFrame(converter.screenRect(fromAXRect: panel.context.frame))
         }
-        return Scan(outcome: .found(contexts), panelElements: panels.map(\.element))
+        let estimates = panels.reduce(into: [PanelContext.ID: PanelSelectionEstimate]()) { estimates, panel in
+            estimates[panel.context.id] = panel.selectionEstimate
+        }
+        return Scan(outcome: .found(contexts), panelElements: panels.map(\.element), selectionEstimates: estimates)
     }
 }

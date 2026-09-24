@@ -1,6 +1,6 @@
 import Foundation
 
-/// パネルのファイル一覧から、選択モードの推定に使う先頭の行を読む（DSN-001 §2.3）。
+/// パネルのファイル一覧から、選択モードの推定に使う行を読む（DSN-001 §2.3）。
 ///
 /// NSOpenPanel のファイル一覧（FinderKit）の構造（macOS 26 で確認）:
 /// - カラム表示（AXBrowser）: AXColumns（左の列から順）の最後の列が今のフォルダ。列（AXScrollArea）の子の AXList の項目
@@ -12,17 +12,53 @@ import Foundation
 ///   AXImage は文字列を持たないため文字色は読めないが、選べない項目は AXEnabled が false になる
 /// - 名前の要素の AXURL（ファイル参照 URL）は、ディレクトリなら末尾が "/" になる
 ///
-/// AX の往復を抑えるため、次のようにする:
-/// - 表示中の行（AXVisibleRows / AXVisibleChildren）だけを先頭から読む。フォルダの項目がすべて返る AXChildren は使わない
+/// AX の往復を抑えるため、次のようにする（読む項目の場所は `FileListItemSource`）:
+/// - 表示中の行（AXVisibleRows / AXVisibleChildren）を先頭から読む
+/// - 先頭の行がディレクトリばかりのときだけ、一覧の末尾の数行を範囲を指定して読む。フォルダの項目をすべて受け取らない
 /// - ディレクトリの行は URL まで、ファイルの行は文字色（読めなければ AXEnabled）まで読む。アイコン表示では文字色を読まず AXEnabled を読む
 /// - 選べるファイルの行が見つかったら推定が確定するため、以降の行は読まない
 public enum FileListRowSampler {
-    private static let browserRole = "AXBrowser"
-    private static let tableRoles: Set<String> = ["AXOutline", "AXTable"]
-    /// カラム表示の列の中の一覧のロール
-    private static let columnListRole = "AXList"
-    /// カラム表示で今のフォルダの列を探す数。右端のプレビューの列の分だけ、最後から 2 列まで見る
-    private static let browserColumnsToSearch = 2
+    /// 選択モードの推定に使う行を読む。
+    /// 1. 先頭の行: 表示中の行を先頭から最大 `PanelSelectionModeEstimator.sampledRowCount` 行（`sampleRows` と同じ）
+    /// 2. 末尾の行: 先頭の行にディレクトリの行があり、ディレクトリ以外の行がないときだけ、一覧の末尾から最大
+    ///    `PanelSelectionModeEstimator.trailingSampledRowCount` 行（先頭の行と重ならない範囲）。
+    ///    「フォルダを先頭に表示」の並びやサブフォルダの多いフォルダでは、ファイルが表示範囲の外（一覧の末尾）に並ぶため（Issue #73）
+    /// - Parameter role: fileList のロール（`sampleRows` と同じ）。
+    /// - Throws: 読み取りに失敗したら `PanelTreeReadError`。
+    public static func sample<Reader: PanelTreeReader>(
+        in fileList: Reader.Node,
+        role: String,
+        reader: Reader
+    ) throws -> FileListSample {
+        let leadingLimit = PanelSelectionModeEstimator.sampledRowCount
+        guard let source = try FileListItemSource(fileList: fileList, role: role, reader: reader, leadingLimit: leadingLimit) else {
+            return FileListSample(leadingRows: [], trailingRows: [])
+        }
+        let leadingRows = try readRows(source.leadingItems.prefix(leadingLimit), layout: source.layout, reader: reader)
+        guard needsTrailingRows(after: leadingRows) else {
+            return FileListSample(leadingRows: leadingRows, trailingRows: [])
+        }
+        return FileListSample(leadingRows: leadingRows, trailingRows: trailingRows(of: source, after: leadingRows.count, reader: reader))
+    }
+
+    /// 末尾の行は、先頭の行で推定できなかったときの補いにすぎないため、読み取りに失敗したら読まなかったことにし、
+    /// 先頭の行だけで推定する（表示範囲の外の要素が無効な実装でも、先頭の行を読めた結果を捨てない）。
+    private static func trailingRows<Reader: PanelTreeReader>(
+        of source: FileListItemSource<Reader.Node>,
+        after leadingCount: Int,
+        reader: Reader
+    ) -> [FileListRow] {
+        do {
+            let items = try source.trailingItems(
+                after: leadingCount,
+                limit: PanelSelectionModeEstimator.trailingSampledRowCount,
+                reader: reader
+            )
+            return try readRows(items, layout: source.layout, reader: reader)
+        } catch {
+            return []
+        }
+    }
 
     /// fileList の表示中の行を、先頭から最大 limit 行読む。
     /// - Parameter role: fileList のロール（`AXBrowser` / `AXOutline` / `AXTable`、アイコン表示の `AXList`）。
@@ -36,23 +72,26 @@ public enum FileListRowSampler {
         limit: Int = PanelSelectionModeEstimator.sampledRowCount
     ) throws -> [FileListRow] {
         let limit = max(0, limit)
-        let items: [Reader.Node]
-        let layout: ItemLayout
-        if role == browserRole {
-            items = try currentFolderItems(inBrowser: fileList, reader: reader)
-            layout = .browserItem
-        } else if tableRoles.contains(role) {
-            items = try reader.visibleRows(of: fileList)
-            layout = .tableRow
-        } else if role == OpenPanelCriteria.collectionListRole {
-            items = try visibleItems(inIconView: fileList, reader: reader, limit: limit)
-            layout = .iconItem
-        } else {
+        guard let source = try FileListItemSource(fileList: fileList, role: role, reader: reader, leadingLimit: limit) else {
             return []
         }
+        return try readRows(source.leadingItems.prefix(limit), layout: source.layout, reader: reader)
+    }
 
+    /// 先頭の行がディレクトリばかりで、末尾の行も読む必要があるか。
+    /// 行がない（空のフォルダ・読み込み前）か、ディレクトリ以外の行がある（推定できる、または選べるかを読めない）なら読まない。
+    private static func needsTrailingRows(after leadingRows: [FileListRow]) -> Bool {
+        leadingRows.contains { $0.isDirectory == true } && !leadingRows.contains { $0.isDirectory == false }
+    }
+
+    /// items を順に読む。選べるファイルの行が見つかったら、推定が確定するため以降の行は読まない。
+    private static func readRows<Reader: PanelTreeReader>(
+        _ items: some Sequence<Reader.Node>,
+        layout: ItemLayout,
+        reader: Reader
+    ) throws -> [FileListRow] {
         var rows: [FileListRow] = []
-        for item in items.prefix(limit) {
+        for item in items {
             let row = try readRow(item, layout: layout, reader: reader)
             rows.append(row)
             if row.isDirectory == false, row.isSelectable == true {
@@ -60,33 +99,6 @@ public enum FileListRowSampler {
             }
         }
         return rows
-    }
-
-    /// カラム表示の今のフォルダ（AXList を持つ最後の列）の、表示中の項目。
-    private static func currentFolderItems<Reader: PanelTreeReader>(
-        inBrowser browser: Reader.Node,
-        reader: Reader
-    ) throws -> [Reader.Node] {
-        for column in try reader.columns(of: browser).reversed().prefix(browserColumnsToSearch) {
-            for child in try reader.children(of: column) where try reader.role(of: child) == columnListRole {
-                return try reader.visibleChildren(of: child)
-            }
-        }
-        return []
-    }
-
-    /// アイコン表示の、セクションの順に並べた表示中の項目。limit 個の項目が集まったら、残りのセクションは読まない。
-    private static func visibleItems<Reader: PanelTreeReader>(
-        inIconView iconView: Reader.Node,
-        reader: Reader,
-        limit: Int
-    ) throws -> [Reader.Node] {
-        var items: [Reader.Node] = []
-        for section in try reader.visibleChildren(of: iconView) {
-            guard items.count < limit else { break }
-            items += try reader.visibleChildren(of: section)
-        }
-        return items
     }
 
     /// 行を 1 つ読む。名前の要素や URL がなければ、種類の分からない行にする。
@@ -143,14 +155,4 @@ public enum FileListRowSampler {
             return try reader.children(of: item).first
         }
     }
-}
-
-/// 行（項目）から名前の要素への辿り方。
-private enum ItemLayout {
-    /// カラム表示の項目: 項目の AXTitleUIElement
-    case browserItem
-    /// リスト表示の行: 最初のセルの AXTitleUIElement
-    case tableRow
-    /// アイコン表示の項目: 項目の最初の子（AXURL と AXEnabled を持つ AXImage）
-    case iconItem
 }

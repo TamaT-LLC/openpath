@@ -29,7 +29,9 @@ public final class OpenPanelDetector: PanelDetecting, @unchecked Sendable {
             locator.locate(in: target, reader: reader, now: startedAt)
         }
         Self.log(lookup, axCalls: reader.callCount, elapsed: ContinuousClock.now - startedAt)
-        return lookup.panel.map { DetectedPanel(element: $0.element, context: $0.context) }
+        return lookup.panel.map {
+            DetectedPanel(element: $0.element, context: $0.context, selectionEstimate: $0.selectionEstimate)
+        }
     }
 
     public func elementDestroyed(_ element: AXUIElement) {
