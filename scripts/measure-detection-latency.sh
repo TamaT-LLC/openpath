@@ -28,10 +28,12 @@
 #   - 同じ ID の start が続いたら古い方は組めなかったものとして数える。
 #   - "panel gone"（ID を持たない）と起動の行（"を起動します"）で、まだ組んでいない start をすべて打ち切る。
 #     ID はプロセスごとの連番で再起動すると同じ値が使われるため、前の起動の start と組まないようにする。
-#   - 組めなかった start と、組む相手の無い end（同じパネルの再表示・ホットキーでの再表示で出る）は件数だけ数える。
+#   - 組む相手の無い end（同じパネルの再表示・ホットキーでの再表示で出る）は件数だけ数えて除外する。
+#   - 組めなかった start（パレットが出なかった検知）が 1 件でもあれば判定しない（終了コード 2）。除いて p95 を出すと
+#     表示の失敗を見逃すため。
 # 集計: p50 / p95 は nearest-rank 法（昇順に並べた ceil(p / 100 × n) 番目の値）。
 #
-# 終了コード: 0 = PASS、1 = FAIL、2 = 計測できなかった（ログが無い・end の行が 1 行も無い等）
+# 終了コード: 0 = PASS、1 = FAIL、2 = 計測できなかった（ログが無い・end の行が 1 行も無い・組めなかった start がある等）
 set -euo pipefail
 
 # shellcheck source=scripts/lib/common.sh
@@ -323,7 +325,13 @@ main() {
     "${unpaired}" "${PANEL_GONE_PATTERN}"
   # 同じパネルの再表示・ホットキーでの再表示でも end は出るため、警告にはしない
   printf '組にしなかった end: %s 件（組む start が無い。同じパネルの再表示・ホットキーでの再表示等）\n' "${orphan_ends}"
-  printf '合格基準: p95 <= %s ms\n' "${threshold_ms}"
+  printf '合格基準: p95 <= %s ms（組めなかった start が 0 件であること）\n' "${threshold_ms}"
+
+  # パレットが出なかった検知を除いて p95 を出すと、表示の失敗を見逃して PASS にしてしまうため判定しない。
+  # panel detected はイベントを渡す前にログに出るため、正常な操作では palette shown より後になることは無い
+  if [[ "${unpaired}" -gt 0 ]]; then
+    die_unmeasurable "パレットが出なかった検知（組めなかった start）が ${unpaired} 件あるため判定できません（上の p50 / p95 は組めた分だけの値）。パネルを開いたまま集計していないか、パレットが出ずに閉じたパネルが無いかを確かめ、S-01 だけを繰り返したログで測り直してください"
+  fi
 
   local status="${EXIT_FAIL}"
   if awk -v value="${p95}" -v limit="${threshold_ms}" 'BEGIN { exit !(value <= limit) }'; then
