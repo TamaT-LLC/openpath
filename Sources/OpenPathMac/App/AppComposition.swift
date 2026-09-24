@@ -1,3 +1,5 @@
+import Foundation
+
 import OpenPathCore
 
 /// アプリのコンポジションルート。依存の生成と配線を AppDelegate から切り離す。
@@ -11,6 +13,8 @@ import OpenPathCore
 ///   自動確定の後のクリップボードの復元失敗のバッジをメニューバーへつなぐ。
 /// - 初回起動の案内（`OnboardingAssembly`、UX-001 §7）は起動処理を終えてから出す。
 ///   設定ファイルの生成とパネルの監視の開始を済ませ、「試してみる」ですぐにパレットが出るようにするため。
+/// - メニューの「有効」は UserDefaults（`jp.tamat.openpath`）に記録し、次の起動は前回の値で始める。
+///   メニューのチェックとアイコンの薄い表示も、起動時から記録の値に合わせる。
 @MainActor
 public final class AppComposition {
     private let services: AppServices
@@ -24,12 +28,16 @@ public final class AppComposition {
     public init() {
         let services = AppServices()
         let permissionMonitor = AccessibilityPermissionMonitor()
-        let lifecycle = AppLifecycle(services: services, permission: permissionMonitor.status)
+        let lifecycle = AppLifecycle(
+            services: services,
+            permission: permissionMonitor.status,
+            enabledState: UserDefaultsEnabledState(storage: UserDefaults.standard)
+        )
         let onboarding = OnboardingAssembly(configStore: services.configStore, permission: permissionMonitor.status)
         let statusItemController = StatusItemController(
             configFileURL: services.configStore.fileURL,
             actions: StatusMenuActions(
-                // 「有効」は起動のたびに有効から始める（設定ファイルには書き戻さない）
+                // 「有効」は AppLifecycle が UserDefaults に記録する（設定ファイルには書き戻さない）
                 setEnabled: { isEnabled in lifecycle.setEnabled(isEnabled) },
                 rebuildCandidates: { services.rebuildCandidates() },
                 clearHistory: {
@@ -39,6 +47,7 @@ public final class AppComposition {
                 },
                 showOnboarding: { onboarding.reopen() }
             ),
+            isEnabled: lifecycle.isEnabled,
             accessibilityPermission: permissionMonitor.status
         )
         let configStore = services.configStore

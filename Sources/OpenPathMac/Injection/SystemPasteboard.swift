@@ -3,7 +3,7 @@ import AppKit
 import OpenPathCore
 
 /// `NSPasteboard` を注入用のペーストボードとして扱うアダプタ。
-/// 退避・復元の判断（どの型を残すか、他者の書き込みを上書きしないか）は OpenPathCore の `PasteboardSwap` が持つ。
+/// 退避・復元の判断（どの型を残すか、他者の書き込みを上書きしないか、機密の内容を戻さないか）は OpenPathCore の `PasteboardSwap` が持つ。
 @MainActor
 public final class SystemPasteboard: PasteboardAccessing {
     private let pasteboard: NSPasteboard

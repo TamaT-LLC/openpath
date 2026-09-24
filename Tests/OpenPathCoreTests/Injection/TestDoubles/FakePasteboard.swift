@@ -13,13 +13,15 @@ final class FakePasteboard: PasteboardAccessing {
 
     private struct Item: PasteboardItemReading {
         let entries: [Entry]
+        let recordRead: @MainActor (String) -> Void
 
         var types: [String] {
             entries.map(\.type)
         }
 
         func data(forType type: String) -> Data? {
-            entries.first { $0.type == type }?.data
+            recordRead(type)
+            return entries.first { $0.type == type }?.data
         }
     }
 
@@ -31,6 +33,12 @@ final class FakePasteboard: PasteboardAccessing {
     var remainingWriteFailures = 0
     /// 書き込みが成功するたびに呼ばれる。
     var onWrite: ((PasteboardSnapshot) -> Void)?
+    /// データを読み出した型を発生順に記録する（機密の内容を読み出していないことの確認に使う）。
+    private(set) var readTypes: [String] = []
+    /// アイテムの一覧を読み出した直後に呼ばれる（読み出した一覧は呼ぶ前の内容のまま）。読み出しの合間の他者の書き込みを再現する。
+    var onItemsRead: (() -> Void)?
+    /// 型のデータを読み出した直後に呼ばれる。読み出しの合間の他者の書き込みを再現する。
+    var onDataRead: ((String) -> Void)?
 
     init(items: [[Entry]]) {
         storedItems = items
@@ -50,7 +58,14 @@ final class FakePasteboard: PasteboardAccessing {
     }
 
     var items: [any PasteboardItemReading] {
-        storedItems.map(Item.init)
+        let items = storedItems.map { entries in
+            Item(entries: entries) { [weak self] type in
+                self?.readTypes.append(type)
+                self?.onDataRead?(type)
+            }
+        }
+        onItemsRead?()
+        return items
     }
 
     func replaceContents(with snapshot: PasteboardSnapshot) -> Bool {
@@ -89,6 +104,14 @@ extension PasteboardSnapshot {
         ]),
         Item(representations: [
             Representation(type: "public.png", data: Data([0x89, 0x50, 0x4E, 0x47])),
+        ]),
+    ])
+
+    /// パスワードマネージャーがコピーした内容の例（nspasteboard.org の機密の印付き）。
+    static let concealedPassword = PasteboardSnapshot(items: [
+        Item(representations: [
+            Representation(type: "public.utf8-plain-text", data: Data("correct horse battery staple".utf8)),
+            Representation(type: "org.nspasteboard.ConcealedType", data: Data()),
         ]),
     ])
 

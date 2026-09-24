@@ -19,6 +19,7 @@ public protocol AppLifecycleServices: AnyObject {
 ///   パネルの監視はアクセシビリティ権限があるときだけ始め、権限の付与・取り消しに合わせて始める・止める。
 ///   権限が無いまま AX を呼んでも失敗するだけで、パレットを出せないため（UX-001 §5）。
 /// - 有効・無効（メニューの「有効」）: 無効の間はパネルの監視とホットキーを止める。候補の構築は続け、有効に戻したらすぐ使えるようにする。
+///   切り替えるたびに記録し、次の起動は前回の値で始める（無効で起動したらパネルの監視もホットキーも始めない）。
 /// - 終了: パネルの監視 → ホットキーを止めてから終了処理をする。設定の読み込み中に終了した場合は、読み込み後に何も始めない。
 ///
 /// 各モジュールへの呼び出しは状態が変わったときだけ行い、同じ開始・停止を重ねない。
@@ -35,8 +36,8 @@ public final class AppLifecycle {
     public private(set) var phase = Phase.notLaunched
     /// 最後に知らされたアクセシビリティ権限の状態
     public private(set) var permission: AccessibilityPermissionStatus
-    /// メニューの「有効」。起動のたびに有効から始める
-    public private(set) var isEnabled = true
+    /// メニューの「有効」。前回の値を記録から読んで始める（記録が無ければ有効）
+    public private(set) var isEnabled: Bool
     /// パネルを監視中か
     public private(set) var isPanelWatching = false
     /// ホットキーを登録中か
@@ -44,13 +45,21 @@ public final class AppLifecycle {
 
     /// 所有者（AppComposition）が services を兼ねるため、循環参照にならないよう弱参照にする
     private weak var services: (any AppLifecycleServices)?
+    private let enabledState: any EnabledStateRecording
 
     /// - Parameters:
     ///   - services: 各モジュールの開始と停止。弱参照で持つため、呼び出し側で保持すること。
     ///   - permission: 起動時のアクセシビリティ権限の状態。
-    public init(services: any AppLifecycleServices, permission: AccessibilityPermissionStatus) {
+    ///   - enabledState: メニューの「有効」の記録。配線漏れで再起動後に保たれなくならないよう、既定値を持たせない。
+    public init(
+        services: any AppLifecycleServices,
+        permission: AccessibilityPermissionStatus,
+        enabledState: any EnabledStateRecording
+    ) {
         self.services = services
         self.permission = permission
+        self.enabledState = enabledState
+        isEnabled = enabledState.isEnabled
     }
 
     private var shouldWatchPanels: Bool {
@@ -70,7 +79,7 @@ public final class AppLifecycle {
         guard phase == .launching else { return }
         services?.startCandidateIndexing()
         phase = .running
-        Log.info("起動処理を終えました（アクセシビリティ権限: \(permission.isGranted ? "あり" : "なし")）")
+        Log.info("起動処理を終えました（アクセシビリティ権限: \(permission.isGranted ? "あり" : "なし")、有効: \(isEnabled ? "はい" : "いいえ")）")
         reconcile()
     }
 
@@ -82,10 +91,11 @@ public final class AppLifecycle {
         reconcile()
     }
 
-    /// メニューの「有効」の切り替えを反映する。無効の間はパネルの監視とホットキーを止める。
+    /// メニューの「有効」の切り替えを反映して記録する。無効の間はパネルの監視とホットキーを止める。
     public func setEnabled(_ newValue: Bool) {
         guard phase != .terminated, newValue != isEnabled else { return }
         isEnabled = newValue
+        enabledState.recordEnabled(newValue)
         reconcile()
     }
 

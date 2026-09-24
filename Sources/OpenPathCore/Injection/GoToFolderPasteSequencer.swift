@@ -11,6 +11,7 @@
 ///
 /// - ペーストボードは差し替えた後なら、成功・失敗・キャンセルのどの経路でも戻す。
 ///   失敗・キャンセル時は 200ms を待たずにすぐ戻す。戻せなければ `InjectionError.pasteboardRestoreFailed` を投げる。
+///   元の内容が機密（パスワードマネージャー等）なら戻さずに空にする（`PasteboardSwap`。失敗ではない）。
 /// - キーを送る直前ごとに注入先がまだ有効か（アプリが最前面で、ウィンドウが残っているか）を確かめ、
 ///   無効なら送らずに `.targetNotFrontmost` / `.panelGone` を投げる。注入先の記録は呼び出し元（`PathInjectionFlow`）が行う。
 /// - キャンセルには各ステップの間と待機中に応じ、以降のキー操作は送らない。
@@ -154,10 +155,15 @@ public final class GoToFolderPasteSequencer {
     }
 
     /// 戻せなかったことは、元の注入の結果（成功・他のエラー）より優先して伝える。ユーザーのクリップボードが失われているため。
-    /// 他者の書き込みを優先して戻さなかった場合は、意図どおりなので失敗にしない。
+    /// 他者の書き込みを優先して戻さなかった場合と、機密の内容を戻さずに空にした場合は、意図どおりなので失敗にしない。
     private static func restore(_ swap: PasteboardSwap) throws {
-        guard swap.restore() != .failed else {
+        switch swap.restore() {
+        case .failed:
             throw InjectionError.pasteboardRestoreFailed
+        case .clearedBecauseConcealed:
+            Log.info("クリップボードの内容が機密（パスワード等）だったため、元に戻さずに空にしました")
+        case .restored, .skippedBecauseReplacedByOthers, .alreadyRestored:
+            break
         }
     }
 

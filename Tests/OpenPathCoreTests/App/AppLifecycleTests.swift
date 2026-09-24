@@ -10,7 +10,7 @@ struct AppLifecycleTests {
     @Test("起動は設定の読み込み → 候補の構築 → パネルの監視 → ホットキーの順に始める")
     func launchOrder() async {
         let services = AppLifecycleServicesSpy()
-        let lifecycle = AppLifecycle(services: services, permission: .granted)
+        let lifecycle = AppLifecycle(services: services, permission: .granted, enabledState: EnabledStateSpy())
 
         await lifecycle.launch()
 
@@ -28,7 +28,7 @@ struct AppLifecycleTests {
     @Test("アクセシビリティ権限が無ければパネルの監視を始めない（ホットキーは登録する）")
     func launchWithoutPermission() async {
         let services = AppLifecycleServicesSpy()
-        let lifecycle = AppLifecycle(services: services, permission: .notGranted)
+        let lifecycle = AppLifecycle(services: services, permission: .notGranted, enabledState: EnabledStateSpy())
 
         await lifecycle.launch()
 
@@ -39,7 +39,7 @@ struct AppLifecycleTests {
     @Test("2 回目の起動は何もしない")
     func launchIsIdempotent() async {
         let services = AppLifecycleServicesSpy()
-        let lifecycle = AppLifecycle(services: services, permission: .granted)
+        let lifecycle = AppLifecycle(services: services, permission: .granted, enabledState: EnabledStateSpy())
         await lifecycle.launch()
 
         await lifecycle.launch()
@@ -50,7 +50,7 @@ struct AppLifecycleTests {
     @Test("設定の読み込みを終えるまでは、候補の構築もパネルの監視も始めない")
     func waitsForConfiguration() async {
         let services = AppLifecycleServicesSpy(holdsConfigurationLoading: true)
-        let lifecycle = AppLifecycle(services: services, permission: .granted)
+        let lifecycle = AppLifecycle(services: services, permission: .granted, enabledState: EnabledStateSpy())
 
         let launch = Task { await lifecycle.launch() }
         await services.waitForConfigurationLoading()
@@ -69,7 +69,7 @@ struct AppLifecycleTests {
     @Test("権限が付与されたらパネルの監視を始め、取り消されたら止める")
     func followsPermission() async {
         let services = AppLifecycleServicesSpy()
-        let lifecycle = AppLifecycle(services: services, permission: .notGranted)
+        let lifecycle = AppLifecycle(services: services, permission: .notGranted, enabledState: EnabledStateSpy())
         await lifecycle.launch()
 
         lifecycle.permissionDidChange(.granted)
@@ -82,7 +82,7 @@ struct AppLifecycleTests {
     @Test("同じ権限の通知では何もしない")
     func ignoresSamePermission() async {
         let services = AppLifecycleServicesSpy()
-        let lifecycle = AppLifecycle(services: services, permission: .granted)
+        let lifecycle = AppLifecycle(services: services, permission: .granted, enabledState: EnabledStateSpy())
         await lifecycle.launch()
         let callsAfterLaunch = services.calls
 
@@ -94,7 +94,7 @@ struct AppLifecycleTests {
     @Test("起動中に権限が付与されたら、起動を終えた時点で監視を始める")
     func permissionGrantedWhileLaunching() async {
         let services = AppLifecycleServicesSpy(holdsConfigurationLoading: true)
-        let lifecycle = AppLifecycle(services: services, permission: .notGranted)
+        let lifecycle = AppLifecycle(services: services, permission: .notGranted, enabledState: EnabledStateSpy())
         let launch = Task { await lifecycle.launch() }
         await services.waitForConfigurationLoading()
 
@@ -112,7 +112,7 @@ struct AppLifecycleTests {
     @Test("無効にするとパネルの監視とホットキーを止め、有効に戻すと再開する")
     func followsEnabled() async {
         let services = AppLifecycleServicesSpy()
-        let lifecycle = AppLifecycle(services: services, permission: .granted)
+        let lifecycle = AppLifecycle(services: services, permission: .granted, enabledState: EnabledStateSpy())
         await lifecycle.launch()
 
         lifecycle.setEnabled(false)
@@ -127,7 +127,7 @@ struct AppLifecycleTests {
     @Test("無効の間に権限が付与されても監視を始めず、有効に戻したときに始める")
     func permissionWhileDisabled() async {
         let services = AppLifecycleServicesSpy()
-        let lifecycle = AppLifecycle(services: services, permission: .notGranted)
+        let lifecycle = AppLifecycle(services: services, permission: .notGranted, enabledState: EnabledStateSpy())
         await lifecycle.launch()
         lifecycle.setEnabled(false)
 
@@ -142,7 +142,7 @@ struct AppLifecycleTests {
     @Test("起動前に無効にしたら、起動しても監視もホットキーも始めない")
     func disabledBeforeLaunch() async {
         let services = AppLifecycleServicesSpy()
-        let lifecycle = AppLifecycle(services: services, permission: .granted)
+        let lifecycle = AppLifecycle(services: services, permission: .granted, enabledState: EnabledStateSpy())
 
         lifecycle.setEnabled(false)
         await lifecycle.launch()
@@ -153,7 +153,7 @@ struct AppLifecycleTests {
     @Test("同じ値の設定や、終了後の設定では何もしない")
     func ignoresRedundantEnabled() async {
         let services = AppLifecycleServicesSpy()
-        let lifecycle = AppLifecycle(services: services, permission: .granted)
+        let lifecycle = AppLifecycle(services: services, permission: .granted, enabledState: EnabledStateSpy())
         await lifecycle.launch()
         let callsAfterLaunch = services.calls
 
@@ -167,12 +167,89 @@ struct AppLifecycleTests {
         #expect(services.calls == callsAfterTerminate)
     }
 
+    // MARK: - 「有効」の保持（再起動後も保つ）
+
+    @Test("前回無効にしていたら無効のまま起動し、パネルの監視もホットキーも始めない")
+    func launchesDisabledWhenRecordedDisabled() async {
+        let services = AppLifecycleServicesSpy()
+        let lifecycle = AppLifecycle(services: services, permission: .granted, enabledState: EnabledStateSpy(isEnabled: false))
+
+        await lifecycle.launch()
+
+        #expect(lifecycle.isEnabled == false)
+        #expect(services.calls == [.loadConfiguration, .startCandidateIndexing])
+        #expect(lifecycle.isPanelWatching == false)
+        #expect(lifecycle.isHotkeyRegistered == false)
+    }
+
+    @Test("無効で起動した後に有効へ戻すと、パネルの監視とホットキーを始める")
+    func enablingAfterDisabledLaunch() async {
+        let services = AppLifecycleServicesSpy()
+        let lifecycle = AppLifecycle(services: services, permission: .granted, enabledState: EnabledStateSpy(isEnabled: false))
+        await lifecycle.launch()
+
+        lifecycle.setEnabled(true)
+
+        #expect(services.calls.suffix(2) == [.setPanelWatching(true), .setHotkeyRegistered(true)])
+        #expect(lifecycle.isEnabled)
+    }
+
+    @Test("「有効」を切り替えるたびに記録する")
+    func recordsEachChange() async {
+        let enabledState = EnabledStateSpy()
+        let lifecycle = AppLifecycle(services: AppLifecycleServicesSpy(), permission: .granted, enabledState: enabledState)
+        await lifecycle.launch()
+
+        lifecycle.setEnabled(false)
+        lifecycle.setEnabled(true)
+
+        #expect(enabledState.recorded == [false, true])
+    }
+
+    @Test("同じ値の設定や、終了後の設定は記録しない")
+    func doesNotRecordRedundantChanges() async {
+        let enabledState = EnabledStateSpy()
+        let lifecycle = AppLifecycle(services: AppLifecycleServicesSpy(), permission: .granted, enabledState: enabledState)
+        await lifecycle.launch()
+
+        lifecycle.setEnabled(true)
+        lifecycle.terminate()
+        lifecycle.setEnabled(false)
+
+        #expect(enabledState.recorded.isEmpty)
+    }
+
+    @Test("無効にしたことは、同じ保存先を使う次の起動に引き継がれる")
+    func disabledStateSurvivesRelaunch() async {
+        let storage = InMemoryEnabledStateStorage()
+        let firstServices = AppLifecycleServicesSpy()
+        let first = AppLifecycle(
+            services: firstServices,
+            permission: .granted,
+            enabledState: UserDefaultsEnabledState(storage: storage)
+        )
+        await first.launch()
+        first.setEnabled(false)
+        first.terminate()
+
+        let services = AppLifecycleServicesSpy()
+        let relaunched = AppLifecycle(
+            services: services,
+            permission: .granted,
+            enabledState: UserDefaultsEnabledState(storage: storage)
+        )
+        await relaunched.launch()
+
+        #expect(relaunched.isEnabled == false)
+        #expect(services.calls == [.loadConfiguration, .startCandidateIndexing])
+    }
+
     // MARK: - 終了
 
     @Test("終了はパネルの監視 → ホットキーを止めてから終了処理をする")
     func terminateOrder() async {
         let services = AppLifecycleServicesSpy()
-        let lifecycle = AppLifecycle(services: services, permission: .granted)
+        let lifecycle = AppLifecycle(services: services, permission: .granted, enabledState: EnabledStateSpy())
         await lifecycle.launch()
 
         lifecycle.terminate()
@@ -184,7 +261,7 @@ struct AppLifecycleTests {
     @Test("終了は 1 度だけ行い、終了後の権限の変化では監視を始めない")
     func terminateIsFinal() async {
         let services = AppLifecycleServicesSpy()
-        let lifecycle = AppLifecycle(services: services, permission: .notGranted)
+        let lifecycle = AppLifecycle(services: services, permission: .notGranted, enabledState: EnabledStateSpy())
         await lifecycle.launch()
         lifecycle.terminate()
         let callsAfterTerminate = services.calls
@@ -199,7 +276,7 @@ struct AppLifecycleTests {
     @Test("設定の読み込み中に終了したら、読み込み後に候補の構築も監視も始めない")
     func terminateWhileLaunching() async {
         let services = AppLifecycleServicesSpy(holdsConfigurationLoading: true)
-        let lifecycle = AppLifecycle(services: services, permission: .granted)
+        let lifecycle = AppLifecycle(services: services, permission: .granted, enabledState: EnabledStateSpy())
         let launch = Task { await lifecycle.launch() }
         await services.waitForConfigurationLoading()
 
@@ -214,7 +291,7 @@ struct AppLifecycleTests {
     @Test("起動前に終了したら終了処理だけを行い、以降の起動は何もしない")
     func terminateBeforeLaunch() async {
         let services = AppLifecycleServicesSpy()
-        let lifecycle = AppLifecycle(services: services, permission: .granted)
+        let lifecycle = AppLifecycle(services: services, permission: .granted, enabledState: EnabledStateSpy())
 
         lifecycle.terminate()
         await lifecycle.launch()

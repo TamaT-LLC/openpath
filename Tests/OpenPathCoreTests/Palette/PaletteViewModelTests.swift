@@ -206,6 +206,6 @@ struct PaletteViewModelTests {
     @Test("状態表示の文言は UX-001 §5 のとおり")
     func statusTextsFollowUXDesign() {
         #expect(PaletteText.buildingCandidates == "候補を構築中…")
-        #expect(PaletteText.noMatches == "一致する候補がありません。Tab でパスを直接入力")
+        #expect(PaletteText.noMatches == "一致する候補がありません。~/ や / で始まるパスも入力できます")
     }
 }

@@ -148,6 +148,34 @@ struct GoToFolderPasteSequencerFailureTests {
         #expect(harness.pasteboard.contents == .newerUserCopy)
     }
 
+    @Test("ペーストボードの退避の途中で他者が書き換えたら、ペーストボードに書き込まずに timeout(waitPaste) を投げる（副方式へ）")
+    func changeDuringCaptureIsWaitPaste() async {
+        let harness = SequencerHarness()
+        harness.pasteboard.onDataRead = { _ in
+            harness.pasteboard.onDataRead = nil
+            harness.pasteboard.simulateExternalWrite(.newerUserCopy)
+        }
+
+        await #expect(throws: InjectionError.timeout(step: .waitPaste)) {
+            try await harness.run(path: Self.path)
+        }
+        #expect(harness.pasteboard.writes.isEmpty)
+        #expect(harness.pasteboard.contents == .newerUserCopy)
+        #expect(harness.log.keyStrokes == [.goToFolder])
+    }
+
+    @Test("元のクリップボードが機密なら、失敗経路でも戻さずに空にし、元のエラーをそのまま投げる")
+    func concealedClipboardIsClearedOnFailure() async {
+        let harness = SequencerHarness(clipboard: .concealedPassword)
+        harness.keyboard.failingKeyStrokes = [.returnKey]
+
+        await #expect(throws: InjectionError.timeout(step: .waitPaste)) {
+            try await harness.run(path: Self.path)
+        }
+        #expect(harness.pasteboard.contents == .empty)
+        #expect(harness.pasteboard.writes == [.transientText(Self.path), .empty])
+    }
+
     // MARK: - キャンセル
 
     @Test("開始前にキャンセルされていたら、何もせずに CancellationError を投げる")
