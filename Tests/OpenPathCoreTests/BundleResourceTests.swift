@@ -60,6 +60,9 @@ struct BundleResourceTests {
     }
 
     private static let usageDescriptionKeySuffix = "UsageDescription"
+    /// 3 つのフォルダで共通の用途の説明。変えるときは手動シナリオ（TST-002 ONB-20）の期待値も合わせる
+    private static let expectedProtectedFolderUsageDescription =
+        "openpath は、ファイル選択ダイアログで目的の場所へ素早く移動できるよう、このフォルダ内の項目の名前を読み取って候補にします。ファイルの中身は読まず、外部にも送信しません。"
 
     private struct Entitlements: Decodable {
         let isAppSandboxEnabled: Bool
@@ -98,13 +101,12 @@ struct BundleResourceTests {
         #expect(infoPlist.isUIElement)
     }
 
-    @Test("roots にホームを指定したときの確認ダイアログに理由を出すため、デスクトップ・書類・ダウンロードの用途の説明がある")
+    @Test("roots にホームを指定したときの確認ダイアログに理由を出すため、デスクトップ・書類・ダウンロードに決めた文言の用途の説明がある")
     func infoPlistDescribesProtectedFolderUsage() throws {
         let descriptions = try Self.decodePropertyList(ProtectedFolderUsageDescriptions.self, at: Self.infoPlistPath)
 
         for description in descriptions.all {
-            let text = try #require(description)
-            #expect(!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            #expect(description == Self.expectedProtectedFolderUsageDescription)
         }
     }
 
