@@ -13,7 +13,7 @@
 #   2. osascript の `choose folder` でフォルダ選択のダイアログを別プロセスで出す
 #      （初回起動の案内の「試してみる」と同じ方式。キー操作の送出や他のアプリへの Apple Events は使わない）
 #   3. 開始時点以降のログに panel detected が出るまで待つ。ダイアログが最前面でない間の行は別のアプリのパネルと
-#      みなして読み飛ばす。palette shown も出れば、検知からの時間を出す
+#      みなして読み飛ばす。同じパネル ID の palette shown も出れば、検知からの時間を出す
 #   4. osascript を終了してダイアログを閉じ、閉じた後に panel gone が出ることを確かめる
 #
 # openpath は最前面のアプリのパネルだけを検知する。端末から起動した osascript は最前面にならないことがあるため、
@@ -44,8 +44,9 @@ readonly DIALOG_PROMPT="openpath のスモークテストです。パレット�
 readonly LAUNCH_PREFIX="] ${APP_NAME} "
 readonly LAUNCH_SUFFIX=" を起動します"
 readonly TERMINATED_MESSAGE="] ${APP_NAME} を終了します"
-readonly LAUNCHED_WITH_PERMISSION="起動処理を終えました（アクセシビリティ権限: あり）"
-readonly LAUNCHED_WITHOUT_PERMISSION="起動処理を終えました（アクセシビリティ権限: なし）"
+# 起動処理の完了の行は「…（アクセシビリティ権限: あり、有効: はい）」（PR #69 から「有効」が付く）。前方一致で見る
+readonly LAUNCHED_WITH_PERMISSION="起動処理を終えました（アクセシビリティ権限: あり"
+readonly LAUNCHED_WITHOUT_PERMISSION="起動処理を終えました（アクセシビリティ権限: なし"
 readonly PERMISSION_GRANTED="アクセシビリティ権限が付与されました"
 readonly PERMISSION_REVOKED="アクセシビリティ権限が取り消されました"
 readonly WATCH_STARTED="パネルの監視を始めました"
@@ -126,6 +127,18 @@ require_tools() {
   done
 }
 
+# 標準入力の lsappinfo info の出力から pid を出す。無ければ何も出さない。
+# 書式は macOS 26 までが「"pid"=123」、macOS 27 は -only の指定に関わらず「    pid = 123 …」
+lsappinfo_pid() {
+  sed -n -e 's/^"pid"=\([0-9][0-9]*\)$/\1/p' -e 's/^ *pid = \([0-9][0-9]*\).*$/\1/p' | head -n 1
+}
+
+# 標準入力の lsappinfo info の出力から実行ファイルの場所を出す。無ければ何も出さない。
+# 書式は macOS 26 までが「"CFBundleExecutablePath"="…"」、macOS 27 は「    executable path="…"」
+lsappinfo_executable_path() {
+  sed -n -e 's/^"CFBundleExecutablePath"="\(.*\)"$/\1/p' -e 's/^ *executable path="\(.*\)"$/\1/p' | head -n 1
+}
+
 # 同じ bundle id で起動中のインスタンスを「pid<TAB>実行ファイルの場所」で 1 行ずつ出す（場所が分からなければ空）。
 # lsappinfo info -app <bundle id> は、同じ bundle id のインスタンスが複数あると何も返さないため、find で列挙する
 list_running_instances() {
@@ -133,8 +146,8 @@ list_running_instances() {
   local asn info pid path
   for asn in $(lsappinfo find "bundleid=${bundle_id}" | grep -oE 'ASN:0x[0-9a-fA-F]+-0x[0-9a-fA-F]+' || true); do
     info="$(lsappinfo info -only pid,executablepath "${asn}:")" || continue
-    pid="$(printf '%s\n' "${info}" | sed -n 's/^"pid"=\([0-9][0-9]*\)$/\1/p')"
-    path="$(printf '%s\n' "${info}" | sed -n 's/^"CFBundleExecutablePath"="\(.*\)"$/\1/p')"
+    pid="$(printf '%s\n' "${info}" | lsappinfo_pid)"
+    path="$(printf '%s\n' "${info}" | lsappinfo_executable_path)"
     # 終了済みのインスタンスが一覧に残っていることがあるため、プロセスがあるものだけにする
     if [[ -n "${pid}" ]] && ps -p "${pid}" >/dev/null 2>&1; then
       printf '%s\t%s\n' "${pid}" "${path}"
@@ -216,13 +229,13 @@ check_log_state() {
       fail_precondition "ログに起動処理の完了が記録されていません。起動を終えてから実行してください"
       ;;
     "denied "*)
-      fail_precondition "アクセシビリティ権限がありません（ログ: 「${LAUNCHED_WITHOUT_PERMISSION}」）。システム設定で ${APP_NAME} を許可してから実行してください"
+      fail_precondition "アクセシビリティ権限がありません（ログ: 「アクセシビリティ権限: なし」）。システム設定で ${APP_NAME} を許可してから実行してください"
       ;;
     "revoked "*)
       fail_precondition "アクセシビリティ権限が取り消されています（ログ: 「${PERMISSION_REVOKED}」）。システム設定で ${APP_NAME} を許可し直してから実行してください"
       ;;
     "granted stopped")
-      fail_precondition "パネルの監視が止まっています（ログ: 「${WATCH_STOPPED}」）。メニューの「有効」にチェックを入れてから実行してください"
+      fail_precondition "パネルを監視していません（最新の起動以降に「${WATCH_STARTED}」が無いか、その後に「${WATCH_STOPPED}」）。メニューの「有効」にチェックを入れてから実行してください"
       ;;
     "granted watching")
       log "ログ: 最新の起動以降でアクセシビリティ権限あり・パネルの監視中"
@@ -297,7 +310,7 @@ to_epoch_ms() {
 is_dialog_frontmost() {
   local front_asn front_pid
   front_asn="$(lsappinfo front)" || return 1
-  front_pid="$(lsappinfo info -only pid "${front_asn}" | sed -n 's/^"pid"=\([0-9][0-9]*\)$/\1/p')" || return 1
+  front_pid="$(lsappinfo info -only pid "${front_asn}" | lsappinfo_pid)" || return 1
   [[ -n "${front_pid}" && "${front_pid}" == "${dialog_pid}" ]]
 }
 
@@ -385,12 +398,27 @@ wait_for_line_after() {
   done
 }
 
+# panel detected (id: panel-3, directoriesOnly: true) の「panel-3」を出す。読めなければ何も出さない
+panel_id_of() {
+  local text
+  text="$(line_text_of "$1")"
+  local id_pattern='\(id: ([^,)]+)'
+  if [[ "${text}" =~ ${id_pattern} ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+  fi
+}
+
+# 検知したパネルと同じ ID の palette shown（PR #69、書式は「palette shown (id: panel-3)」）までの時間を出す。
+# palette shown はホットキーでの再表示でも出るため、検知の後の最初の同じ ID の行を使う
 report_palette_latency() {
   local detection="$1"
+  local panel_id palette_message
+  panel_id="$(panel_id_of "${detection}")"
+  palette_message="${PALETTE_SHOWN}${panel_id:+ (id: ${panel_id})}"
   local palette_entry
-  palette_entry="$(wait_for_line_after "${PALETTE_SHOWN}" "$(line_number_of "${detection}")" "${PALETTE_TIMEOUT_SECONDS}")"
+  palette_entry="$(wait_for_line_after "${palette_message}" "$(line_number_of "${detection}")" "${PALETTE_TIMEOUT_SECONDS}")"
   if [[ -z "${palette_entry}" ]]; then
-    warn "${PALETTE_TIMEOUT_SECONDS} 秒以内に ${PALETTE_SHOWN} がログに出ませんでした（このビルドが出力しないか、パレットが出ていません）。検知だけで判定します"
+    warn "${PALETTE_TIMEOUT_SECONDS} 秒以内に「${palette_message}」がログに出ませんでした（PR #69 より前のビルドか、パレットが出ていません）。検知だけで判定します"
     return 0
   fi
   local detected_ms shown_ms
