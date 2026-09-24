@@ -14,7 +14,7 @@
 #      （初回起動の案内の「試してみる」と同じ方式。キー操作の送出や他のアプリへの Apple Events は使わない）
 #   3. 開始時点以降のログに panel detected が出るまで待つ。ダイアログが最前面でない間の行は別のアプリのパネルと
 #      みなして読み飛ばす。palette shown も出れば、検知からの時間を出す
-#   4. osascript を終了してダイアログを閉じ、panel gone が出ることを確かめる
+#   4. osascript を終了してダイアログを閉じ、閉じた後に panel gone が出ることを確かめる
 #
 # openpath は最前面のアプリのパネルだけを検知する。端末から起動した osascript は最前面にならないことがあるため、
 # ダイアログが最前面でなければクリックして前面に出すよう案内して待つ。
@@ -449,11 +449,18 @@ main() {
   report_selection_mode "${detected_entry}"
   report_palette_latency "${detected_entry}"
 
-  close_dialog
   # openpath は同時に 1 つのパネルだけを追跡し、次の panel detected の前に必ず panel gone を出す（PanelWatchPolicy）。
-  # そのため、受け入れた panel detected の後の最初の panel gone がこのダイアログのもの
+  # そのため、受け入れた panel detected の後の最初の panel gone がこのダイアログのもの。
+  # 閉じる前に出ていたら、最前面の切り替えやキャンセルによるもので、閉じたことの確認にはならない
+  local closed_at early_gone
+  closed_at="$(new_log_lines | awk 'END { print NR }')"
+  early_gone="$(find_line_after "${PANEL_GONE}" "$(line_number_of "${detected_entry}")")"
+  if [[ -n "${early_gone}" ]]; then
+    fail_ng "ダイアログを閉じる前に ${PANEL_GONE} が出ました（$(timestamp_of "${early_gone}")）。最前面を切り替えずに再実行してください"
+  fi
+  close_dialog
   local gone_entry
-  gone_entry="$(wait_for_line_after "${PANEL_GONE}" "$(line_number_of "${detected_entry}")" "${GONE_TIMEOUT_SECONDS}")"
+  gone_entry="$(wait_for_line_after "${PANEL_GONE}" "${closed_at}" "${GONE_TIMEOUT_SECONDS}")"
   if [[ -z "${gone_entry}" ]]; then
     fail_ng "ダイアログを閉じてから ${GONE_TIMEOUT_SECONDS} 秒以内に ${PANEL_GONE} がログに出ませんでした"
   fi
