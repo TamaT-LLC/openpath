@@ -21,6 +21,49 @@ struct BundleResourceTests {
         }
     }
 
+    /// macOS のプライバシー保護（TCC）の対象フォルダを読むときに、確認ダイアログへ出す用途の説明
+    private struct ProtectedFolderUsageDescriptions: Decodable {
+        let desktop: String?
+        let documents: String?
+        let downloads: String?
+
+        enum CodingKeys: String, CodingKey, CaseIterable {
+            case desktop = "NSDesktopFolderUsageDescription"
+            case documents = "NSDocumentsFolderUsageDescription"
+            case downloads = "NSDownloadsFolderUsageDescription"
+        }
+
+        var all: [String?] { [desktop, documents, downloads] }
+    }
+
+    /// 値の型を問わず、トップレベルのキー名だけを読む
+    private struct TopLevelKeys: Decodable {
+        let names: Set<String>
+
+        private struct AnyKey: CodingKey {
+            let stringValue: String
+            let intValue: Int? = nil
+
+            init(stringValue: String) {
+                self.stringValue = stringValue
+            }
+
+            init?(intValue: Int) {
+                nil
+            }
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: AnyKey.self)
+            names = Set(container.allKeys.map(\.stringValue))
+        }
+    }
+
+    private static let usageDescriptionKeySuffix = "UsageDescription"
+    /// 3 つのフォルダで共通の用途の説明。変えるときは手動シナリオ（TST-002 ONB-20）の期待値も合わせる
+    private static let expectedProtectedFolderUsageDescription =
+        "openpath は、ファイル選択ダイアログで目的の場所へ素早く移動できるよう、このフォルダ内の項目の名前を読み取って候補にします。ファイルの中身は読まず、外部にも送信しません。"
+
     private struct Entitlements: Decodable {
         let isAppSandboxEnabled: Bool
         let isNetworkClientAllowed: Bool?
@@ -56,6 +99,24 @@ struct BundleResourceTests {
         let infoPlist = try Self.decodePropertyList(InfoPlist.self, at: Self.infoPlistPath)
 
         #expect(infoPlist.isUIElement)
+    }
+
+    @Test("roots にホームを指定したときの確認ダイアログに理由を出すため、デスクトップ・書類・ダウンロードに決めた文言の用途の説明がある")
+    func infoPlistDescribesProtectedFolderUsage() throws {
+        let descriptions = try Self.decodePropertyList(ProtectedFolderUsageDescriptions.self, at: Self.infoPlistPath)
+
+        for description in descriptions.all {
+            #expect(description == Self.expectedProtectedFolderUsageDescription)
+        }
+    }
+
+    @Test("用途の説明は保護フォルダの 3 つだけで、ほかの権限の確認を増やさない（NFR-02）")
+    func infoPlistHasNoOtherUsageDescriptions() throws {
+        let keys = try Self.decodePropertyList(TopLevelKeys.self, at: Self.infoPlistPath)
+        let usageDescriptionKeys = keys.names.filter { $0.hasSuffix(Self.usageDescriptionKeySuffix) }
+        let protectedFolderKeys = Set(ProtectedFolderUsageDescriptions.CodingKeys.allCases.map(\.rawValue))
+
+        #expect(usageDescriptionKeys == protectedFolderKeys)
     }
 
     @Test("AX 観測のため非サンドボックス、かつネットワーク権限を持たない")

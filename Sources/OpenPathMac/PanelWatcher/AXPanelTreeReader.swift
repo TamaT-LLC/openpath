@@ -100,6 +100,57 @@ final class AXPanelTreeReader: PanelTreeReader {
         return Double(color.alpha)
     }
 
+    func itemCount(_ attribute: PanelTreeItemsAttribute, of node: AXUIElement) throws -> Int {
+        callCount += 1
+        var count: CFIndex = 0
+        let result = AXUIElementGetAttributeValueCount(node, Self.name(of: attribute) as CFString, &count)
+        switch result {
+        case .success:
+            return max(0, count)
+        case .noValue, .attributeUnsupported:
+            return 0
+        case .invalidUIElement:
+            throw PanelTreeReadError.elementGone
+        default:
+            throw PanelTreeReadError.unavailable
+        }
+    }
+
+    /// フォルダの項目がすべて返る属性でも、range の分だけをプロセス間で受け渡す。
+    /// 要素数を超える範囲（読んでいる間に項目が減った場合など）は、AX が切り詰めるか `illegalArgument` を返すため、空にする。
+    func items(_ attribute: PanelTreeItemsAttribute, of node: AXUIElement, in range: Range<Int>) throws -> [AXUIElement] {
+        guard !range.isEmpty, range.lowerBound >= 0 else { return [] }
+        callCount += 1
+        var values: CFArray?
+        let result = AXUIElementCopyAttributeValues(
+            node,
+            Self.name(of: attribute) as CFString,
+            range.lowerBound,
+            range.count,
+            &values
+        )
+        switch result {
+        case .success:
+            let elements = values.flatMap { AXAttributeCast.cast($0, to: [AXUIElement].self) } ?? []
+            return elements.map(Self.limitingMessagingTimeout)
+        case .noValue, .attributeUnsupported, .illegalArgument:
+            return []
+        case .invalidUIElement:
+            throw PanelTreeReadError.elementGone
+        default:
+            throw PanelTreeReadError.unavailable
+        }
+    }
+
+    private static func name(of attribute: PanelTreeItemsAttribute) -> String {
+        switch attribute {
+        case .rows:
+            kAXRowsAttribute
+        case .children:
+            kAXChildrenAttribute
+        }
+    }
+
     /// 要素の配列の属性。読み取った要素にもメッセージングのタイムアウトを設定する。
     private func elements(_ attribute: String, of node: AXUIElement) throws -> [AXUIElement] {
         let elements = try value(attribute, of: node, as: [AXUIElement].self) ?? []

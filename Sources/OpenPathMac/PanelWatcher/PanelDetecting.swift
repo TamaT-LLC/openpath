@@ -23,9 +23,12 @@ public struct DetectedPanel {
     public let element: AXUIElement
     /// `frame` は AX の座標系（左上原点）で返すこと。NSScreen の座標系への変換は PanelWatcher（PanelScanner）が行う。
     public let context: PanelContext
+    /// 選択モードの推定結果と、推定に使った行の内訳。PanelWatcher がログ（`panel detected` 等）に出す。分からなければ nil。
+    public let selectionEstimate: PanelSelectionEstimate?
 
-    public init(element: AXUIElement, context: PanelContext) {
+    public init(element: AXUIElement, context: PanelContext, selectionEstimate: PanelSelectionEstimate? = nil) {
         self.element = element
         self.context = context
+        self.selectionEstimate = selectionEstimate
     }
 }
