@@ -13,6 +13,8 @@ import Observation
 ///   設定の変更は走査中の結果を古くするため、走査を取り消してから新しい設定で走査し直す。
 /// - 周期の再構築は、全件の再構築を終えてから `interval` 後に行う。全件の走査中には周期の契機を積まず、
 ///   履歴だけの取り直しでは数え直さない。
+/// - 周期の再構築では、前回の収集から変わっていないと安価に確かめられたソース（ChangeTrackingCandidateSource）を
+///   収集も差し替えもしない（Issue #78）。起動時・手動・設定の変更では必ず全ソースを収集し直す。
 @MainActor
 @Observable
 public final class CandidateIndexRebuilder {
@@ -32,7 +34,8 @@ public final class CandidateIndexRebuilder {
     }
 
     /// 候補ソースを全件走査し直している最中か（フッターの「候補を構築中…」用。UX-001 §5）。
-    /// 後続の再構築が控えている間も true のまま。履歴だけの取り直し（`refreshHistory()`）では true にしない。
+    /// 後続の再構築が控えている間も true のまま。周期の再構築（変わっていないソースは確かめるだけ）の間も true にし、
+    /// 履歴だけの取り直し（`refreshHistory()`）では true にしない。
     public private(set) var isRebuilding = false
     /// 各ソースの直近の収集で出た警告（ソースの並び順）。取り消した走査のソースは直前の警告のまま
     public private(set) var warnings: [CandidateSourceWarning] = []
@@ -50,6 +53,8 @@ public final class CandidateIndexRebuilder {
     @ObservationIgnored private var periodicTask: Task<Void, Never>?
     /// 候補をインデックスに入れた可能性のあるソース。設定から外れたソースの候補を取り除くのに使う
     @ObservationIgnored private var managedKinds: Set<CandidateSourceKind> = []
+    /// 直近の収集で受け取った変更の検知の記録。周期の再構築で収集を省くかの判定に使う
+    @ObservationIgnored private var changeMarkers = CandidateSourceMarkers()
     /// 直近の全件の再構築でのソースの並び。警告の並びに使う
     @ObservationIgnored private var sourceOrder: [CandidateSourceKind] = []
     @ObservationIgnored private var warningsBySource: [CandidateSourceKind: [CandidateSourceWarning]] = [:]
@@ -100,10 +105,12 @@ public final class CandidateIndexRebuilder {
 
     /// 確定履歴を消したときに呼ぶ（メニューの「履歴をクリア」）。
     /// 走査中の再構築は消す前の履歴を読んでいるため、取り消してから走査し直す。取り直しを走査の終わりまで待つと、
-    /// 全件の走査が長引く間、消した場所が候補に残るため。全件の再構築中なら全件を、それ以外は履歴だけを走査し直す。
+    /// 全件の走査が長引く間、消した場所が候補に残るため。全ソースの再構築中ならそれを（周期の再構築なら周期の
+    /// 再構築として）、それ以外は履歴だけを走査し直す。
     public func historyDidClear() {
         Log.debug("履歴の削除に合わせて候補を取り直します")
-        request(activeCycle?.scope == .all ? .all : .history, cancellingActive: true)
+        let activeScope = activeCycle?.scope ?? .history
+        request(activeScope.coversAllSources ? activeScope : .history, cancellingActive: true)
     }
 
     /// 設定の変更を反映する。`start()` の前に呼んだ場合は起動時の再構築に使う。
@@ -115,7 +122,10 @@ public final class CandidateIndexRebuilder {
         guard lifecycle != .stopped else { return }
         let changesSources = CandidateSourceSettings(newConfig) != CandidateSourceSettings(config)
         config = newConfig
-        guard changesSources, lifecycle == .running else { return }
+        guard changesSources else { return }
+        // 走査の条件が変わると、同じディレクトリでも候補が変わる。前の条件で作った記録は使わない
+        changeMarkers.removeAll()
+        guard lifecycle == .running else { return }
         Log.info("設定の変更に合わせて候補を再構築します")
         request(.all, cancellingActive: true)
     }
@@ -167,39 +177,39 @@ public final class CandidateIndexRebuilder {
     }
 
     private func startCycle(_ scope: CandidateRebuildScope) {
-        // 周期を数え直すのは全件の再構築のときだけ。確定のたびの履歴の取り直しで周期が延び続けないようにする
-        if scope == .all {
+        // 周期を数え直すのは全ソースの再構築のときだけ。確定のたびの履歴の取り直しで周期が延び続けないようにする
+        if scope.coversAllSources {
             periodicTask?.cancel()
             periodicTask = nil
         }
-        let (sources, staleKinds) = plan(scope)
+        let (refreshes, staleKinds) = plan(scope)
         let task = Task.detached(priority: .utility) { [weak self, index] in
-            let outcome = await CandidateRebuildCycle.run(sources: sources, removing: staleKinds, in: index)
+            let outcome = await CandidateRebuildCycle.run(refreshes: refreshes, removing: staleKinds, in: index)
             await self?.finishCycle(outcome)
         }
         activeCycle = ActiveCycle(scope: scope, task: task)
         updateIsRebuilding()
     }
 
-    /// 走査するソースと、取り除くソースを決める。全件の再構築では、設定から外れたソースを取り除く対象にする
-    private func plan(_ scope: CandidateRebuildScope) -> (sources: [any CandidateSource], staleKinds: Set<CandidateSourceKind>) {
+    /// 走査するソースと、取り除くソースを決める。全ソースの再構築では、設定から外れたソースを取り除く対象にする
+    private func plan(_ scope: CandidateRebuildScope) -> (refreshes: [CandidateSourceRefresh], staleKinds: Set<CandidateSourceKind>) {
         var seenKinds: Set<CandidateSourceKind> = []
         // 同じ kind のソースを並行して走査すると差し替えが後勝ちになるため、重複は先勝ちで除く
         let sources = sourceProvider.sources(for: config).filter { seenKinds.insert($0.kind).inserted }
-        switch scope {
-        case .history:
-            return (sources.filter { $0.kind == .history }, [])
-        case .all:
-            let kinds = sources.map(\.kind)
-            let staleKinds = managedKinds.subtracting(kinds)
-            managedKinds = Set(kinds)
-            sourceOrder = kinds
-            return (sources, staleKinds)
+        let refreshes = changeMarkers.refreshes(for: scope, sources: sources)
+        guard scope.coversAllSources else {
+            return (refreshes, [])
         }
+        let kinds = sources.map(\.kind)
+        let staleKinds = managedKinds.subtracting(kinds)
+        managedKinds = Set(kinds)
+        sourceOrder = kinds
+        return (refreshes, staleKinds)
     }
 
     private func finishCycle(_ outcome: CandidateRebuildOutcome) {
         activeCycle = nil
+        changeMarkers.update(with: outcome)
         record(outcome)
         if lifecycle == .running, let next = pendingScope {
             pendingScope = nil
@@ -231,7 +241,7 @@ public final class CandidateIndexRebuilder {
     private func periodicRebuildIsDue() {
         periodicTask = nil
         Log.debug("定期の候補の再構築を始めます")
-        request(.all)
+        request(.periodic)
     }
 
     // MARK: - 結果の反映
@@ -255,7 +265,8 @@ public final class CandidateIndexRebuilder {
             }
         }
         Log.debug(
-            "候補の再構築を終えました（差し替え \(outcome.replaced.count)、取り消し \(outcome.cancelled.count)、"
+            "候補の再構築を終えました（収集 \(outcome.replaced.count)（うち候補が同じ \(outcome.identical.count)）、"
+                + "変更なし \(outcome.unchanged.count)、取り消し \(outcome.cancelled.count)、"
                 + "失敗 \(outcome.failed.count)、除去 \(outcome.removed.count)、\(outcome.elapsed)）"
         )
         let latestWarnings = sourceOrder.flatMap { warningsBySource[$0] ?? [] }
@@ -265,7 +276,7 @@ public final class CandidateIndexRebuilder {
     }
 
     private func updateIsRebuilding() {
-        let isFullRebuildQueued = activeCycle?.scope == .all || pendingScope == .all
+        let isFullRebuildQueued = activeCycle?.scope.coversAllSources == true || pendingScope?.coversAllSources == true
         let newValue = lifecycle == .running && isFullRebuildQueued
         if isRebuilding != newValue {
             isRebuilding = newValue

@@ -31,3 +31,23 @@ public struct RootCandidateSource: CandidateSource {
         return config.roots.map { RootCandidateSource(root: $0, scanner: scanner) }
     }
 }
+
+/// 変更の検知（Issue #78）: 走査で中身を読んだディレクトリの状態を記録し、周期の再構築ではそれらを stat し直すだけで
+/// 走査し直すかを決める（RootScanMarker）。
+extension RootCandidateSource: ChangeTrackingCandidateSource {
+    /// ルートを走査し、中身を読んだディレクトリの状態の記録を添えて返す。ルートを走査できなければ記録は nil。
+    /// `snapshot()` と同じく、バックグラウンドのタスクから呼ぶこと。
+    public func trackedSnapshot() async throws -> (snapshot: CandidateSourceSnapshot, marker: RootScanMarker?) {
+        let result = try scanner.trackedScan(root: root)
+        return (result.snapshot, result.marker)
+    }
+
+    /// 記録したディレクトリのどれかの状態が変わったか。別のルート・別の走査条件の記録なら true。
+    /// ディレクトリを stat するため、バックグラウンドのタスクから呼ぶこと。
+    public func hasChanged(since marker: RootScanMarker) async -> Bool {
+        guard marker.isRecorded(root: root, options: scanner.options) else {
+            return true
+        }
+        return marker.hasChanges()
+    }
+}
