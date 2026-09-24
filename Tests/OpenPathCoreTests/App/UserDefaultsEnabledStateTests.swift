@@ -36,8 +36,32 @@ struct UserDefaultsEnabledStateTests {
         #expect(storage.values == [UserDefaultsEnabledState.enabledKey: true])
     }
 
+    @Test("真偽値以外で記録された値（defaults write -string NO や起動引数 -enabled NO）も、UserDefaults の真偽値の解釈で読む")
+    func readsNonBooleanValueAsUserDefaultsBool() {
+        let state = UserDefaultsEnabledState(storage: StringValuedStorage(value: "NO", boolValue: false))
+
+        #expect(state.isEnabled == false)
+    }
+
     @Test("キーは初回起動の記録（onboardingFinished）と同じ書き方にする")
     func keyName() {
         #expect(UserDefaultsEnabledState.enabledKey == "enabled")
     }
+}
+
+/// 文字列で記録された値を返す保存先。UserDefaults は "NO" などの文字列も `bool(forKey:)` で真偽値として読む。
+private struct StringValuedStorage: EnabledStateStorage {
+    let value: String
+    /// UserDefaults が value を真偽値として解釈した結果
+    let boolValue: Bool
+
+    func object(forKey defaultName: String) -> Any? {
+        value
+    }
+
+    func bool(forKey defaultName: String) -> Bool {
+        boolValue
+    }
+
+    func set(_ value: Bool, forKey defaultName: String) {}
 }

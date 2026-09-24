@@ -11,8 +11,10 @@ public protocol EnabledStateRecording {
 /// 「有効」の保存先。UserDefaults がそのまま準拠する。
 /// テストで実ユーザーの ~/Library/Preferences にファイルを残さないよう、メモリ上の実装に差し替えられるようにする。
 public protocol EnabledStateStorage {
-    /// 記録が無いことと無効（false）を区別するため、`bool(forKey:)` ではなく値そのものを読む
+    /// 記録があるかの判定に使う。`bool(forKey:)` だけでは記録が無いことと無効（false）を区別できないため
     func object(forKey defaultName: String) -> Any?
+    /// 記録の値。`defaults write -string NO` や起動引数（`-enabled NO`）の文字列も真偽値として読める
+    func bool(forKey defaultName: String) -> Bool
     func set(_ value: Bool, forKey defaultName: String)
 }
 
@@ -33,7 +35,8 @@ public struct UserDefaultsEnabledState: EnabledStateRecording {
     }
 
     public var isEnabled: Bool {
-        (storage.object(forKey: Self.enabledKey) as? Bool) ?? Self.defaultValue
+        guard storage.object(forKey: Self.enabledKey) != nil else { return Self.defaultValue }
+        return storage.bool(forKey: Self.enabledKey)
     }
 
     public func recordEnabled(_ isEnabled: Bool) {

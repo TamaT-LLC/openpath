@@ -25,6 +25,10 @@ final class InMemoryEnabledStateStorage: EnabledStateStorage {
         values[defaultName]
     }
 
+    func bool(forKey defaultName: String) -> Bool {
+        values[defaultName] ?? false
+    }
+
     func set(_ value: Bool, forKey defaultName: String) {
         values[defaultName] = value
     }
