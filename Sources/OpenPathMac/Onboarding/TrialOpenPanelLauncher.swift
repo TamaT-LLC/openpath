@@ -75,6 +75,7 @@ final class TrialOpenPanelLauncher {
         }
     }
 
+    /// osascript のプロセスの状態を、前面に出せるかの観点で確かめる。
     private static func state(of process: Process) -> TrialPanelProcessState {
         guard process.isRunning else { return .exited }
         let processID = process.processIdentifier

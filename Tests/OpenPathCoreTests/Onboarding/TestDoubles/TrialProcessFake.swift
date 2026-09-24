@@ -24,6 +24,7 @@ final class TrialProcessFake {
         self.clock = clock
     }
 
+    /// 仮想時計の現在時刻での状態
     func state() -> TrialPanelProcessState {
         let now = clock.elapsed
         if let exitedAt, now >= exitedAt {
@@ -41,6 +42,7 @@ final class TrialProcessFake {
         return .inactive
     }
 
+    /// 前面に出す要求を受ける。前面に出せる状態で、断る回数が残っていなければ前面に出る
     func activate() {
         activationRequests.append(clock.elapsed)
         guard state() == .inactive else { return }

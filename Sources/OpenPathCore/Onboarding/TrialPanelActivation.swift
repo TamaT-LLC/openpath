@@ -27,6 +27,11 @@ public struct TrialPanelActivationTiming: Sendable, Equatable {
     /// 起動してから前面に出るのを待つ上限。osascript の起動が遅い場合（初回の読み込みなど）に備えて長めにとる
     public let timeout: Duration
 
+    /// - Parameters:
+    ///   - pollInterval: 状態を確かめる間隔
+    ///   - retryInterval: 要求を送ってから次の要求を送るまでの間隔
+    ///   - maxAttempts: 要求を送る上限の回数
+    ///   - timeout: 前面に出るのを待つ上限
     public init(pollInterval: Duration, retryInterval: Duration, maxAttempts: Int, timeout: Duration) {
         self.pollInterval = pollInterval
         self.retryInterval = retryInterval
@@ -34,6 +39,7 @@ public struct TrialPanelActivationTiming: Sendable, Equatable {
         self.timeout = timeout
     }
 
+    /// 既定の待ち方。50ms ごとに確かめ、200ms ごとに最大 5 回要求し、10 秒で諦める
     public static let standard = TrialPanelActivationTiming(
         pollInterval: .milliseconds(50),
         retryInterval: .milliseconds(200),
@@ -44,6 +50,7 @@ public struct TrialPanelActivationTiming: Sendable, Equatable {
 
 /// 前面に出す処理の結果。ログに残す。
 public struct TrialPanelActivationOutcome: Sendable, Equatable {
+    /// 前面に出せたか
     public enum Status: Sendable, Equatable {
         /// 前面に出た
         case activated
@@ -53,12 +60,17 @@ public struct TrialPanelActivationOutcome: Sendable, Equatable {
         case notActivated(lastState: TrialPanelProcessState)
     }
 
+    /// 前面に出せたか
     public let status: Status
     /// 前面に出す要求を送った回数
     public let attempts: Int
     /// 前面に出す処理を始めてからの経過時間
     public let elapsed: Duration
 
+    /// - Parameters:
+    ///   - status: 前面に出せたか
+    ///   - attempts: 前面に出す要求を送った回数
+    ///   - elapsed: 前面に出す処理を始めてからの経過時間
     public init(status: Status, attempts: Int, elapsed: Duration) {
         self.status = status
         self.attempts = attempts
@@ -90,7 +102,7 @@ public struct TrialPanelActivationOutcome: Sendable, Equatable {
     private static let attosecondsPerMillisecond: Int64 = 1_000_000_000_000_000
     private static let millisecondsPerSecond: Int64 = 1_000
 
-    /// ミリ秒（切り捨て）
+    /// ミリ秒（切り捨て）。ログ用
     private static func milliseconds(_ duration: Duration) -> Int64 {
         let components = duration.components
         return components.seconds * millisecondsPerSecond + components.attoseconds / attosecondsPerMillisecond
@@ -106,6 +118,7 @@ public struct TrialPanelActivationOutcome: Sendable, Equatable {
 ///
 /// 前面に出たかは要求の戻り値ではなく、その後に確かめた状態で判断する（要求を受け付けても前面に出ないことがあるため）。
 public struct TrialPanelActivation: Sendable, Equatable {
+    /// `next(observing:at:)` が返す、次の行動
     public enum Action: Sendable, Equatable {
         /// 次に確かめるまで待つ
         case wait
@@ -115,12 +128,14 @@ public struct TrialPanelActivation: Sendable, Equatable {
         case finish(TrialPanelActivationOutcome)
     }
 
+    /// 待ち方
     public let timing: TrialPanelActivationTiming
     /// 前面に出す要求を送った回数
     public private(set) var attempts = 0
     /// 最後に要求を送った時点の経過時間
     private var lastAttemptElapsed: Duration?
 
+    /// - Parameter timing: 待ち方
     public init(timing: TrialPanelActivationTiming = .standard) {
         self.timing = timing
     }
@@ -153,6 +168,7 @@ public struct TrialPanelActivation: Sendable, Equatable {
         return .activate
     }
 
+    /// 試行回数と経過時間を添えて終える
     private func finish(_ status: TrialPanelActivationOutcome.Status, at elapsed: Duration) -> Action {
         .finish(TrialPanelActivationOutcome(status: status, attempts: attempts, elapsed: elapsed))
     }
