@@ -99,7 +99,7 @@ public enum FileListRowSampler {
               let url = try reader.url(of: name) else {
             return FileListRow(isDirectory: nil)
         }
-        if url.hasDirectoryPath {
+        if isDirectoryPath(url) {
             return FileListRow(isDirectory: true)
         }
         if layout == .iconItem {
@@ -111,6 +111,21 @@ public enum FileListRowSampler {
             return FileListRow(isDirectory: false, textOpacity: textOpacity)
         }
         return FileListRow(isDirectory: false, isEnabled: try reader.isEnabled(of: name))
+    }
+
+    /// 名前の要素の AXURL がディレクトリを指すか（末尾が "/" か）。
+    ///
+    /// `URL.hasDirectoryPath` は使わない。Swift 6.2 系（macOS 27 の既定）の Foundation は、
+    /// パスが Apple のファイル ID 参照の形式（`/.file/id=<番号>...`）に一致すると、URL の構築時に
+    /// その番号をファイルシステムへ問い合わせて実在のパスへ解決しようとする。番号が実在しない
+    /// （テストの二重体が使う架空の ID など）と解決に失敗し、URL がルート（`path` が `/`）や
+    /// `com-apple-unresolvable-file-reference-url:` という不正な URL に化けてしまい、
+    /// `hasDirectoryPath` が本来の値と無関係に `true` を返すようになる（ファイルの行が
+    /// すべてディレクトリと誤判定される不具合の原因）。この問い合わせは OS やビルドによって
+    /// 挙動が変わりうるため、文字列表現の末尾が "/" かを直接見て判定する
+    /// （ファイル一覧の名前の要素の AXURL は、ディレクトリなら末尾が "/" になるとの前提は変わらない）。
+    private static func isDirectoryPath(_ url: URL) -> Bool {
+        url.absoluteString.hasSuffix("/")
     }
 
     private static func nameElement<Reader: PanelTreeReader>(
