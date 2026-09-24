@@ -49,9 +49,15 @@ enum FileListFixtures {
     }
 
     /// 項目の URL。実機ではファイル参照 URL（file:///.file/id=...）で、ディレクトリは末尾が "/" になる。
+    ///
+    /// パスの先頭は `/.file/id=` にしない。Swift 6.2 系の Foundation（macOS 27 の既定）は、パスがこの形式
+    /// （Apple のファイル ID 参照）に一致すると、URL の構築時にその番号を実在のファイルへ解決しようとする。
+    /// このテスト用の番号は実在しないため解決に失敗し、URL がルート（`file:///`）や不正な URL に化けて、
+    /// 末尾が "/" かどうかとは無関係な値になってしまう（本来テストしたい「AXURL の末尾で判定する」ロジックの
+    /// 手前で壊れる）。`id=` という見た目は保ちつつ、実在解決の対象にならない架空のディレクトリ配下に置く。
     static func url(for item: FileListItem) -> URL {
         URL(
-            filePath: "/.file/id=6571367.\(item.name)",
+            filePath: "/OpenPathTests/panel-fixture/id=6571367.\(item.name)",
             directoryHint: item.kind == .directory ? .isDirectory : .notDirectory
         )
     }
