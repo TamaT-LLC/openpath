@@ -10,7 +10,7 @@ downstream:
 - PROJ-UX-001
 - PROJ-ARCH-001
 owner: TakehiroT
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # openpath 要件（L1 / Draft）
@@ -41,6 +41,7 @@ updated: 2026-09-23
 - FR-PALETTE-04: ↑↓ / Ctrl+N / Ctrl+P で選択、Enter で確定、Esc でパレットのみ閉じる（パネルは残す）こと。
 - FR-PALETTE-05: パレットを閉じた後、ホットキー（既定: Ctrl+Shift+O）で再表示できること。
 - FR-PALETTE-06: 日本語を含むパス・ファイル名を正しく検索・表示できること。
+- FR-PALETTE-07: 候補ソースに無い場所でも、存在する絶対パスまたは `~/` から始まるパスを検索フィールドに入力すれば、その場所を移動先として選べること。末尾が `/` の入力は配下を絞り込む検索語として扱い、その場所自体は移動先として選べない。
 
 ### 2.3 候補ソース（FR-SOURCE）
 
