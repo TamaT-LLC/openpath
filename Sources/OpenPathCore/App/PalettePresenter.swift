@@ -8,12 +8,16 @@
 ///   （`PaletteQuerySession`）。
 ///   ディレクトリに絞るかは候補を引くたびにパネルの推定と設定 include_files から決める。
 /// - キー入力: 注入のキー操作の前にパレットを表示したままキー入力をパネルへ返し、失敗を表示したらパレットに戻す。
+/// - 表示の記録: 表示するたびに（同じパネルの再表示・ホットキーでの再表示でも）`palette shown` を info でログに出す。
+///   PanelWatcher の `panel detected` と同じパネル ID を含め、両者のタイムスタンプ（ミリ秒）の差で検知レイテンシを測る
+///   （FR-DETECT-03、#30）。パスは含まない。
 @MainActor
 public final class PalettePresenter: PaletteDisplaying {
     private let viewModel: PaletteViewModel
     private let window: any PaletteWindowControlling
     private let includeFiles: @MainActor () -> Bool
     private let search: PaletteQuerySession.Search
+    private let didShow: @MainActor (PanelContext) -> Void
     private lazy var querySession = PaletteQuerySession(search: search) { [weak self] rows, keepingSelection in
         self?.apply(rows, keepingSelection: keepingSelection)
     }
@@ -28,16 +32,19 @@ public final class PalettePresenter: PaletteDisplaying {
     ///   - window: パレットのウィンドウ。
     ///   - includeFiles: 設定 include_files。設定ファイルの変更を反映するため、候補を引くたびに読む。
     ///   - search: 候補の引き方。
+    ///   - didShow: ウィンドウを出した直後に、表示のたびに呼ぶ。既定では `palette shown` をログに出す。
     public init(
         viewModel: PaletteViewModel,
         window: any PaletteWindowControlling,
         includeFiles: @escaping @MainActor () -> Bool,
-        search: @escaping PaletteQuerySession.Search
+        search: @escaping PaletteQuerySession.Search,
+        didShow: @escaping @MainActor (PanelContext) -> Void = PalettePresenter.logShown
     ) {
         self.viewModel = viewModel
         self.window = window
         self.includeFiles = includeFiles
         self.search = search
+        self.didShow = didShow
         viewModel.onQueryChange = { [weak self] _ in
             self?.queryDidChange()
         }
@@ -59,6 +66,7 @@ public final class PalettePresenter: PaletteDisplaying {
         window.rowCount = viewModel.rows.count
         requestRows(keepingSelection: isSamePanel)
         window.show(near: context.frame)
+        didShow(context)
     }
 
     public func update(context: PanelContext) {
@@ -91,6 +99,18 @@ public final class PalettePresenter: PaletteDisplaying {
         // 注入の前にキー入力をパネルへ返しているため、パレットを残して再試行できるよう戻す（UX-001 §5）
         guard presentedPanel != nil else { return }
         window.reclaimKey()
+    }
+
+    // MARK: - 表示の記録
+
+    /// `palette shown` のログの文言。書式は PanelWatcher の `panel detected (id: …, …)` に揃える。
+    public nonisolated static func shownLogMessage(for context: PanelContext) -> String {
+        "palette shown (id: \(context.id.rawValue))"
+    }
+
+    /// 表示の時刻はログのタイムスタンプ（ミリ秒）で分かる。
+    public nonisolated static func logShown(_ context: PanelContext) {
+        Log.info(shownLogMessage(for: context))
     }
 
     // MARK: - 配線から呼ぶ操作

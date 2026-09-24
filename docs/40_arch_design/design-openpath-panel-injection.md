@@ -81,6 +81,7 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
 - 判定はクロージャ（`PanelDetector`）ではなく `PanelDetecting` プロトコル（既定実装 `OpenPanelDetector()`）として持つ（PR #56。#17 時点のクロージャ API は削除）。`AXApplicationObserver` の破棄通知は対象要素も判定側へ渡し、走査で見つけたパネルの要素にも `kAXUIElementDestroyedNotification` を追加登録する（最大 8 要素、古いものから解除。PR #46 で見送った対処案を PR #56 で採用）。
 - AX の要素参照には 1 回 0.25 秒のメッセージングタイムアウトを設定する（既定の約 6 秒のままだと応答しないアプリで `axQueue` が止まるため）。タイムアウトした要素は子なしとして扱い、一時的な失敗としてパネルを消えたとはみなさない。
 - `panelAppeared` を送るとき `panel detected` を、パネルの消滅では `panel gone` を info でログに出す（`Log.configure` が必須。TST-001 §4 のスモークスクリプトが grep する。Idle に戻った後の再通知でも出す）。判定のコスト（AX 呼び出し回数・所要ミリ秒）は debug で出す。どちらもパスは含まない（PR #56）。
+- パレットを表示するたびに `palette shown (id: …)` を info でログに出す（`PalettePresenter` がウィンドウを出した直後。同じパネルの再表示・ホットキーでの再表示でも出す）。`panel detected (id: …)` と同じパネル ID を含むため、同じ ID の `panel detected` の後の最初の `palette shown` とのタイムスタンプ（ミリ秒）の差を検知レイテンシ（FR-DETECT-03）として計測できる（#30）。パスは含まない。
 - サンドボックスアプリでは、パネルは `openAndSavePanelService` のプロセスで描画されるが、AX ツリー上はホストアプリのウィンドウの `AXSheet` 子要素として見える。ホスト側の観測だけで検知できるが、要素アクセスの往復が遅いため判定は `axQueue` 上で同期的に行う（各ウィンドウに判定関数を適用する形。DSN-001 の当初案は判定関数を async にする想定だったが、axQueue 上の 1 ジョブにまとめる方が単純で速い、PR #46）。
 
 ### 2.3 パネルの選択モード推定
