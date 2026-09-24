@@ -193,7 +193,7 @@ struct OpenPanelLocatorCacheTests {
         let expected = LocatedOpenPanel(
             element: found.element,
             context: found.context,
-            selectionMode: found.selectionMode,
+            selectionEstimate: found.selectionEstimate,
             isNewlyClassified: false
         )
         #expect(lookup == .undetermined(lastKnown: expected))

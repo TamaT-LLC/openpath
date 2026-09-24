@@ -11,7 +11,8 @@
 /// PanelWatchPolicy がパレットの表示中（PanelShown）も補助ポーリングを続けて走査の機会を作る。
 /// 推定し直した結果フォルダのみかどうかが変わったら、PanelWatchPolicy が `panelContextChanged` で表示中のパレットへ知らせる。
 struct SelectionModeState<Node> {
-    private(set) var mode: PanelSelectionMode
+    /// 推定結果と、推定に使った行の内訳
+    private(set) var estimate: PanelSelectionEstimate
     /// 推定し直す予定。nil なら推定は確定している
     private var retry: Retry?
 
@@ -20,14 +21,14 @@ struct SelectionModeState<Node> {
         retry != nil
     }
 
-    /// fileList の先頭の行から推定する。
+    /// fileList の先頭の行（先頭がディレクトリばかりなら末尾の行も。`FileListRowSampler.sample`）から推定する。
     init<Reader: PanelTreeReader>(
         fileList: FileListElement<Node>?,
         reader: Reader,
         now: ContinuousClock.Instant,
         configuration: OpenPanelCacheConfiguration
     ) where Reader.Node == Node {
-        mode = .undetermined
+        estimate = .notSampled
         guard let fileList else { return }
         apply(
             Self.estimate(fileList, reader: reader),
@@ -61,7 +62,7 @@ struct SelectionModeState<Node> {
         now: ContinuousClock.Instant,
         configuration: OpenPanelCacheConfiguration
     ) {
-        mode = estimate.mode
+        self.estimate = estimate.result
         guard !estimate.hasReadableRows, completedRetries < configuration.maxRechecks else {
             retry = nil
             return
@@ -77,20 +78,18 @@ struct SelectionModeState<Node> {
         reader: Reader
     ) -> Estimate where Reader.Node == Node {
         do {
-            let rows = try FileListRowSampler.sampleRows(in: fileList.node, role: fileList.role, reader: reader)
-            return Estimate(
-                mode: PanelSelectionModeEstimator.estimate(rows),
-                hasReadableRows: rows.contains { $0.isDirectory != nil }
-            )
+            let sample = try FileListRowSampler.sample(in: fileList.node, role: fileList.role, reader: reader)
+            let result = PanelSelectionModeEstimator.estimate(sample)
+            return Estimate(result: result, hasReadableRows: result.sampledDirectoryCount + result.sampledFileCount > 0)
         } catch {
-            return Estimate(mode: .undetermined, hasReadableRows: false)
+            return Estimate(result: .notSampled, hasReadableRows: false)
         }
     }
 }
 
 extension SelectionModeState {
     private struct Estimate {
-        let mode: PanelSelectionMode
+        let result: PanelSelectionEstimate
         /// 種類の分かる行を読めたか。読めなかったら推定し直す
         let hasReadableRows: Bool
     }

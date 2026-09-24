@@ -58,7 +58,7 @@ public struct OpenPanelLocator<Node: Hashable> {
                 LocatedOpenPanel(
                     element: $0.element,
                     context: $0.context,
-                    selectionMode: $0.selectionMode,
+                    selectionEstimate: $0.selectionEstimate,
                     isNewlyClassified: false
                 )
             }
@@ -118,7 +118,8 @@ public struct OpenPanelLocator<Node: Hashable> {
     ) throws -> LocatedOpenPanel<Node>? where Reader.Node == Node {
         guard let (id, isNewlyClassified) = try openPanelID(of: candidate, reader: reader, now: now) else { return nil }
         let selectionModeState = entries[candidate]?.selectionMode
-        let selectionMode = selectionModeState?.mode ?? .undetermined
+        let selectionEstimate = selectionModeState?.estimate ?? .notSampled
+        let selectionMode = selectionEstimate.mode
         // パネルが動いても最新の位置でパレットを出せるよう、矩形は毎回読む
         let frame = try reader.frame(of: candidate) ?? .zero
         return LocatedOpenPanel(
@@ -129,7 +130,7 @@ public struct OpenPanelLocator<Node: Hashable> {
                 frame: frame,
                 isSelectionModeProvisional: selectionModeState?.isProvisional ?? false
             ),
-            selectionMode: selectionMode,
+            selectionEstimate: selectionEstimate,
             isNewlyClassified: isNewlyClassified
         )
     }

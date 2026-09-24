@@ -4,16 +4,22 @@ public struct LocatedOpenPanel<Node> {
     public let element: Node
     /// `frame` は AX の座標系（左上原点）のまま。NSScreen の座標系への変換は PanelWatcher 側（OpenPathMac の PanelScanner）で行う。
     public let context: PanelContext
-    /// 選択モードの推定結果。`context.isDirectoriesOnly` の元になった値で、推定できなかった（`.undetermined`）か
-    /// ファイルも選べる（`.filesSelectable`）かをログで見分けるために持つ。
-    public let selectionMode: PanelSelectionMode
+    /// 選択モードの推定結果と、推定に使った行の内訳。`context.isDirectoriesOnly` の元になった値で、
+    /// 推定できなかった（`.undetermined`）かファイルも選べる（`.filesSelectable`）か、推定できなかった理由を
+    /// ログで見分けるために持つ。
+    public let selectionEstimate: PanelSelectionEstimate
     /// この呼び出しで判定した（キャッシュを使わなかった）か。判定のコストをログに残すために使う。
     public let isNewlyClassified: Bool
 
-    public init(element: Node, context: PanelContext, selectionMode: PanelSelectionMode, isNewlyClassified: Bool) {
+    /// 選択モードの推定結果。
+    public var selectionMode: PanelSelectionMode {
+        selectionEstimate.mode
+    }
+
+    public init(element: Node, context: PanelContext, selectionEstimate: PanelSelectionEstimate, isNewlyClassified: Bool) {
         self.element = element
         self.context = context
-        self.selectionMode = selectionMode
+        self.selectionEstimate = selectionEstimate
         self.isNewlyClassified = isNewlyClassified
     }
 }
