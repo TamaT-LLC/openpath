@@ -44,4 +44,23 @@ struct LogConfigurationTests {
     func defaultMaximumFileSizeIsPositive() {
         #expect(LogConfiguration().maximumFileSize > 0)
     }
+
+    @Test("最小レベルを変える設定のキーは logLevel（defaults write jp.tamat.openpath logLevel debug）")
+    func minimumLevelPreferenceKey() {
+        #expect(LogConfiguration.minimumLevelPreferenceKey == "logLevel")
+    }
+
+    @Test(
+        "設定があれば、その値を最小レベルにする（リリースビルドでも debug にできる）",
+        arguments: [("debug", LogLevel.debug), ("info", .info), ("warning", .warning), ("ERROR", .error)]
+    )
+    func minimumLevelFromPreference(value: String, expected: LogLevel) {
+        #expect(LogConfiguration.minimumLevel(preferenceValue: value) == expected)
+    }
+
+    @Test("設定が無い・不正なら、既定の最小レベルにする", arguments: [nil, "", "verbose"] as [String?])
+    func minimumLevelFallsBackToDefault(value: String?) {
+        #expect(LogConfiguration.minimumLevel(preferenceValue: value) == LogConfiguration.defaultMinimumLevel)
+    }
 }
+

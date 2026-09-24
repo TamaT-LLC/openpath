@@ -20,6 +20,11 @@ public struct LogConfiguration: Sendable, Equatable {
         #endif
     }()
 
+    /// 最小レベルを既定から変える設定（UserDefaults `jp.tamat.openpath` のキー）。
+    /// リリースビルドでも QA の切り分けのために debug ログ（パスを含む）を出せるようにする（Issue #74）。
+    /// 有効化: `defaults write jp.tamat.openpath logLevel debug`、無効化: `defaults delete jp.tamat.openpath logLevel`（openpath の再起動後に反映）。
+    public static let minimumLevelPreferenceKey = "logLevel"
+
     /// ローテーション時に退避するファイルの拡張子。1 世代のみ保持する。
     private static let rotatedFileExtension = "1"
 
@@ -37,6 +42,12 @@ public struct LogConfiguration: Sendable, Equatable {
 
     public var rotatedFileURL: URL {
         fileURL.appendingPathExtension(Self.rotatedFileExtension)
+    }
+
+    /// 設定値（`minimumLevelPreferenceKey` の値）から最小レベルを決める。
+    /// 設定が無い・どのレベルにも当たらなければ既定の最小レベル（DEBUG ビルドで debug、リリースビルドで info）。
+    public static func minimumLevel(preferenceValue: String?) -> LogLevel {
+        preferenceValue.flatMap(LogLevel.init(preferenceValue:)) ?? defaultMinimumLevel
     }
 
     public init(

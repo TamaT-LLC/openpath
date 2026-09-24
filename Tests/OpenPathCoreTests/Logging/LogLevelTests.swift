@@ -37,4 +37,29 @@ struct LogLevelTests {
     func redactsPaths(level: LogLevel, expected: Bool) {
         #expect(level.redactsPaths == expected)
     }
+
+    @Test(
+        "設定値（defaults の logLevel）から読む。大文字小文字と前後の空白は区別しない",
+        arguments: [
+            ("debug", LogLevel.debug),
+            ("DEBUG", .debug),
+            (" Info\n", .info),
+            ("warning", .warning),
+            ("error", .error),
+        ]
+    )
+    func parsesPreferenceValue(value: String, expected: LogLevel) {
+        #expect(LogLevel(preferenceValue: value) == expected)
+    }
+
+    @Test("どのレベルにも当たらない設定値は nil", arguments: ["", "verbose", "warn", "1", "debug info"])
+    func rejectsUnknownPreferenceValue(value: String) {
+        #expect(LogLevel(preferenceValue: value) == nil)
+    }
+
+    @Test("設定値として書く文字列は小文字で、読み戻すと同じレベルになる", arguments: LogLevel.allCases)
+    func preferenceValueRoundTrips(level: LogLevel) {
+        #expect(level.preferenceValue == level.label.lowercased())
+        #expect(LogLevel(preferenceValue: level.preferenceValue) == level)
+    }
 }
