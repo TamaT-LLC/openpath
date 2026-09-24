@@ -33,6 +33,7 @@ readonly DEFAULT_LOG_FILE="${HOME}/Library/Logs/${APP_NAME}/${APP_NAME}.log"
 readonly DEFAULT_DETECT_TIMEOUT_SECONDS=15
 readonly PALETTE_TIMEOUT_SECONDS=2
 readonly GONE_TIMEOUT_SECONDS=5
+readonly DIALOG_EXIT_TIMEOUT_SECONDS=3
 readonly POLL_INTERVAL_SECONDS=0.1
 readonly FRONTMOST_HINT_DELAY_SECONDS=2
 # FR-DETECT-03（検知からパレット表示まで 300ms 以下）。1 回の計測なので判定には使わず、超えたら知らせるだけにする
@@ -90,6 +91,11 @@ usage_error() {
 cleanup() {
   if [[ -n "${dialog_pid}" ]]; then
     kill "${dialog_pid}" 2>/dev/null || true
+    # SIGTERM で終わらなければ SIGKILL で終わらせ、wait が戻らなくなるのを避ける。
+    # 回収するまで pid は再利用されないため、終了済みの子に送っても他のプロセスには届かない
+    if ! wait_for_dialog_exit; then
+      kill -KILL "${dialog_pid}" 2>/dev/null || true
+    fi
     wait "${dialog_pid}" 2>/dev/null || true
   fi
   if [[ -n "${dialog_stderr}" ]]; then
@@ -466,8 +472,25 @@ report_selection_mode() {
   warn "フォルダのみのパネルと判定されていません（${DIRECTORIES_ONLY_MARK} ではない）。パレットの候補にファイルが混ざっていないか確かめてください"
 }
 
+# osascript が終わるまで最大 DIALOG_EXIT_TIMEOUT_SECONDS 秒待つ。終われば 0、終わらなければ 1
+wait_for_dialog_exit() {
+  local deadline
+  deadline="$(deadline_after "${DIALOG_EXIT_TIMEOUT_SECONDS}")"
+  while is_dialog_running; do
+    if [[ "${SECONDS}" -ge "${deadline}" ]]; then
+      return 1
+    fi
+    sleep "${POLL_INTERVAL_SECONDS}"
+  done
+}
+
+# osascript を終了してダイアログを閉じる。ダイアログのウインドウは osascript のプロセスが持つため、
+# プロセスが終わったことをもって閉じたとみなす（panel gone は最前面の切り替えでも出るため、それだけでは確かめられない）
 close_dialog() {
   kill "${dialog_pid}" 2>/dev/null || true
+  if ! wait_for_dialog_exit; then
+    fail_ng "osascript（pid ${dialog_pid}）が ${DIALOG_EXIT_TIMEOUT_SECONDS} 秒以内に終わらず、ダイアログを閉じられたか確かめられません"
+  fi
   wait "${dialog_pid}" 2>/dev/null || true
   dialog_pid=""
   log "osascript を終了してダイアログを閉じました。${PANEL_GONE} を最大 ${GONE_TIMEOUT_SECONDS} 秒待ちます"
@@ -502,6 +525,11 @@ main() {
   early_gone="$(find_line_after "${PANEL_GONE}" "$(line_number_of "${detected_entry}")")"
   if [[ -n "${early_gone}" ]]; then
     fail_ng "ダイアログを閉じる前に ${PANEL_GONE} が出ました（$(timestamp_of "${early_gone}")）。最前面を切り替えずに再実行してください"
+  fi
+  # openpath は最前面が変わっても panel gone を出す。閉じる時点で最前面でなければ、閉じた後の panel gone が
+  # 閉じたことによるものか区別できないため NG にする
+  if ! is_dialog_frontmost; then
+    fail_ng "ダイアログを閉じる前に最前面が別のアプリに切り替わりました。最前面を切り替えずに再実行してください"
   fi
   close_dialog
   local gone_entry
