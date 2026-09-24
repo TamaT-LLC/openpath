@@ -13,6 +13,12 @@ struct TrialOpenPanelScriptTests {
         ])
     }
 
+    @Test("前面に出せなかった場合に備え、パレットが出ないときはダイアログをクリックすればよいことを添える（Issue #72）")
+    func promptTellsWhatToDoWithoutPalette() {
+        #expect(TrialOpenPanelScript.prompt.contains("パレットが出ないときは、このダイアログを一度クリックしてください"))
+        #expect(TrialOpenPanelScript.prompt.contains("「キャンセル」で閉じてください"))
+    }
+
     @Test("他のアプリへ命令を送らない（tell を含まない）ため、オートメーションの許可を求めない")
     func doesNotTargetOtherApplications() {
         let script = TrialOpenPanelScript.arguments.joined(separator: " ")
