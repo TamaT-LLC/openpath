@@ -33,7 +33,10 @@ updated: 2026-09-24
 記録の仕方:
 
 - §2 の実施環境と、各表の「結果」「備考」を埋めた写しを、PR 本文か Issue のコメントに貼る。
-- 「結果」は `OK` / `NG` / `—`（未実施・対象外）のいずれか。日をまたいで実施したら、備考に日時も書く。
+- 「結果」は次のいずれか。日をまたいで実施したら、備考に日時も書く。
+  - `OK` / `NG`
+  - `未確認`: 実施しなかった、または確認できなかった（アクセシビリティ権限の無い環境など）。理由を備考に書く
+  - `—`: 対象外（その変更に関係しない項目、未実装の仕様）
 - NG の項目は、ID を題名に含めた個別の Issue を起票し、備考に Issue 番号を書く。
 
 項目 ID は、TST-001 §3 のシナリオは `S-01`〜`S-13` のまま使い、それ以外は章ごとの接頭辞と連番にした（例: `PAL-03`）。項目を追加するときは、既存の番号を振り直さずに末尾へ足す。
@@ -48,7 +51,7 @@ TST-001 §3 と PR #65 の手順のうち、そのままでは実施できない
 
 ### 1.2 オーナー判断で決まった仕様
 
-次の 2 点は並行の修正 PR で実装する予定である。修正 PR のマージ前は従来の挙動になるため、結果を `—` にして備考に「修正前」と書く。
+次の 2 点は並行の修正 PR で実装する予定である。修正 PR のマージ前は従来の挙動になるため、結果を `—`（対象外）にして備考に「修正前」と書く。
 
 - パスワードマネージャーなどの機密クリップボード（`org.nspasteboard.ConcealedType` を含む内容）は、注入後に復元しない。復元するとパスワードマネージャーの自動消去が効かなくなるため（CLIP-02）。
 - メニューの「有効」は再起動後も保持する。PR #65 時点の「起動のたびに有効に戻る」から変わる（MENU-02）。
@@ -83,7 +86,7 @@ TST-001 §3 と PR #65 の手順のうち、そのままでは実施できない
 | ID | 手順 | 期待 | 結果 | 備考 |
 | --- | --- | --- | --- | --- |
 | PRE-01 | `./scripts/build.sh && ./scripts/sign.sh` | 警告なく `build/openpath.app` ができ、署名の検証が通る |  |  |
-| PRE-02 | 初回の状態に戻す: `tccutil reset Accessibility jp.tamat.openpath`、`defaults delete jp.tamat.openpath onboardingFinished`、`~/.config/openpath/config.toml` を退避する | ad-hoc 署名は再ビルドのたびに権限の付け直しが要る。`defaults delete` は記録が無ければエラーになるが問題ない |  |  |
+| PRE-02 | 起動中の openpath（インストール版・別の場所のビルド）を終了する。初回の状態に戻す: `tccutil reset Accessibility jp.tamat.openpath`、`defaults delete jp.tamat.openpath onboardingFinished`、`~/.config/openpath/config.toml` を退避する | 同じ bundle id の openpath が残っていない（ログを共有するため、スモークテストは複数起動を前提不足にする）。ad-hoc 署名は再ビルドのたびに権限の付け直しが要る。`defaults delete` は記録が無ければエラーになるが問題ない |  |  |
 | PRE-03 | 別の端末で `tail -f ~/Library/Logs/openpath/openpath.log` | 以降の項目でログを確かめられる |  |  |
 
 ## 4. 初回起動と権限（ONB / PERM）
