@@ -10,6 +10,8 @@ public final class PasteboardSwap {
     public enum SwapError: Error, Equatable {
         /// パスを書き込めなかった。元の内容は戻してある（機密の内容は戻さず空のまま）。
         case writeFailed
+        /// 退避の途中（機密かの判定から退避を終えるまで）に他のアプリやユーザーが書き換えた。何も書き込んでいない。
+        case changedWhileCapturing
     }
 
     public enum RestoreOutcome: Equatable, Sendable {
@@ -40,11 +42,10 @@ public final class PasteboardSwap {
     private var plan: RestorePlan?
 
     /// 現在の内容を退避してから text を書き込む。元の内容が機密なら退避しない。
-    /// - Throws: 書き込めなかった場合 `SwapError.writeFailed`。
+    /// - Throws: 書き込めなかった場合 `SwapError.writeFailed`、
+    ///   退避の途中で書き換えられた場合 `SwapError.changedWhileCapturing`。
     public init(replacingContentsOf pasteboard: any PasteboardAccessing, with text: String) throws {
-        let plan: RestorePlan = Self.containsConcealedItem(pasteboard)
-            ? .clear
-            : .writeBack(PasteboardSnapshot.capture(from: pasteboard))
+        let plan = try Self.makeRestorePlan(for: pasteboard)
         guard pasteboard.replaceContents(with: .transientText(text)) else {
             // 消去だけ済んで書き込めなかった場合に備え、元の内容へ戻してから失敗を返す（機密の内容は戻さない）
             if case .writeBack(let original) = plan {
@@ -72,6 +73,20 @@ public final class PasteboardSwap {
             _ = pasteboard.replaceContents(with: .empty)
             return .clearedBecauseConcealed
         }
+    }
+
+    /// 機密かを判定し、機密でなければ退避する。
+    /// 判定と退避はペーストボードを別々に読むため、その間に機密の内容へ書き換わると、機密の内容を退避して
+    /// 書き戻してしまい得る。途中で changeCount が変わったら、何も書き込まずにやめる（呼び出し側は副方式へ回す）。
+    private static func makeRestorePlan(for pasteboard: any PasteboardAccessing) throws -> RestorePlan {
+        let changeCountBeforeCapture = pasteboard.changeCount
+        let isConcealed = containsConcealedItem(pasteboard)
+        // 判定の直後に書き換わっていれば、新しい内容のデータを読み出さずにやめる
+        guard pasteboard.changeCount == changeCountBeforeCapture else { throw SwapError.changedWhileCapturing }
+        guard !isConcealed else { return .clear }
+        let original = PasteboardSnapshot.capture(from: pasteboard)
+        guard pasteboard.changeCount == changeCountBeforeCapture else { throw SwapError.changedWhileCapturing }
+        return .writeBack(original)
     }
 
     /// 型の一覧だけで判定し、機密のデータそのものは読み出さない。

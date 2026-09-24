@@ -86,6 +86,39 @@ struct PasteboardSwapTests {
         #expect(pasteboard.contents == .userClipboard)
     }
 
+    // MARK: - 退避の途中の書き換え
+
+    @Test("退避の途中で他者が書き換えたら、何も書き込まずに changedWhileCapturing を投げる")
+    func abortsWhenChangedDuringCapture() {
+        let pasteboard = FakePasteboard(contents: .userClipboard)
+        pasteboard.onDataRead = { _ in
+            pasteboard.onDataRead = nil
+            pasteboard.simulateExternalWrite(.concealedPassword)
+        }
+
+        #expect(throws: PasteboardSwap.SwapError.changedWhileCapturing) {
+            try PasteboardSwap(replacingContentsOf: pasteboard, with: Self.path)
+        }
+        #expect(pasteboard.writes.isEmpty)
+        #expect(pasteboard.contents == .concealedPassword)
+    }
+
+    @Test("機密かを判定した直後に他者が書き換えていたら、データを読み出さずにやめる")
+    func abortsBeforeCapturingWhenChangedAfterConcealedCheck() {
+        let pasteboard = FakePasteboard(contents: .userClipboard)
+        pasteboard.onItemsRead = {
+            pasteboard.onItemsRead = nil
+            pasteboard.simulateExternalWrite(.concealedPassword)
+        }
+
+        #expect(throws: PasteboardSwap.SwapError.changedWhileCapturing) {
+            try PasteboardSwap(replacingContentsOf: pasteboard, with: Self.path)
+        }
+        #expect(pasteboard.readTypes.isEmpty)
+        #expect(pasteboard.writes.isEmpty)
+        #expect(pasteboard.contents == .concealedPassword)
+    }
+
     // MARK: - 機密の内容（org.nspasteboard.ConcealedType）
 
     @Test("元の内容が機密（パスワードマネージャー等）なら、書き戻さずに空にする")

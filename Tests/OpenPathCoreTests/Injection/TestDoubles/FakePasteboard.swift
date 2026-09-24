@@ -35,6 +35,10 @@ final class FakePasteboard: PasteboardAccessing {
     var onWrite: ((PasteboardSnapshot) -> Void)?
     /// データを読み出した型を発生順に記録する（機密の内容を読み出していないことの確認に使う）。
     private(set) var readTypes: [String] = []
+    /// アイテムの一覧を読み出した直後に呼ばれる（読み出した一覧は呼ぶ前の内容のまま）。読み出しの合間の他者の書き込みを再現する。
+    var onItemsRead: (() -> Void)?
+    /// 型のデータを読み出した直後に呼ばれる。読み出しの合間の他者の書き込みを再現する。
+    var onDataRead: ((String) -> Void)?
 
     init(items: [[Entry]]) {
         storedItems = items
@@ -54,11 +58,14 @@ final class FakePasteboard: PasteboardAccessing {
     }
 
     var items: [any PasteboardItemReading] {
-        storedItems.map { entries in
+        let items = storedItems.map { entries in
             Item(entries: entries) { [weak self] type in
                 self?.readTypes.append(type)
+                self?.onDataRead?(type)
             }
         }
+        onItemsRead?()
+        return items
     }
 
     func replaceContents(with snapshot: PasteboardSnapshot) -> Bool {
