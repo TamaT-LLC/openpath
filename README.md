@@ -89,7 +89,7 @@ open build/openpath.app   # Dock には出ず、メニューバーに常駐す�
 
 - 出力先は `~/Library/Logs/openpath/openpath.log`（5 MiB を超えると `openpath.log.1` に退避）。統合ログ（Console.app、subsystem `jp.tamat.openpath`）にも出ます。
 - 最小レベルは DEBUG ビルド（`swift run` 等）で debug、リリースビルド（`build.sh`）で info です。パス（注入したパスなど）は debug でだけ記録します（NFR-05）。
-- QA などでリリースビルドの debug ログを出すには、openpath を終了してから次を実行し、起動し直します。注入したパス・使った方式（主方式 / 副方式）・各ステップの経過時間・確定前の移動先シートの入力欄の値と候補の選択・移動後のパネルの現在地（表示名）が残ります（Issue #74）。
+- QA などでリリースビルドの debug ログを出すには、openpath を終了してから次を実行し、起動し直します。注入したパス・使った方式（主方式 / 副方式）・各ステップの経過時間が残ります。確定前の移動先シートの入力欄の値と候補の選択は入力欄を AX で見つけられたとき、移動後のパネルの現在地（表示名）は自動確定しない注入の後に残ります（Issue #74）。
 
   ```bash
   defaults write jp.tamat.openpath logLevel debug
