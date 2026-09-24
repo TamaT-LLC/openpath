@@ -8,6 +8,8 @@
 ///
 /// 検知しない変化: シンボリックリンクのリンク先の中身や種別の変化（リンク自体の作成・削除・張り替えは、
 /// 親ディレクトリの更新日時で検知する）、depth の階層の項目の隠し属性の変化。手動の「候補を再構築」で反映する。
+/// 中身を読めないディレクトリがあった走査では記録を作らない。読めるようになっても（権限やプライバシーの許可の変更）
+/// ディレクトリの状態が変わるとは限らないため、読めない間は周期の再構築のたびに走査する。
 public struct RootScanMarker: Sendable, Equatable {
     struct Directory: Sendable, Equatable {
         let path: String
@@ -41,7 +43,8 @@ public struct RootScanMarker: Sendable, Equatable {
 /// 変更の検知の記録を添えた、1 ルートの走査の結果（Issue #78）。
 public struct RootScanResult: Sendable {
     public let snapshot: CandidateSourceSnapshot
-    /// ルートを走査できなかった（存在しない・ディレクトリでない・読めない）ときは nil
+    /// ルートを走査できなかった（存在しない・ディレクトリでない・読めない）ときと、中身を読めないディレクトリが
+    /// あったときは nil
     public let marker: RootScanMarker?
 }
 
@@ -52,6 +55,8 @@ struct RootScanMarkerRecorder {
     private var directories: [RootScanMarker.Directory] = []
     /// ルートの状態を読めなかった（走査を始める前に消えた等）ときは記録を作らない
     private var isRootRecorded = false
+    /// 中身を読めないディレクトリがあった（`invalidate()`）ときは記録を作らない
+    private var isValid = true
 
     init(root: String, options: RootScanOptions) {
         self.root = root
@@ -72,8 +77,13 @@ struct RootScanMarkerRecorder {
         directories.append(RootScanMarker.Directory(path: path, stamp: stamp))
     }
 
+    /// 記録を作らないようにする。中身を読めないディレクトリがあったときに呼ぶ
+    mutating func invalidate() {
+        isValid = false
+    }
+
     func marker() -> RootScanMarker? {
-        guard isRootRecorded else { return nil }
+        guard isRootRecorded, isValid else { return nil }
         return RootScanMarker(root: root, options: options, directories: directories)
     }
 }

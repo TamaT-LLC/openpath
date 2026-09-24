@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// 設定 `roots` の 1 ルート配下を `depth` まで走査し、候補を集める（FR-SOURCE-02 / 05, DSN-002 §3）。
 ///
@@ -12,7 +13,7 @@ import Foundation
 /// - 存在しない・読めないルートはエラーにせず警告を返す。読めないサブディレクトリは飛ばして続ける
 /// - 候補が `itemLimit` を超えた時点で打ち切り、警告を返す
 /// - `trackedScan(root:)` は、中身を読んだディレクトリの状態を読む前に記録し、変更の検知に使う記録
-///   （RootScanMarker）を添えて返す（Issue #78）
+///   （RootScanMarker）を添えて返す（Issue #78）。中身を読めないディレクトリがあったときは記録を作らない
 ///
 /// ファイルシステムを同期的に読むため、メインスレッドではなくバックグラウンドのタスクから呼ぶこと（DSN-002 §3）。
 public struct RootDirectoryScanner: Sendable {
@@ -90,21 +91,32 @@ public struct RootDirectoryScanner: Sendable {
     ) throws {
         // シンボリックリンクのルートはそのままでは列挙できないため、リンク先を列挙する
         let rootURL = URL(filePath: root, directoryHint: .isDirectory).resolvingSymlinksInPath()
+        let hasListingFailure = OSAllocatedUnfairLock(initialState: false)
         guard let enumerator = FileManager.default.enumerator(
             at: rootURL,
             includingPropertiesForKeys: Self.resourceKeys,
             options: Self.enumerationOptions,
             // 読めないサブディレクトリがあっても残りの走査は続ける
-            errorHandler: { _, _ in true }
+            errorHandler: { _, _ in
+                hasListingFailure.withLock { $0 = true }
+                return true
+            }
         ) else {
             return
+        }
+        defer {
+            // 読めなかったディレクトリは、読めるようになっても（権限やプライバシーの許可の変更）状態が変わらないことがある。
+            // 記録を作らず、周期の再構築でも走査し直させる（読めない間は周期のたびに走査する）
+            if hasListingFailure.withLock({ $0 }) {
+                recorder.invalidate()
+            }
         }
 
         var paths = DescendantPathBuilder(root: root)
         var step = EnumerationStep.continue
         while step == .continue {
             // 列挙で得る URL やリソース値は autorelease されるため、1 件ごとに解放する。スレッドのプールに任せると
-            // 走査を終えた後もしばらく全件分（候補 20,000 件で十数 MB）が残り、メモリのピークを押し上げる（Issue #78）
+            // 走査を終えた後もしばらく全件分（候補 20,000 件で約 6MB）が残り、メモリのピークを押し上げる（Issue #78）
             step = try autoreleasepool {
                 guard let url = enumerator.nextObject() as? URL else {
                     return .finished

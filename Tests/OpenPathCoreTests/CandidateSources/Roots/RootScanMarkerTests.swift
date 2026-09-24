@@ -219,6 +219,32 @@ struct RootScanMarkerTests {
         #expect(try trackedScan(root: tree.path("file.txt")).marker == nil)
     }
 
+    @Test("中身を読めないディレクトリがあった走査は記録を作らない（読めるようになっても状態は変わらないため）")
+    func noMarkerWhenListingFails() throws {
+        try tree.makeDirectories("a/b", "c")
+        let locked = tree.path("a")
+        try FileTreeFixture.setPermissions(FileTreeFixture.noPermissions, atPath: locked)
+        defer { try? FileTreeFixture.setPermissions(FileTreeFixture.ownerAllPermissions, atPath: locked) }
+
+        let result = try trackedScan(depth: 2)
+
+        #expect(result.snapshot.pathSet == [tree.root, tree.path("a"), tree.path("c")])
+        #expect(result.marker == nil)
+    }
+
+    @Test("中身を読まないディレクトリ（depth の階層）が読めなくても記録を作る")
+    func markerWhenUnlistedDirectoryIsUnreadable() throws {
+        try tree.makeDirectories("a/b/c")
+        let locked = tree.path("a/b")
+        try FileTreeFixture.setPermissions(FileTreeFixture.noPermissions, atPath: locked)
+        defer { try? FileTreeFixture.setPermissions(FileTreeFixture.ownerAllPermissions, atPath: locked) }
+
+        let result = try trackedScan(depth: 2)
+
+        #expect(result.snapshot.pathSet == [tree.root, tree.path("a"), tree.path("a/b")])
+        #expect(result.marker != nil)
+    }
+
     @Test("上限で打ち切った走査でも記録を作り、読んだディレクトリの変化を検知する")
     func truncatedScanIsTracked() throws {
         try tree.makeDirectories("a/x", "a/y", "b/x", "b/y")
