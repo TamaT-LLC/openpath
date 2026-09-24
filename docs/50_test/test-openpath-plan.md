@@ -148,13 +148,17 @@ open build/openpath.app          # アクセシビリティ権限を付与して
 
 | 項目 | 方法 | 合格基準 |
 | --- | --- | --- |
-| アイドル CPU | Activity Monitor で 10 分計測 | 平均 0.1% 未満 |
-| メモリ | 候補 20,000 件を読み込み | 50MB 以下 |
-| 検知レイテンシ | ログのタイムスタンプ（panel created → palette shown） | p95 300ms 以下 |
-| ネットワーク | Little Snitch / `nettop` で監視 | 通信ゼロ |
+| アイドル CPU | `scripts/measure-idle-cpu.sh` で 10 分計測（累積 CPU 時間 `ps -o time` の増分 ÷ 経過実時間 × 100。1 コア = 100%。`top` の %CPU を参考値として併記）。5 分ごとの候補の周期の再構築を含めて測り、候補数を記録する | 平均 0.1% 未満 |
+| メモリ | 候補 20,000 件を読み込ませた計測用インスタンスで、構築が落ち着いてから 30 秒後に `scripts/measure-memory.sh --pid` で phys_footprint の現在値を測る（`--candidates 20000` なら、起動・落ち着いてから 30 秒の待機（`--measure-delay`）・計測・停止を 1 回で行う） | 50MB 以下 |
+| 検知レイテンシ | `scripts/measure-detection-latency.sh`（ログのタイムスタンプ `panel detected (id: …)` → `palette shown (id: …)` の差。同じパネル ID の行を組にし、パレットが出なかった検知が 1 件でもあれば判定しない。既定ではログの最後の起動以降だけを集計する。権限付きの .app で S-01 を 20 回程度繰り返した後に実行）。`panel detected` は PanelWatcher がパネルを検知した直後に出るため、パネルが生成されてから検知されるまで（AX 通知の遅れや 200ms ポーリングの待ち）の時間は含まれない | p95 300ms 以下 |
+| ネットワーク | `scripts/measure-network.sh`（`nettop` の送受信バイト数と `lsof -i` のインターネットソケット数。起動直後から監視する） | 通信ゼロ |
 | Notarization | `spctl -a -vv openpath.app`（`scripts/notarize.sh` 内で実行。提出前に ad-hoc 署名でないこと・`Developer ID Application:` 署名・`runtime` フラグの付与を確認してから提出する、PR #59） | accepted |
 
-- 各項目の実測値は実装 PR の「テスト」節に記録している（roots 走査・候補の前処理時間・常駐メモリ: DSN-002 §5 / §8、PR #40 / #47 / #51 / #57。CI 実行環境: PR #33）。本表は Phase 1 の合格基準を示すもので、実測値そのものは記載しない。
+- 計測スクリプトの終了コードは 0 = PASS、1 = FAIL、2 = 計測できなかった（対象のプロセスやログが無い等）。
+- アイドル CPU・メモリ・ネットワークは、`scripts/measure-isolated.sh start` で一時 HOME（`CFFIXED_USER_HOME`）を使う計測用インスタンスを起動して測る。実ユーザーの設定・履歴・ログには触れず、止めるときは `stop` で自分が起動した pid だけを止める。起動引数 `-onboardingFinished YES -enabled YES`（UserDefaults の引数ドメイン。保存されない）で、初回起動の案内を出さず有効の状態で起動する。アクセシビリティ権限の無い状態ではパネルの検知（200ms ポーリング）は動かないため、検知レイテンシと、ポーリングを含むアイドル CPU は .app に権限を付けてから測る。
+- メモリは RSS ではなく phys_footprint（Activity Monitor の「メモリ」列と同じ値）で判定する。RSS は共有フレームワークのページを含み、圧縮・スワップされたページを含まないため。
+- 計測の手順・環境（macOS のバージョンで値が変わるため必ず記録する）・Phase 1 の実測値と、オーナーが実行・判断する項目（検知レイテンシ・Notarization・権限付きでのアイドル CPU・候補 20,000 件でのアイドル CPU の FAIL とメモリの扱い）は PROJ-TST-003（`docs/50_test/test-openpath-nfr-measurement.md`）に記録する。
+- 個別の実装 PR で測った値は各 PR の「テスト」節に記録している（roots 走査・候補の前処理時間・常駐メモリ: DSN-002 §5 / §8、PR #40 / #47 / #51 / #57。CI 実行環境: PR #33）。本表は Phase 1 の合格基準と計測方法を示すもので、実測値そのものは記載しない。
 
 ## 6. 完了条件
 
