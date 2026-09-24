@@ -150,7 +150,7 @@ open build/openpath.app          # アクセシビリティ権限を付与して
 | --- | --- | --- |
 | アイドル CPU | `scripts/measure-idle-cpu.sh` で 10 分計測（累積 CPU 時間 `ps -o time` の増分 ÷ 経過実時間 × 100。1 コア = 100%。`top` の %CPU を参考値として併記）。5 分ごとの候補の周期の再構築を含めて測り、候補数を記録する | 平均 0.1% 未満 |
 | メモリ | 候補 20,000 件を読み込ませた計測用インスタンスで、構築が落ち着いてから 30 秒後に `scripts/measure-memory.sh --pid` で phys_footprint の現在値を測る（`--candidates 20000` なら、起動・落ち着いてから 30 秒の待機（`--measure-delay`）・計測・停止を 1 回で行う） | 50MB 以下 |
-| 検知レイテンシ | `scripts/measure-detection-latency.sh`（ログのタイムスタンプ `panel detected (id: …)` → `palette shown (id: …)` の差。同じパネル ID の行を組にし、パレットが出なかった検知が 1 件でもあれば判定しない。権限付きの .app で S-01 を 20 回程度繰り返した後に実行）。`panel detected` は PanelWatcher がパネルを検知した直後に出るため、パネルが生成されてから検知されるまで（AX 通知の遅れや 200ms ポーリングの待ち）の時間は含まれない | p95 300ms 以下 |
+| 検知レイテンシ | `scripts/measure-detection-latency.sh`（ログのタイムスタンプ `panel detected (id: …)` → `palette shown (id: …)` の差。同じパネル ID の行を組にし、パレットが出なかった検知が 1 件でもあれば判定しない。既定ではログの最後の起動以降だけを集計する。権限付きの .app で S-01 を 20 回程度繰り返した後に実行）。`panel detected` は PanelWatcher がパネルを検知した直後に出るため、パネルが生成されてから検知されるまで（AX 通知の遅れや 200ms ポーリングの待ち）の時間は含まれない | p95 300ms 以下 |
 | ネットワーク | `scripts/measure-network.sh`（`nettop` の送受信バイト数と `lsof -i` のインターネットソケット数。起動直後から監視する） | 通信ゼロ |
 | Notarization | `spctl -a -vv openpath.app`（`scripts/notarize.sh` 内で実行。提出前に ad-hoc 署名でないこと・`Developer ID Application:` 署名・`runtime` フラグの付与を確認してから提出する、PR #59） | accepted |
 

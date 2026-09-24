@@ -4,10 +4,13 @@
 # 始点の panel detected は PanelWatcher がパネルを検知した直後に出るため、パネルが生成されてから検知されるまで
 # （AX 通知の遅れや 200ms ポーリングの待ち）の時間は含まれない。
 #
-# 使い方: scripts/measure-detection-latency.sh [--log FILE]... [--start-pattern TEXT] [--end-pattern TEXT] [--threshold-ms MS]
+# 使い方: scripts/measure-detection-latency.sh [--log FILE]... [--all-sessions] [--start-pattern TEXT] [--end-pattern TEXT]
+#                                              [--threshold-ms MS]
 #   --log FILE           読むログ。繰り返し指定すると指定した順に続けて読む。省略時は ~/Library/Logs/openpath/ の
 #                        openpath.log.1（あれば）と openpath.log をこの順に読む（ローテーションで古い方が .1 になるため）。
 #                        CFFIXED_USER_HOME が設定されていれば ~ の代わりにそれを使う（measure-isolated.sh の一時 HOME）
+#   --all-sessions       ログにある起動をすべて集計する。既定では最後の起動の行（"を起動します"）以降だけを集計する
+#                        （前の起動や、palette shown を出さない PR #69 より前のビルドの記録を今回の計測に混ぜないため）
 #   --start-pattern TEXT 始点の行の目印。既定 "panel detected"（PanelWatcher が `panel detected (id: open-panel-N, …)` を出す）
 #   --end-pattern TEXT   終点の行の目印。既定 "palette shown"（PalettePresenter がパレットを表示するたびに
 #                        `palette shown (id: open-panel-N)` を info で出す。PR #69 より前のビルドは出さないため、
@@ -16,8 +19,8 @@
 #
 # 計測の手順: アクセシビリティ権限を付けた openpath を起動し、TextEdit の「ファイル > 開く…」（⌘O）→ パレットが
 # 出たのを確かめてパネルを「キャンセル」で閉じる操作（TST-001 §3 の S-01。Finder の ⌘O では「開く」ダイアログが
-# 出ない）を 20 回ほど繰り返してから、このスクリプトを実行する。
-
+# 出ない）を 20 回ほど繰り返してから、このスクリプトを実行する（アプリを再起動すると、既定ではそれより前の記録は
+# 集計されない）。
 #
 # ログ行の形式は `2026-09-23T12:34:56.789+09:00 [INFO] message`。目印は message に含まれるか（固定文字列）で判定する。
 # タイムスタンプはオフセット（+09:00 / -05:00 / Z）込みでエポックミリ秒に直してから差を取るため、秒・分・日・年の
@@ -26,8 +29,9 @@
 #   - end に ID があれば、同じ ID のまだ組んでいない start と組にする（間に別の ID の start があってもよい）。
 #   - end に ID が無ければ、直前の start がまだ組んでいなければそれと組にする（ID を出さない行を目印にしたとき）。
 #   - 同じ ID の start が続いたら古い方は組めなかったものとして数える。
-#   - "panel gone"（ID を持たない）と起動の行（"を起動します"）で、まだ組んでいない start をすべて打ち切る。
-#     ID はプロセスごとの連番で再起動すると同じ値が使われるため、前の起動の start と組まないようにする。
+#   - "panel gone"（ID を持たない）で、まだ組んでいない start をすべて打ち切る。
+#   - 起動の行（"を起動します"）では、それまでの集計をすべて捨てて数え直す（--all-sessions のときは、まだ組んでいない
+#     start を打ち切るだけ）。ID はプロセスごとの連番で再起動すると同じ値が使われるため、前の起動の start と組まない。
 #   - 組む相手の無い end（同じパネルの再表示・ホットキーでの再表示で出る）は件数だけ数えて除外する。
 #   - 組めなかった start（パレットが出なかった検知）が 1 件でもあれば判定しない（終了コード 2）。除いて p95 を出すと
 #     表示の失敗を見逃すため。
@@ -54,9 +58,11 @@ readonly LOG_DIRECTORY="${CFFIXED_USER_HOME:-${HOME}}/Library/Logs/${APP_NAME}"
 readonly CURRENT_LOG_FILE="${LOG_DIRECTORY}/${APP_NAME}.log"
 readonly ROTATED_LOG_FILE="${CURRENT_LOG_FILE}.1"
 
-# ログを先頭から読み、組にできた差を "latency <ms>" で、最後に
-# "summary <start 行数> <end 行数> <組めなかった start> <組む相手の無い end> <負の差> <解釈できないタイムスタンプ>" を出力する。
-# 目印は -v だとエスケープが解釈されるため環境変数（START_PATTERN / END_PATTERN / GONE_PATTERN / LAUNCH_PATTERN）で受け取る
+# ログを先頭から読み、最後に組にできた差を "latency <ms>" で、続けて
+# "summary <start 行数> <end 行数> <組めなかった start> <組む相手の無い end> <負の差> <解釈できないタイムスタンプ>
+#  <起動の行数> <集計した起動のタイムスタンプ（無ければ -）>" を出力する。
+# 目印は -v だとエスケープが解釈されるため環境変数（START_PATTERN / END_PATTERN / GONE_PATTERN / LAUNCH_PATTERN）で受け取る。
+# ALL_SESSIONS=1 なら起動の行で集計を捨てない
 # awk のプログラムなのでシェルでは展開しない
 # shellcheck disable=SC2016
 readonly PAIRING_AWK='
@@ -140,11 +146,28 @@ function abandon_pending(    key) {
   has_last_start = 0
 }
 
+# 起動の行より前の集計をすべて捨てる（前の起動の記録を今回の計測に混ぜない）
+function reset_session() {
+  split("", pending_time)
+  split("", latencies)
+  latency_count = 0
+  last_start_key = ""
+  has_last_start = 0
+  starts = 0
+  ends = 0
+  unpaired = 0
+  orphan_ends = 0
+  negative = 0
+  bad_timestamps = 0
+}
+
 BEGIN {
   start_pattern = ENVIRON["START_PATTERN"]
   end_pattern = ENVIRON["END_PATTERN"]
   gone_pattern = ENVIRON["GONE_PATTERN"]
   launch_pattern = ENVIRON["LAUNCH_PATTERN"]
+  all_sessions = ENVIRON["ALL_SESSIONS"] == "1"
+  session_stamp = "-"
 }
 
 {
@@ -157,7 +180,13 @@ BEGIN {
     next
   }
   if (is_launch) {
-    abandon_pending()
+    launches++
+    if (all_sessions) {
+      abandon_pending()
+    } else {
+      reset_session()
+      session_stamp = $1
+    }
     next
   }
   time = epoch_milliseconds($1)
@@ -193,7 +222,7 @@ BEGIN {
       negative++
       next
     }
-    printf "latency %d\n", time - start_time
+    latencies[++latency_count] = time - start_time
   } else {
     abandon_pending()
   }
@@ -201,7 +230,10 @@ BEGIN {
 
 END {
   abandon_pending()
-  printf "summary %d %d %d %d %d %d\n", starts, ends, unpaired, orphan_ends, negative, bad_timestamps
+  for (i = 1; i <= latency_count; i++) {
+    printf "latency %d\n", latencies[i]
+  }
+  printf "summary %d %d %d %d %d %d %d %s\n", starts, ends, unpaired, orphan_ends, negative, bad_timestamps, launches, session_stamp
 }'
 
 # 昇順に並んだ値から「件数 p50 p95 最大」を出力する（nearest-rank 法: ceil(p × n / 100) 番目）
@@ -235,12 +267,17 @@ main() {
   local start_pattern="${DEFAULT_START_PATTERN}"
   local end_pattern="${DEFAULT_END_PATTERN}"
   local threshold_ms="${DEFAULT_THRESHOLD_MS}"
+  local all_sessions=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --log)
         require_option_value "$1" "$#"
         log_files+=("$2")
         shift 2
+        ;;
+      --all-sessions)
+        all_sessions=1
+        shift
         ;;
       --start-pattern)
         require_option_value "$1" "$#"
@@ -284,18 +321,32 @@ main() {
 
   local pairing
   pairing="$(START_PATTERN="${start_pattern}" END_PATTERN="${end_pattern}" GONE_PATTERN="${PANEL_GONE_PATTERN}" \
-    LAUNCH_PATTERN="${APP_LAUNCH_PATTERN}" awk "${PAIRING_AWK}" "${log_files[@]}")" || die_unmeasurable "ログを集計できません"
+    LAUNCH_PATTERN="${APP_LAUNCH_PATTERN}" ALL_SESSIONS="${all_sessions}" awk "${PAIRING_AWK}" "${log_files[@]}")" \
+    || die_unmeasurable "ログを集計できません"
   local summary
   summary="$(printf '%s\n' "${pairing}" | awk '$1 == "summary"')"
   # 集計の awk が最後まで動かなかったとき（summary の行が無い）に、0 件として先へ進まない
   [[ -n "${summary}" ]] || die_unmeasurable "ログを集計できません（集計結果がありません）"
-  local starts ends unpaired orphan_ends negative bad_timestamps
-  read -r _ starts ends unpaired orphan_ends negative bad_timestamps <<<"${summary}"
+  local starts ends unpaired orphan_ends negative bad_timestamps launches session_stamp
+  read -r _ starts ends unpaired orphan_ends negative bad_timestamps launches session_stamp <<<"${summary}"
 
   printf '== 検知レイテンシ（FR-DETECT-03）==\n'
   printf '対象ログ: %s\n' "$(printf '%s, ' "${log_files[@]}" | sed 's/, $//')"
+  if [[ "${launches}" -eq 0 ]]; then
+    printf '集計範囲: ログ全体（起動の行が無い）\n'
+  elif [[ "${all_sessions}" -eq 1 ]]; then
+    printf '集計範囲: ログにあるすべての起動（%s 回。--all-sessions）\n' "${launches}"
+  else
+    printf '集計範囲: 最後の起動（%s）以降（ログにある起動は %s 回。すべて集計するなら --all-sessions）\n' \
+      "${session_stamp}" "${launches}"
+  fi
   printf '始点: "%s" / 終点: "%s"（パネルの ID で組にする。間に "%s" か "%s" があれば組にしない）\n' \
     "${start_pattern}" "${end_pattern}" "${PANEL_GONE_PATTERN}" "${APP_LAUNCH_PATTERN}"
+  # 計測の後にアプリを再起動すると、既定の範囲には計測した記録が入らないため、計測できないときに案内する
+  local session_hint=""
+  if [[ "${all_sessions}" -eq 0 && "${launches}" -gt 1 ]]; then
+    session_hint="（最後の起動より前の記録は集計していません。前の起動も含めるなら --all-sessions）"
+  fi
   printf 'start の行: %s 件、end の行: %s 件\n' "${starts}" "${ends}"
   if [[ "${bad_timestamps}" -gt 0 ]]; then
     warn "タイムスタンプを解釈できない行を ${bad_timestamps} 行飛ばしました"
@@ -306,14 +357,14 @@ main() {
 
   # 終点のログを出さない古いビルドでも計測しようとしがちなため、始点も無いときもこちらを先に伝える
   if [[ "${ends}" -eq 0 ]]; then
-    die_unmeasurable "終点の行（\"${end_pattern}\"）がログに 1 行も無いため計測できません。パレット表示時に \"${DEFAULT_END_PATTERN}\" を info で出すビルド（PR #69 以降）で計測し直すか、終点の文言が違う場合は --end-pattern で指定してください"
+    die_unmeasurable "終点の行（\"${end_pattern}\"）がログに 1 行も無いため計測できません。パレット表示時に \"${DEFAULT_END_PATTERN}\" を info で出すビルド（PR #69 以降）で計測し直すか、終点の文言が違う場合は --end-pattern で指定してください${session_hint}"
   fi
-  [[ "${starts}" -gt 0 ]] || die_unmeasurable "始点の行（\"${start_pattern}\"）がログに 1 行もありません"
+  [[ "${starts}" -gt 0 ]] || die_unmeasurable "始点の行（\"${start_pattern}\"）がログに 1 行もありません${session_hint}"
 
   local stats
   stats="$(printf '%s\n' "${pairing}" | awk '$1 == "latency" { print $2 }' | sort -n \
     | awk -v median="${MEDIAN_PERCENTILE}" -v tail="${TAIL_PERCENTILE}" "${PERCENTILE_AWK}")" \
-    || die_unmeasurable "start と end を 1 組も組にできませんでした（組めなかった start: ${unpaired} 件）"
+    || die_unmeasurable "start と end を 1 組も組にできませんでした（組めなかった start: ${unpaired} 件）${session_hint}"
   local count p50 p95 maximum
   read -r count p50 p95 maximum <<<"${stats}"
 
