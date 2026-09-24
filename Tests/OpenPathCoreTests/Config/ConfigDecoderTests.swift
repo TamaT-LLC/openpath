@@ -73,6 +73,13 @@ struct ConfigDecoderTests {
         #expect(!config.disabledApps.contains("com.apple.finder"))
     }
 
+    @Test("roots を省略すると空のまま（ghq が無いときに生成するファイルの ~ には合わせない、DSN-002 §6）")
+    func omittedRootsStayEmpty() throws {
+        let config = try S.decode("[ghq]\nenabled = false").config
+
+        #expect(config.roots.isEmpty)
+    }
+
     @Test("空の TOML はすべて既定値になる")
     func emptySourceYieldsDefaults() throws {
         let result = try S.decode("")
