@@ -17,7 +17,11 @@ NSOpenPanel 自体は置き換えません。Esc でパレットを閉じれば�
 
 ## ステータス
 
-Phase 1 実装中。SPM プロジェクトの雛形ができ、メニューバーに常駐するだけの最小アプリが起動します（パネル検知・パレット・注入は未実装）。設計ドキュメントは `docs/` を参照してください（[system-doc-agent](https://github.com/TamaT-LLC/system-doc-agent-cli) 形式）。
+Phase 1 の機能（パネル検知・パレット・候補と履歴・注入・メニューバー・設定ファイル・初回起動の案内）は実装済みで、実機での確認（QA）中です。確認項目は手動シナリオ（`docs/50_test/test-openpath-manual-scenarios.md`）にまとめています。Developer ID 署名と Notarization はまだ行っておらず、Homebrew cask での配布も始めていません。使うときは下の手順でビルドし、ad-hoc 署名した `.app` を起動してください。
+
+要求する権限はアクセシビリティだけです。ただし `roots` にホーム（`~`）を指定した場合（ghq が無いときの既定）は、デスクトップ・書類・ダウンロードの中を初めて読むときに macOS のアクセス確認が出ます（「[初回起動の案内](#初回起動の案内)」を参照）。
+
+設計ドキュメントは `docs/` を参照してください（[system-doc-agent](https://github.com/TamaT-LLC/system-doc-agent-cli) 形式）。
 
 | Layer | ドキュメント |
 | --- | --- |
@@ -26,7 +30,7 @@ Phase 1 実装中。SPM プロジェクトの雛形ができ、メニューバ�
 | L2 UX | `docs/30_ux/ux-openpath-palette.md` |
 | L3 アーキテクチャ | `docs/40_arch_design/arch-openpath-app.md` |
 | L4 詳細設計 | `docs/40_arch_design/design-openpath-panel-injection.md`, `docs/40_arch_design/design-openpath-index-frecency.md` |
-| L5 テスト | `docs/50_test/test-openpath-plan.md` |
+| L5 テスト | `docs/50_test/test-openpath-plan.md`, `docs/50_test/test-openpath-manual-scenarios.md`, `docs/50_test/test-openpath-nfr-measurement.md` |
 | インデックス | `docs/00_index/index.md` |
 
 ## 開発
@@ -85,6 +89,8 @@ open build/openpath.app   # Dock には出ず、メニューバーに常駐す�
 - 案内を終える（「試してみる」「閉じる」「あとで」）と `~/Library/Preferences/jp.tamat.openpath.plist` の `onboardingFinished` に記録し、次の起動からは出ません。メニューの「はじめに…」でいつでも開き直せます。
 - 最初からやり直すには、openpath を終了してから `defaults delete jp.tamat.openpath onboardingFinished` を実行します。
 - 設定ファイル `~/.config/openpath/config.toml` が無ければ、既定の内容で作ります（既存のファイルは上書きしません）。候補として走査するディレクトリ `roots` は、`ghq root` の結果を絶対パスに解決できればその root、できなければ（ghq が未インストール・実行に失敗した・結果が相対パスなど）ホーム（`~`）になります。ホームにした場合、`~/Desktop`・`~/Documents`・`~/Downloads` の中を初めて読むときに macOS がアクセスの許可を確認することがあります。
+  - 確認には、フォルダ内の項目の名前を候補にするためという用途の説明（`Resources/Info.plist`）が出ます。許可しなくても openpath は動き、そのフォルダの中が候補に入らないだけです。Full Disk Access は要りません。
+  - あとから変えるときは「システム設定 → プライバシーとセキュリティ → ファイルとフォルダ」で openpath の項目を切り替え、メニューの「候補を再構築」を選びます。
 
 ### ログ
 
