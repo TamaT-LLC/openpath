@@ -22,6 +22,12 @@
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>openpath は、ファイル選択ダイアログで目的の場所へ素早く移動できるよう、このフォルダ内の項目の名前を読み取って候補にします。ファイルの中身は読まず、外部にも送信しません。</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>openpath は、ファイル選択ダイアログで目的の場所へ素早く移動できるよう、このフォルダ内の項目の名前を読み取って候補にします。ファイルの中身は読まず、外部にも送信しません。</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>openpath は、ファイル選択ダイアログで目的の場所へ素早く移動できるよう、このフォルダ内の項目の名前を読み取って候補にします。ファイルの中身は読まず、外部にも送信しません。</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>
