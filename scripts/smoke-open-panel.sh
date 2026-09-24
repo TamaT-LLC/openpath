@@ -266,35 +266,43 @@ file_identity() {
 
 # 開始時点のオフセット以降に追記された行を出す。
 # ローテーション（FileLogSink は現在のファイルを .1 へ移して新しく作る）はサイズではなく inode で判定する。
-# 開始時のファイルが .1 に移っていればその残りから続けて出し、.1 が別のファイル（古いローテーション）なら読まない
+# 開始時のファイルが .1 に移っていればその残りから続けて出し、.1 が別のファイル（古いローテーション）なら読まない。
+# 存在するのに読めなければ失敗を返す。ローテーションで .1 へ移してから新しく作るまでの間は本体が無いため、無いのは空とみなす
 new_log_lines() {
   local identity size
   identity="$(file_identity "${log_file}" 2>/dev/null)" || identity=""
   if [[ -n "${identity}" && "${identity}" == "${start_identity}" ]]; then
-    size="$(file_size "${log_file}" 2>/dev/null)" || size=0
+    size="$(file_size "${log_file}" 2>/dev/null)" || return 1
     if [[ "${size}" -ge "${start_offset}" ]]; then
-      tail -c "+$((start_offset + 1))" "${log_file}" || true
+      tail -c "+$((start_offset + 1))" "${log_file}" 2>/dev/null || return 1
     else
       # 同じファイルが切り詰められた。先頭から読む
-      cat "${log_file}" 2>/dev/null || true
+      cat "${log_file}" 2>/dev/null || return 1
     fi
     return 0
   fi
   if [[ -f "${log_file}.1" && "$(file_identity "${log_file}.1" 2>/dev/null)" == "${start_identity}" ]]; then
-    tail -c "+$((start_offset + 1))" "${log_file}.1" || true
+    tail -c "+$((start_offset + 1))" "${log_file}.1" 2>/dev/null || return 1
   fi
-  cat "${log_file}" 2>/dev/null || true
+  if [[ -e "${log_file}" ]]; then
+    cat "${log_file}" 2>/dev/null || return 1
+  fi
 }
 
-# 開始以降の after 行目より後で、message を含む最初の行を「行番号<TAB>行」で出す。無ければ何も出さない。
-# awk を途中で終えると書き込み側が SIGPIPE で失敗し得るため、最後まで読む。
-# 呼び出し側は $(...) の代入で使うため、読めなくても失敗扱い（set -e での終了）にしない
+# 開始以降の after 行目より後で、message を含む最初の行を「行番号<TAB>行」で出す。無ければ何も出さずに成功を返す。
+# ログを読めなければ失敗を返す（pipefail のため new_log_lines の失敗がそのまま返る）。
+# awk を途中で終えると書き込み側が SIGPIPE で失敗し得るため、最後まで読む
 find_line_after() {
   local message="$1"
   local after="$2"
   new_log_lines | awk -v message="${message}" -v after="${after}" '
     !printed && NR > after && index($0, message) { print NR "\t" $0; printed = 1 }
-  ' || true
+  '
+}
+
+# 実行中にログを読めなくなった。テストの失敗ではないため前提不足にする（$(...) の外で呼ぶ）
+log_read_failed() {
+  fail_precondition "実行中にログファイル ${log_file}（または ${log_file}.1）を読めなくなりました"
 }
 
 line_number_of() {
@@ -384,7 +392,7 @@ wait_for_detection() {
   local is_hinted=0
   local after=0
   while [[ "${SECONDS}" -lt "${deadline}" ]]; do
-    candidate="$(find_line_after "${PANEL_DETECTED}" "${after}")"
+    candidate="$(find_line_after "${PANEL_DETECTED}" "${after}")" || log_read_failed
     if [[ -n "${candidate}" ]]; then
       if is_dialog_frontmost; then
         detected_entry="${candidate}"
@@ -405,14 +413,15 @@ wait_for_detection() {
   done
 }
 
-# after 行目より後で message を含む行を、timeout 秒まで待って出す。出なければ何も出さない
+# after 行目より後で message を含む行を、timeout 秒まで待って出す。出なければ何も出さずに成功を返し、
+# ログを読めなければ失敗を返す（$(...) で呼ぶため、呼び出し側が log_read_failed で終える）
 wait_for_line_after() {
   local message="$1"
   local after="$2"
   local deadline entry
   deadline="$(deadline_after "$3")"
   while [[ "${SECONDS}" -lt "${deadline}" ]]; do
-    entry="$(find_line_after "${message}" "${after}")"
+    entry="$(find_line_after "${message}" "${after}")" || return 1
     if [[ -n "${entry}" ]]; then
       printf '%s\n' "${entry}"
       return 0
@@ -439,7 +448,8 @@ report_palette_latency() {
   panel_id="$(panel_id_of "${detection}")"
   palette_message="${PALETTE_SHOWN}${panel_id:+ (id: ${panel_id})}"
   local palette_entry
-  palette_entry="$(wait_for_line_after "${palette_message}" "$(line_number_of "${detection}")" "${PALETTE_TIMEOUT_SECONDS}")"
+  palette_entry="$(wait_for_line_after "${palette_message}" "$(line_number_of "${detection}")" "${PALETTE_TIMEOUT_SECONDS}")" \
+    || log_read_failed
   if [[ -z "${palette_entry}" ]]; then
     warn "${PALETTE_TIMEOUT_SECONDS} 秒以内に「${palette_message}」がログに出ませんでした（PR #69 より前のビルドか、パレットが出ていません）。検知だけで判定します"
     return 0
@@ -464,7 +474,7 @@ report_selection_mode() {
     return 0
   fi
   local updated_entry
-  updated_entry="$(find_line_after "${PANEL_UPDATED}" "$(line_number_of "${detection}")")"
+  updated_entry="$(find_line_after "${PANEL_UPDATED}" "$(line_number_of "${detection}")")" || log_read_failed
   if [[ "$(line_text_of "${updated_entry}")" == *"${DIRECTORIES_ONLY_MARK}"* ]]; then
     log "選択モードはフォルダのみに推定し直されました: $(timestamp_of "${updated_entry}")"
     return 0
@@ -521,8 +531,8 @@ main() {
   # そのため、受け入れた panel detected の後の最初の panel gone がこのダイアログのもの。
   # 閉じる前に出ていたら、最前面の切り替えやキャンセルによるもので、閉じたことの確認にはならない
   local closed_at early_gone
-  closed_at="$(new_log_lines | awk 'END { print NR }')"
-  early_gone="$(find_line_after "${PANEL_GONE}" "$(line_number_of "${detected_entry}")")"
+  closed_at="$(new_log_lines | awk 'END { print NR }')" || log_read_failed
+  early_gone="$(find_line_after "${PANEL_GONE}" "$(line_number_of "${detected_entry}")")" || log_read_failed
   if [[ -n "${early_gone}" ]]; then
     fail_ng "ダイアログを閉じる前に ${PANEL_GONE} が出ました（$(timestamp_of "${early_gone}")）。最前面を切り替えずに再実行してください"
   fi
@@ -533,7 +543,7 @@ main() {
   fi
   close_dialog
   local gone_entry
-  gone_entry="$(wait_for_line_after "${PANEL_GONE}" "${closed_at}" "${GONE_TIMEOUT_SECONDS}")"
+  gone_entry="$(wait_for_line_after "${PANEL_GONE}" "${closed_at}" "${GONE_TIMEOUT_SECONDS}")" || log_read_failed
   if [[ -z "${gone_entry}" ]]; then
     fail_ng "ダイアログを閉じてから ${GONE_TIMEOUT_SECONDS} 秒以内に ${PANEL_GONE} がログに出ませんでした"
   fi
