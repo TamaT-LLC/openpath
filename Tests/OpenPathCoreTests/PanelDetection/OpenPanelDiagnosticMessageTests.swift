@@ -101,6 +101,21 @@ struct OpenPanelDiagnosticMessageTests {
         #expect(entry.logMessage.contains("<path-like>(enabled: ?)"))
     }
 
+    @Test("ファイル名らしい表題（末尾が .拡張子）は伏せ、UI の表題（Open... / 開く… / Ver. 2）は伏せない")
+    func fileLikeButtonTitlesAreRedacted() throws {
+        let entry = try Self.firstEntry(Fixtures.dialog(id: "open", [
+            Fixtures.button("秘密の書類.txt"),
+            Fixtures.button("Quarterly Report.pdf"),
+            Fixtures.button("Open..."),
+            Fixtures.button("開く…"),
+            Fixtures.button("Ver. 2"),
+        ]))
+
+        #expect(!entry.logMessage.contains("秘密"))
+        #expect(!entry.logMessage.contains("Report"))
+        #expect(entry.logMessage.contains("buttons: [<file-like>(enabled: ?), <file-like>(enabled: ?), Open...(enabled: ?), 開く…(enabled: ?), Ver. 2(enabled: ?)]"))
+    }
+
     @Test("ボタンの表題は改行を空白にし、24 文字で切り、12 個を超える分は数だけ出す")
     func buttonTitlesAreBounded() throws {
         let buttons = (1 ... 14).map { Fixtures.button("Button \($0)") }

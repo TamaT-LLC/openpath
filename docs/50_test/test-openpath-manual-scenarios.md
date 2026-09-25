@@ -161,7 +161,7 @@ S-01 の備考（パレットが出ないときの切り分け、Issue #83）: d
 | ⌘O の後も `panel scan (…, windows: N)` の N が増えず、新しい `panel check` も出ない | ダイアログが TextEdit のウィンドウ一覧に現れていない |
 | `panel watch observer failed` | AXObserver を張れていない（ポーリングで補うため、検知はできる想定） |
 
-`panel check` / `panel scan` / `panel watch` の行は、パス・ファイル名・ウィンドウタイトルを含まない（ボタンの表題とロール名だけ。"/" を含む表題は `<path-like>` に伏せる）。ほかの debug ログ（注入したパスなど）は含み得るため、共有する前に §3 の注意のとおり確かめる。
+`panel check` / `panel scan` / `panel watch` の行は、パス・ファイル名・ウィンドウタイトルを含まない（ボタンの表題とロール名だけ。"/" を含む表題は `<path-like>`、末尾が「.拡張子」の表題は `<file-like>` に伏せる）。ほかの debug ログ（注入したパスなど）は含み得るため、共有する前に §3 の注意のとおり確かめる。
 
 ## 7. パレットの操作（S-08、S-09、PAL）
 

@@ -5,7 +5,7 @@ import Foundation
 /// QA が `logLevel debug` で S-01 を再実行し、そのログだけでどの条件で弾いたかを見分けられるようにする。
 /// パス・ファイル名・ウィンドウタイトル・入力欄の文字列は出さない。出すのはロール名・AXIdentifier・ボタンの表題と、
 /// 保存パネルの語（`OpenPanelCriteria.saveFieldKeywords`）のどれに一致したかだけ。ボタンの表題も、パスらしいもの
-/// （"/" を含む）は伏せ、長いものは切る。
+/// （"/" を含む）とファイル名らしいもの（末尾が「.拡張子」）は伏せ、長いものは切る。
 extension OpenPanelDiagnostic {
     /// ボタンを並べる数の上限。超えた分は数だけ出す。
     static let maxLoggedButtons = 12
@@ -13,6 +13,8 @@ extension OpenPanelDiagnostic {
     static let maxLoggedRoles = 12
     /// 表題・ロール名などを切る長さ（文字数）。
     static let maxLoggedLabelLength = 24
+    /// ファイル名らしい表題とみなす拡張子の長さ（英数字の文字数）。
+    static let fileExtensionLengths = 1 ... 6
 
     /// 弾いた条件（`notCandidate` / `noConfirmButton` / `noFileList` / `looksLikeSavePanel` / `truncated`）と、
     /// 判定できなかったこと（`unreadable`）。開くパネルなら空。
@@ -109,7 +111,7 @@ extension OpenPanelDiagnostic {
     private static func buttonText(_ button: OpenPanelClassificationDetails.Button) -> String {
         let enabled = button.isEnabled.map(String.init) ?? "?"
         if let title = button.title, !title.isEmpty {
-            return "\(sanitized(title))\(button.isConfirm ? "*" : "")(enabled: \(enabled))"
+            return "\(sanitizedTitle(title))\(button.isConfirm ? "*" : "")(enabled: \(enabled))"
         }
         let description = if let confirmTitle = button.descriptionConfirmTitle {
             "\(sanitized(confirmTitle))*"
@@ -152,6 +154,21 @@ extension OpenPanelDiagnostic {
     private static func label(_ value: String?) -> String {
         guard let value, !value.isEmpty else { return "none" }
         return sanitized(value)
+    }
+
+    /// ボタンの表題。`sanitized(_:)` に加えて、ファイル名らしいもの（末尾が「.拡張子」）も伏せる。
+    /// 表題はアプリが決める文字列で、ファイル名を含むボタン（「"書類.txt" を開く」など）もあり得るため。
+    static func sanitizedTitle(_ title: String) -> String {
+        guard !title.contains("/") else { return "<path-like>" }
+        return looksLikeFileName(title) ? "<file-like>" : sanitized(title)
+    }
+
+    /// 末尾が「.」と英数字 1〜6 文字（拡張子）か。"Open..." や "Ver. 2" は当たらない。
+    static func looksLikeFileName(_ value: String) -> Bool {
+        guard let dot = value.lastIndex(of: "."), dot != value.startIndex else { return false }
+        let fileExtension = value[value.index(after: dot)...]
+        return fileExtensionLengths.contains(fileExtension.count)
+            && fileExtension.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
     }
 
     /// 改行などの制御文字を空白にし、パスらしいもの（"/" を含む）は伏せ、長いものは切る。

@@ -90,7 +90,13 @@ public enum OpenPanelClassifier {
                 }
             },
             where: { element in
-                details?.visit(element.node, role: element.role, depth: element.depth, isSearchStopped: findings.isSavePanel, reader: reader)
+                details?.visit(
+                    element.node,
+                    role: element.role,
+                    depth: element.depth,
+                    isSearchStopped: findings.isSavePanel,
+                    reader: reader
+                )
                 try readingDescendant { try inspect(element, reader: reader, findings: &findings, details: &details) }
                 return false
             }
