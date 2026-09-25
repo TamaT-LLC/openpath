@@ -116,6 +116,26 @@ struct OpenPanelDiagnosticMessageTests {
         #expect(entry.logMessage.contains("buttons: [<file-like>(enabled: ?), <file-like>(enabled: ?), Open...(enabled: ?), 開く…(enabled: ?), Ver. 2(enabled: ?)]"))
     }
 
+    @Test(
+        "表題の途中にあるファイル名も、表題全体を伏せる",
+        arguments: ["「書類.txt」を開く", "Open \"report.pdf\"", "report.pdf を開く", ".zshrc を開く", "memo.md、他 2 件"]
+    )
+    func fileNameInsideTitleIsRedacted(title: String) throws {
+        let entry = try Self.firstEntry(Fixtures.dialog(id: "open", [Fixtures.button(title)]))
+
+        #expect(entry.logMessage.contains("buttons: [<file-like>(enabled: ?)]"))
+    }
+
+    @Test(
+        "ファイル名でない表題は伏せない",
+        arguments: ["Open...", "開く…", "Ver. 2", "Loading...done", "Save as .txt", "新規フォルダ", "キャンセル"]
+    )
+    func nonFileTitlesAreKept(title: String) throws {
+        let entry = try Self.firstEntry(Fixtures.dialog(id: "open", [Fixtures.button(title)]))
+
+        #expect(entry.logMessage.contains("buttons: [\(title)(enabled: ?)]"))
+    }
+
     @Test("ボタンの表題は改行を空白にし、24 文字で切り、12 個を超える分は数だけ出す")
     func buttonTitlesAreBounded() throws {
         let buttons = (1 ... 14).map { Fixtures.button("Button \($0)") }

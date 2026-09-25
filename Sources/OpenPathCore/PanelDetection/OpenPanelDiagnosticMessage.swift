@@ -5,7 +5,7 @@ import Foundation
 /// QA が `logLevel debug` で S-01 を再実行し、そのログだけでどの条件で弾いたかを見分けられるようにする。
 /// パス・ファイル名・ウィンドウタイトル・入力欄の文字列は出さない。出すのはロール名・AXIdentifier・ボタンの表題と、
 /// 保存パネルの語（`OpenPanelCriteria.saveFieldKeywords`）のどれに一致したかだけ。ボタンの表題も、パスらしいもの
-/// （"/" を含む）とファイル名らしいもの（末尾が「.拡張子」）は伏せ、長いものは切る。
+/// （"/" を含む）とファイル名らしい部分を含むもの（「.拡張子」）は伏せ、長いものは切る。
 extension OpenPanelDiagnostic {
     /// ボタンを並べる数の上限。超えた分は数だけ出す。
     static let maxLoggedButtons = 12
@@ -156,19 +156,26 @@ extension OpenPanelDiagnostic {
         return sanitized(value)
     }
 
-    /// ボタンの表題。`sanitized(_:)` に加えて、ファイル名らしいもの（末尾が「.拡張子」）も伏せる。
-    /// 表題はアプリが決める文字列で、ファイル名を含むボタン（「"書類.txt" を開く」など）もあり得るため。
+    /// ボタンの表題。`sanitized(_:)` に加えて、ファイル名らしい部分を含むもの（「"書類.txt" を開く」など）は
+    /// 表題全体を伏せる。表題はアプリが決める文字列で、ファイル名を含み得るため。
     static func sanitizedTitle(_ title: String) -> String {
         guard !title.contains("/") else { return "<path-like>" }
-        return looksLikeFileName(title) ? "<file-like>" : sanitized(title)
+        return containsFileName(title) ? "<file-like>" : sanitized(title)
     }
 
-    /// 末尾が「.」と英数字 1〜6 文字（拡張子）か。"Open..." や "Ver. 2" は当たらない。
-    static func looksLikeFileName(_ value: String) -> Bool {
-        guard let dot = value.lastIndex(of: "."), dot != value.startIndex else { return false }
-        let fileExtension = value[value.index(after: dot)...]
-        return fileExtensionLengths.contains(fileExtension.count)
-            && fileExtension.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
+    /// ファイル名らしい部分を含むか。「.」と英数字 1〜6 文字（拡張子）が続き、その後が英数字でない箇所を探す。
+    /// 「.」が先頭にあるか、空白と「.」以外の文字の直後にあるものだけを数える（"Open..."・"Ver. 2"・"Save as .txt" は当たらない）。
+    static func containsFileName(_ value: String) -> Bool {
+        let characters = Array(value)
+        return characters.indices.contains { index in
+            guard characters[index] == "." else { return false }
+            if index > characters.startIndex {
+                let previous = characters[index - 1]
+                guard !previous.isWhitespace, previous != "." else { return false }
+            }
+            let fileExtension = characters[(index + 1)...].prefix { $0.isASCII && ($0.isLetter || $0.isNumber) }
+            return fileExtensionLengths.contains(fileExtension.count)
+        }
     }
 
     /// 改行などの制御文字を空白にし、パスらしいもの（"/" を含む）は伏せ、長いものは切る。
