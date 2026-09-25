@@ -83,71 +83,66 @@ struct OpenPanelDiagnosticMessageTests {
         #expect(!entry.logMessage.contains("秘密"))
     }
 
-    @Test("ウィンドウタイトル・入力欄の文字列・パスらしいボタンの表題は出さない")
+    @Test("ウィンドウタイトル・入力欄の文字列・よく使う表題でないボタンの表題は出さない")
     func privateStringsAreNotLogged() throws {
         var window = Fixtures.dialog(id: "open", [
             Fixtures.textField(description: "検索: 秘密のプロジェクト", title: "~/Projects/secret", subrole: "AXSearchField"),
             Fixtures.group([Fixtures.fileList(role: "AXOutline")]),
             Fixtures.button("/Users/someone/秘密.txt"),
-            Fixtures.button("~/Projects/secret"),
+            Fixtures.button("README"),
+            Fixtures.button("「書類.txt」を開く"),
             Fixtures.button("開く"),
         ])
         window.title = "秘密の書類.txt — /Users/someone"
         let entry = try Self.firstEntry(window)
 
-        for secret in ["/Users", "秘密", "~/Projects", "secret"] {
+        for secret in ["/Users", "秘密", "~/Projects", "secret", "README", "書類"] {
             #expect(!entry.logMessage.contains(secret), "\(secret)")
         }
-        #expect(entry.logMessage.contains("<path-like>(enabled: ?)"))
-    }
-
-    @Test("ファイル名らしい表題（末尾が .拡張子）は伏せ、UI の表題（Open... / 開く… / Ver. 2）は伏せない")
-    func fileLikeButtonTitlesAreRedacted() throws {
-        let entry = try Self.firstEntry(Fixtures.dialog(id: "open", [
-            Fixtures.button("秘密の書類.txt"),
-            Fixtures.button("Quarterly Report.pdf"),
-            Fixtures.button("Open..."),
-            Fixtures.button("開く…"),
-            Fixtures.button("Ver. 2"),
-        ]))
-
-        #expect(!entry.logMessage.contains("秘密"))
-        #expect(!entry.logMessage.contains("Report"))
-        #expect(entry.logMessage.contains("buttons: [<file-like>(enabled: ?), <file-like>(enabled: ?), Open...(enabled: ?), 開く…(enabled: ?), Ver. 2(enabled: ?)]"))
+        #expect(entry.logMessage.contains(
+            "buttons: [<other len: 21>(enabled: ?), <other len: 6>(enabled: ?), <other len: 11, contains: 開く>(enabled: ?), 開く*(enabled: ?)]"
+        ))
     }
 
     @Test(
-        "表題の途中にあるファイル名も、表題全体を伏せる",
-        arguments: ["「書類.txt」を開く", "Open \"report.pdf\"", "report.pdf を開く", ".zshrc を開く", "memo.md、他 2 件"]
+        "パネルでよく使う表題は、そのまま出す",
+        arguments: [
+            "開く", "Open", "選択", "Choose", "追加", "Add", "アップロード", "Upload",
+            "キャンセル", "Cancel", "新規フォルダ", "New Folder", "新規書類", "New Document",
+            "オプションを表示", "Show Options", "オプションを隠す", "Hide Options", "保存", "Save", "移動", "Go", "完了", "Done",
+        ]
     )
-    func fileNameInsideTitleIsRedacted(title: String) throws {
+    func knownTitlesAreLogged(title: String) throws {
         let entry = try Self.firstEntry(Fixtures.dialog(id: "open", [Fixtures.button(title)]))
+        let mark = OpenPanelCriteria.isConfirmButtonTitle(title) ? "*" : ""
 
-        #expect(entry.logMessage.contains("buttons: [<file-like>(enabled: ?)]"))
+        #expect(entry.logMessage.contains("buttons: [\(title)\(mark)(enabled: ?)]"))
     }
 
     @Test(
-        "ファイル名でない表題は伏せない",
-        arguments: ["Open...", "開く…", "Ver. 2", "Loading...done", "Save as .txt", "新規フォルダ", "キャンセル"]
+        "よく使う表題でなければ、長さと、含む確定ボタンの表題（大文字小文字は区別しない）だけを出す",
+        arguments: [
+            ("開く…", "<other len: 3, contains: 開く>"),
+            ("Open...", "<other len: 7, contains: Open>"),
+            ("open file", "<other len: 9, contains: Open>"),
+            ("  開く  ", "開く"),
+            ("Ver. 2", "<other len: 6>"),
+            ("Line one\nline two", "<other len: 17>"),
+        ]
     )
-    func nonFileTitlesAreKept(title: String) throws {
+    func otherTitlesAreClassified(title: String, expected: String) throws {
         let entry = try Self.firstEntry(Fixtures.dialog(id: "open", [Fixtures.button(title)]))
 
-        #expect(entry.logMessage.contains("buttons: [\(title)(enabled: ?)]"))
+        #expect(entry.logMessage.contains("buttons: [\(expected)"), "\(entry.logMessage)")
     }
 
-    @Test("ボタンの表題は改行を空白にし、24 文字で切り、12 個を超える分は数だけ出す")
-    func buttonTitlesAreBounded() throws {
-        let buttons = (1 ... 14).map { Fixtures.button("Button \($0)") }
-        let entry = try Self.firstEntry(Fixtures.dialog(id: "many", [
-            Fixtures.button("Line one\nline two"),
-            Fixtures.button(String(repeating: "あ", count: 30)),
-        ] + buttons))
+    @Test("ボタンは 12 個まで並べ、超える分は数だけ出す")
+    func buttonCountIsBounded() throws {
+        let buttons = (1 ... 14).map { Fixtures.button("Button \($0)") } + [Fixtures.button("キャンセル"), Fixtures.button("開く")]
+        let entry = try Self.firstEntry(Fixtures.dialog(id: "many", buttons))
 
-        #expect(entry.logMessage.contains("Line one line two(enabled: ?)"))
-        #expect(entry.logMessage.contains("\(String(repeating: "あ", count: 24))…(enabled: ?)"))
-        #expect(entry.logMessage.contains("Button 10(enabled: ?), +4 more]"))
-        #expect(!entry.logMessage.contains("Button 11"))
+        #expect(entry.logMessage.contains("<other len: 9>(enabled: ?), +4 more]"))
+        #expect(!entry.logMessage.contains("Button 1"))
     }
 
     @Test("表題の無いボタンは説明の有無だけを出し、説明が確定ボタンの表題と一致するときだけその表題を出す")

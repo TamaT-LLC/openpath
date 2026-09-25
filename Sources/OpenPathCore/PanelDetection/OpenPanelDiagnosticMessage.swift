@@ -3,9 +3,10 @@ import Foundation
 /// パネル判定の診断の debug ログの文言（Issue #83）。
 ///
 /// QA が `logLevel debug` で S-01 を再実行し、そのログだけでどの条件で弾いたかを見分けられるようにする。
-/// パス・ファイル名・ウィンドウタイトル・入力欄の文字列は出さない。出すのはロール名・AXIdentifier・ボタンの表題と、
-/// 保存パネルの語（`OpenPanelCriteria.saveFieldKeywords`）のどれに一致したかだけ。ボタンの表題も、パスらしいもの
-/// （"/" を含む）とファイル名らしい部分を含むもの（「.拡張子」）は伏せ、長いものは切る。
+/// パス・ファイル名・ウィンドウタイトル・入力欄の文字列は出さない。出すのはロール名・AXIdentifier と、
+/// 保存パネルの語（`OpenPanelCriteria.saveFieldKeywords`）のどれに一致したかだけ。ボタンの表題は、パネルでよく使う
+/// 表題（`loggedButtonTitles`）だけをそのまま出し、それ以外は長さと、含む確定ボタンの表題（定数）だけを出す。
+/// 表題はアプリが決める文字列で、ファイル名などを含み得るため（Issue #83 の CodeRabbit の指摘）。
 extension OpenPanelDiagnostic {
     /// ボタンを並べる数の上限。超えた分は数だけ出す。
     static let maxLoggedButtons = 12
@@ -13,8 +14,17 @@ extension OpenPanelDiagnostic {
     static let maxLoggedRoles = 12
     /// 表題・ロール名などを切る長さ（文字数）。
     static let maxLoggedLabelLength = 24
-    /// ファイル名らしい表題とみなす拡張子の長さ（英数字の文字数）。
-    static let fileExtensionLengths = 1 ... 6
+    /// そのまま出すボタンの表題（前後の空白を除いて完全一致）。確定ボタンの表題と、開く・保存パネルやアラートの
+    /// 決まった表題。これ以外の表題は本文を出さない。
+    static let loggedButtonTitles: Set<String> = OpenPanelCriteria.confirmButtonTitles.union([
+        "キャンセル", "Cancel", "新規フォルダ", "New Folder", "新規書類", "New Document",
+        "オプションを表示", "Show Options", "オプションを隠す", "Hide Options",
+        "保存", "Save", "移動", "Go", "完了", "Done", "OK",
+    ])
+    /// `<other …>` に添える確定ボタンの表題を探す順（長いものを先に。同じ長さなら名前の順）。
+    private static let confirmTitlesByLength = OpenPanelCriteria.confirmButtonTitles.sorted { lhs, rhs in
+        lhs.count != rhs.count ? lhs.count > rhs.count : lhs < rhs
+    }
 
     /// 弾いた条件（`notCandidate` / `noConfirmButton` / `noFileList` / `looksLikeSavePanel` / `truncated`）と、
     /// 判定できなかったこと（`unreadable`）。開くパネルなら空。
@@ -106,12 +116,13 @@ extension OpenPanelDiagnostic {
         return items.joined(separator: ", ")
     }
 
-    /// 表題のあるボタンは `開く*(enabled: false)`（* は確定ボタンのタイトル）。
+    /// 表題のあるボタンは `開く*(enabled: false)`（* は確定ボタンのタイトル）。よく使う表題でなければ
+    /// `<other len: 3, contains: 開く>(enabled: false)`（長さと、含む確定ボタンの表題だけ）。
     /// 表題の無いボタンは `-(desc: yes, enabled: true)`。説明は、確定ボタンのタイトルと一致するときだけその表題を出す。
     private static func buttonText(_ button: OpenPanelClassificationDetails.Button) -> String {
         let enabled = button.isEnabled.map(String.init) ?? "?"
         if let title = button.title, !title.isEmpty {
-            return "\(sanitizedTitle(title))\(button.isConfirm ? "*" : "")(enabled: \(enabled))"
+            return "\(titleLabel(title))\(button.isConfirm ? "*" : "")(enabled: \(enabled))"
         }
         let description = if let confirmTitle = button.descriptionConfirmTitle {
             "\(sanitized(confirmTitle))*"
@@ -156,26 +167,18 @@ extension OpenPanelDiagnostic {
         return sanitized(value)
     }
 
-    /// ボタンの表題。`sanitized(_:)` に加えて、ファイル名らしい部分を含むもの（「"書類.txt" を開く」など）は
-    /// 表題全体を伏せる。表題はアプリが決める文字列で、ファイル名を含み得るため。
-    static func sanitizedTitle(_ title: String) -> String {
-        guard !title.contains("/") else { return "<path-like>" }
-        return containsFileName(title) ? "<file-like>" : sanitized(title)
-    }
-
-    /// ファイル名らしい部分を含むか。「.」と英数字 1〜6 文字（拡張子）が続き、その後が英数字でない箇所を探す。
-    /// 「.」が先頭にあるか、空白と「.」以外の文字の直後にあるものだけを数える（"Open..."・"Ver. 2"・"Save as .txt" は当たらない）。
-    static func containsFileName(_ value: String) -> Bool {
-        let characters = Array(value)
-        return characters.indices.contains { index in
-            guard characters[index] == "." else { return false }
-            if index > characters.startIndex {
-                let previous = characters[index - 1]
-                guard !previous.isWhitespace, previous != "." else { return false }
-            }
-            let fileExtension = characters[(index + 1)...].prefix { $0.isASCII && ($0.isLetter || $0.isNumber) }
-            return fileExtensionLengths.contains(fileExtension.count)
+    /// ボタンの表題の出し方。よく使う表題はそのまま、それ以外は長さと、含む確定ボタンの表題（大文字小文字を区別しない）だけ。
+    /// 確定ボタンの表題の違い（「開く…」など）を、表題の本文を出さずに見分けられるようにする。
+    static func titleLabel(_ title: String) -> String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if loggedButtonTitles.contains(trimmed) {
+            return trimmed
         }
+        var attributes = ["len: \(trimmed.count)"]
+        if let confirmTitle = confirmTitlesByLength.first(where: { trimmed.range(of: $0, options: .caseInsensitive) != nil }) {
+            attributes.append("contains: \(confirmTitle)")
+        }
+        return "<other \(attributes.joined(separator: ", "))>"
     }
 
     /// 改行などの制御文字を空白にし、パスらしいもの（"/" を含む）は伏せ、長いものは切る。
