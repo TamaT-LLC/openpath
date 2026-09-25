@@ -81,6 +81,27 @@ struct PathInjectionFlowFocusTests {
         #expect(Array(tail) == expected)
     }
 
+    @Test("主方式で Return の直前に入力欄がフォーカスを失っていたら、Return を送らずに副方式へ回し、フォーカスを待ってから移動する")
+    func fallsBackWhenFieldLosesFocusBeforeReturn() async throws {
+        let harness = FlowHarness(sheetAppearsAt: .milliseconds(150))
+        harness.goToField.simulateTyping(Self.previousPath)
+        harness.goToFieldLocator.goButton = nil
+        harness.keyboard.onPost = { [goToField = harness.goToField, pasteboard = harness.pasteboard, clock = harness.clock] keyStroke in
+            guard keyStroke == .paste else { return }
+            goToField.simulateTyping(pasteboard.contents.plainText)
+            // 貼り付けの後、確定前の確認までの間にフォーカスが外れ、100ms 後に戻る
+            goToField.focusProvider = { clock.elapsed >= .milliseconds(350) }
+        }
+
+        try await harness.run(path: Self.path)
+
+        #expect(harness.log.keyStrokes == [.goToFolder, .selectAll, .paste, .returnKey])
+        let returnTime = try #require(harness.log.entries.first { $0.event == .key(.returnKey) }?.time)
+        #expect(returnTime == .milliseconds(350))
+        #expect(harness.log.events.contains(.lookUpGoToField))
+        #expect(harness.pasteboard.contents == .userClipboard)
+    }
+
     @Test("主方式がフォーカスを諦めた後に来たフォーカスは、副方式が拾って Return を送る")
     func directEntryPicksUpLateFocus() async throws {
         let harness = FlowHarness(sheetAppearsAt: .milliseconds(150))

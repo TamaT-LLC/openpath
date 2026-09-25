@@ -100,6 +100,13 @@ public final class GoToFieldFocusWait {
         }
     }
 
+    /// 入力欄がいまフォーカスを持っているかを、待たずに 1 回だけ確かめる。
+    /// 確定前の確認で確かめた入力欄に Return が届くことを、送る直前に確かめるために使う。
+    /// - Throws: キャンセル時は `CancellationError`。AX の失敗は投げずに `.unavailable` を返す。
+    public func currentFocus(of controls: GoToFieldControls) async throws -> GoToFieldFocus {
+        try await readFocus(of: controls.field)
+    }
+
     private func readFocus(of field: any PanelElementOperating) async throws -> GoToFieldFocus {
         do {
             return try await field.isFocused() ? .focused : .notFocused

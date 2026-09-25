@@ -8,7 +8,8 @@
 ///    来なければ（入力欄が消えた場合も）ペーストボードに触れずに `timeout(.waitPaste)` を投げる（副方式へ）
 /// 5. ペーストボードを退避してパスを書き込み（1, 2）、⌘A → ⌘V（5）
 /// 6. 100ms 待って（6）、移動先シートの入力欄の値と候補の選択が移動先になったかを確かめてから（`GoToSheetSubmitGate`、Issue #74）
-///    Return を送る（7）。入力欄の値が移動先にならなければ Return を送らず `timeout(.waitPaste)` を投げる（副方式へ）
+///    Return を送る（7）。入力欄の値が移動先にならなければ Return を送らず `timeout(.waitPaste)` を投げる（副方式へ）。
+///    送る直前にも、確かめた入力欄がまだフォーカスを持つかを確かめ、持たなければ同じく副方式へ回す
 /// 7. `hooks.didSubmitGoToSheet`（8: auto_confirm の差し込み口）
 /// 8. Return から 200ms 後にペーストボードを戻す（9）。ただし確定前の確認で、貼り付けで入力欄が別の値から移動先に変わったことを
 ///    確かめられたら、⌘V は処理済みのため Return の前に戻して待たない（Issue #74）
@@ -80,6 +81,7 @@ public final class GoToFolderPasteSequencer {
         try Task.checkCancellation()
         Self.logStep("移動先シートが出ました", on: timeline)
         let controls = try await waitForFieldFocus(on: timeline)
+        try Task.checkCancellation()
 
         // 入力欄がキーを受け取れるようになってから差し替えることで、⌘⇧G が効かない・入力欄にキーが届かない場合
         // （副方式へのフォールバック）にペーストボードへ触れずに済む
@@ -189,6 +191,7 @@ public final class GoToFolderPasteSequencer {
             restoration.perform()
             Self.logStep("貼り付けたパスが入力欄に入ったため、Return の前にペーストボードを戻しました", on: timeline)
         }
+        try await ensureFieldStillFocused(controls, on: timeline)
         try await post(.returnKey, failingAs: .waitPaste, on: timeline)
         Self.logStep("Return を送りました", on: timeline)
 
@@ -214,6 +217,20 @@ public final class GoToFolderPasteSequencer {
             throw InjectionError.timeout(step: .waitPaste)
         }
         return readiness
+    }
+
+    /// 確定前の確認は、フォーカスを待つときに見つけた入力欄を読む。待つ間に別のシートへフォーカスが移っていると、
+    /// Return は確かめた入力欄ではなくそのシートに届いてしまうため、送る直前に確かめた入力欄がまだフォーカスを持つかを確かめる。
+    /// 持たなければ（入力欄が消えた場合も）Return を送らずに `timeout(.waitPaste)` を投げ、フォーカスを待ってから確定する副方式に任せる。
+    /// 入力欄を見つけていない・フォーカスを読めない場合は、確かめられないため従来どおり送る。
+    private func ensureFieldStillFocused(_ controls: GoToFieldControls?, on timeline: ElapsedTimeline) async throws {
+        guard let fieldFocus, let controls else { return }
+        let focus = try await fieldFocus.currentFocus(of: controls)
+        guard focus == .notFocused || focus == .fieldGone else { return }
+        // シートごとパネルが閉じていれば、貼り付けの失敗ではなくパネルが消えたことを伝える
+        try await InjectionTargetCheck.ensureAvailable(targetGuard, on: timeline)
+        Log.warning("Return の前に移動先シートの入力欄がフォーカスを失ったため、Return を送らずに副方式へ切り替えます（\(focus.rawValue)）")
+        throw InjectionError.timeout(step: .waitPaste)
     }
 
     /// キーはその時点のキーウィンドウに届くため、送る直前に注入先がまだ有効かを確かめる。

@@ -40,7 +40,8 @@ struct GoToFolderPasteSequencerFocusTests {
             .init(time: .milliseconds(350), event: .didSubmitGoToSheet(autoConfirm: false)),
         ]
         #expect(harness.log.entries == expected)
-        #expect(harness.goToField.focusReadCount == 3)
+        // フォーカス待ち（150 / 200 / 250ms）と、Return の直前の確認（350ms）
+        #expect(harness.goToField.focusReadCount == 4)
         #expect(harness.pasteboard.contents == .userClipboard)
     }
 
@@ -142,6 +143,61 @@ struct GoToFolderPasteSequencerFocusTests {
 
         #expect(harness.log.keyStrokes == [.goToFolder])
         #expect(harness.pasteboard.writes.isEmpty)
+    }
+
+    @Test("フォーカスが来た直後にキャンセルされたら、ペーストボードに触れずに CancellationError を投げる")
+    func cancelledRightAfterFocusArrives() async {
+        let harness = Self.makeHarness(focusArrivesAt: nil)
+        harness.goToField.focusProvider = {
+            cancelCurrentTask()
+            return true
+        }
+
+        await #expect(throws: CancellationError.self) {
+            try await harness.run(path: Self.path)
+        }
+
+        #expect(harness.log.keyStrokes == [.goToFolder])
+        #expect(harness.pasteboard.writes.isEmpty)
+    }
+
+    @Test(
+        "確定前の確認の後、Return の直前に入力欄がフォーカスを失っていたら（別のシートに移った・シートが閉じた）、Return を送らずに timeout(waitPaste) を投げ、ペーストボードを戻す",
+        arguments: [false, true]
+    )
+    func doesNotSubmitWhenFieldLosesFocusBeforeReturn(isFieldGone: Bool) async {
+        let harness = Self.makeHarness(focusArrivesAt: .zero)
+        // ⌘V は入力欄に入るが、その後の確定前の確認までの間にフォーカスが移る（またはシートが閉じる）
+        harness.keyboard.onPost = { [goToField = harness.goToField, pasteboard = harness.pasteboard] keyStroke in
+            guard keyStroke == .paste else { return }
+            goToField.simulateTyping(pasteboard.contents.plainText)
+            goToField.focusProvider = { false }
+            if isFieldGone {
+                goToField.focusReadError = InjectionError.panelGone
+            }
+        }
+
+        await #expect(throws: InjectionError.timeout(step: .waitPaste)) {
+            try await harness.run(path: Self.path)
+        }
+
+        #expect(harness.log.keyStrokes == [.goToFolder, .selectAll, .paste])
+        #expect(harness.pasteboard.contents == .userClipboard)
+        #expect(harness.pasteboard.writes == [.transientText(Self.path), .userClipboard])
+    }
+
+    @Test("フォーカスを確かめられない（読めない）ときは、Return の直前にも確かめずに従来どおり送る")
+    func submitsWhenFocusCannotBeReadBeforeReturn() async throws {
+        let harness = Self.makeHarness(focusArrivesAt: .zero)
+        harness.keyboard.onPost = { [goToField = harness.goToField, pasteboard = harness.pasteboard] keyStroke in
+            guard keyStroke == .paste else { return }
+            goToField.simulateTyping(pasteboard.contents.plainText)
+            goToField.focusReadError = InjectionError.axError(code: Self.axCannotCompleteCode)
+        }
+
+        try await harness.run(path: Self.path)
+
+        #expect(harness.log.keyStrokes == [.goToFolder, .selectAll, .paste, .returnKey])
     }
 
     @Test("フォーカスが来たときに別のアプリへ切り替わっていたら、⌘A を送らずに targetNotFrontmost を投げ、ペーストボードを戻す")

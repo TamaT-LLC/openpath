@@ -122,7 +122,7 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
 7. 100ms 待機（ペースト反映）の後、確定前の確認（`GoToSheetSubmitGate`、PR #79）: 入力欄の値と候補リストの選択が移動先になるまで最大 250ms、50ms 間隔で待つ
    - 入力欄の値が移動先にならない（fieldMismatch）: Return を送らず、ペーストボードを戻して timeout(.waitPaste) として副方式へ回す（前回の移動先へ確定してしまうのを防ぐ）
    - 候補の選択だけが追いつかない（suggestionNotUpdated）・入力欄を読めない（unavailable）: そのまま 8. へ
-8. CGEvent: Return（シート確定 → パネルが移動）
+8. CGEvent: Return（シート確定 → パネルが移動）。送る直前に、7. で確かめた入力欄がまだ kAXFocused を持つかを 1 回確かめ、持たなければ（入力欄が消えた場合も）Return を送らずに timeout(.waitPaste) として副方式へ回す（別のシートにフォーカスが移っていると、Return がそちらに届くため。Issue #74）
 9. auto_confirm または Cmd+Enter の場合: 300ms 待機後、パネル内「開く」ボタンを AXPress（auto_confirm フック。DSN-001 §2.2 のタイトル一覧で確定ボタンを探す）
 10. Return から 200ms 後（9. のフックが 200ms を超えた場合はフック完了直後）に、ペーストボードの changeCount が 5. でパスを書き込んだ直後の値から変わっていなければ退避内容へ復元する。変わっていれば、注入中に書き込まれた新しい内容を優先し復元しない。元の内容が機密（5. の ConcealedType）だった場合は復元せず、差し替えたパスを消して空にする。ただし 7. で入力欄が 6. の前の値（移動先でない値）から移動先に変わったことを確かめられた場合は、⌘V は処理済みのため Return の前に復元し、Return の後は待たない（Issue #74）
 ```

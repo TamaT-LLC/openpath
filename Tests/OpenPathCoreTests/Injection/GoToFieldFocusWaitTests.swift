@@ -189,6 +189,27 @@ struct GoToFieldFocusWaitTests {
         #expect(harness.locator.lookupCount == 0)
     }
 
+    @Test(
+        "いまのフォーカスを 1 回だけ読む（Return の直前の確認）: 待たず、探し直さない",
+        arguments: [
+            (hasFocus: true, error: nil, expected: GoToFieldFocus.focused),
+            (hasFocus: false, error: nil, expected: .notFocused),
+            (hasFocus: false, error: InjectionError.panelGone, expected: .fieldGone),
+            (hasFocus: false, error: InjectionError.axError(code: axCannotCompleteCode), expected: .unavailable),
+        ] as [(hasFocus: Bool, error: InjectionError?, expected: GoToFieldFocus)]
+    )
+    func readsCurrentFocusOnce(state: (hasFocus: Bool, error: InjectionError?, expected: GoToFieldFocus)) async throws {
+        let harness = Harness()
+        harness.field.hasFocus = state.hasFocus
+        harness.field.focusReadError = state.error
+        let controls = GoToFieldControls(field: harness.field, goButton: nil)
+
+        #expect(try await harness.wait.currentFocus(of: controls) == state.expected)
+        #expect(harness.field.focusReadCount == 1)
+        #expect(harness.locator.lookupCount == 0)
+        #expect(harness.clock.elapsed == .zero)
+    }
+
     @Test("待っている間にキャンセルされたら CancellationError を投げる")
     func cancelledWhileWaiting() async {
         let harness = Harness()
