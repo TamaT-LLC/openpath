@@ -43,9 +43,10 @@ final class FlowHarness {
         submitCheckLocator.field = goToField
         openButtonLocator = OpenButtonLocatorFake(clock: clock, log: log)
         openButtonLocator.button = openButton
-        // ⌘V で、そのときのペーストボードの文字列が入力欄に入る（OS の貼り付けを再現する）
+        // ⌘V で、そのときのペーストボードの文字列が入力欄に入る（OS の貼り付けを再現する）。
+        // キー入力はフォーカスを持つ要素に届くため、入力欄がフォーカスを持っていなければ入らない
         keyboard.onPost = { [goToField, pasteboard] keyStroke in
-            guard keyStroke == .paste else { return }
+            guard keyStroke == .paste, goToField.isFocusedNow else { return }
             goToField.simulateTyping(pasteboard.contents.plainText)
         }
 
@@ -56,6 +57,9 @@ final class FlowHarness {
         }
         let prepareForKeyEvents: PathInjectionHooks.PrepareForKeyEvents = { log.record(.prepareForKeyEvents) }
         let normalizer = InjectionPathNormalizer(homeDirectory: Self.homeDirectory)
+        // PanelInjector と同じく、主方式と副方式で同じ待ち方を使う（主方式は探したことをログに残さない探し方で探す）
+        let primaryFieldFocus = GoToFieldFocusWait(locator: submitCheckLocator, clock: clock)
+        let secondaryFieldFocus = GoToFieldFocusWait(locator: goToFieldLocator, clock: clock)
         flow = PathInjectionFlow(
             targetGuard: targetGuard,
             primary: GoToFolderPasteSequencer(
@@ -63,6 +67,7 @@ final class FlowHarness {
                 keyboard: keyboard,
                 sheetDetector: sheetDetector,
                 targetGuard: targetGuard,
+                fieldFocus: primaryFieldFocus,
                 submitGate: GoToSheetSubmitGate(locator: submitCheckLocator, normalizer: normalizer, clock: clock),
                 hooks: PathInjectionHooks(prepareForKeyEvents: prepareForKeyEvents, didSubmitGoToSheet: didSubmit),
                 clock: clock
@@ -73,6 +78,7 @@ final class FlowHarness {
                 keyboard: keyboard,
                 prepareForKeyEvents: prepareForKeyEvents,
                 submitGate: GoToSheetSubmitGate(locator: goToFieldLocator, normalizer: normalizer, clock: clock),
+                fieldFocus: secondaryFieldFocus,
                 didSubmit: didSubmit,
                 clock: clock
             ),

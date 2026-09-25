@@ -28,6 +28,8 @@ final class InjectionEventLog {
         case press(element: String)
         /// パネル内の要素に kAXConfirmAction を送った
         case confirmField(element: String)
+        /// パネル内の要素の kAXFocused に true をセットした（キー入力の受け先にした）
+        case focusField(element: String)
     }
 
     struct Entry: Equatable {

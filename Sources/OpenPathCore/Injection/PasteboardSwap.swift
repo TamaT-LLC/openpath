@@ -94,3 +94,31 @@ public final class PasteboardSwap {
         pasteboard.items.contains { $0.types.contains(PasteboardSnapshot.concealedMarkerType) }
     }
 }
+
+/// ペーストボードの復元を 1 回だけ行い、その結果を覚えておく。
+/// 主方式は貼り付けを確かめたら Return の前に戻すため（Issue #74）、戻せなかったことを注入の最後に伝えられるようにする。
+@MainActor
+final class PasteboardRestoration {
+    private let swap: PasteboardSwap
+    /// 復元の結果。まだ戻していなければ nil。
+    private(set) var outcome: PasteboardSwap.RestoreOutcome?
+
+    init(_ swap: PasteboardSwap) {
+        self.swap = swap
+    }
+
+    var isDone: Bool {
+        outcome != nil
+    }
+
+    /// 元の内容へ戻す。2 回目以降は書き込まずに、最初の結果を返す。
+    @discardableResult
+    func perform() -> PasteboardSwap.RestoreOutcome {
+        if let outcome {
+            return outcome
+        }
+        let result = swap.restore()
+        outcome = result
+        return result
+    }
+}

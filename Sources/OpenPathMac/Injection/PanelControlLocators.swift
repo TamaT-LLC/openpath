@@ -177,6 +177,30 @@ final class AXPanelElement: PanelElementOperating {
         }
     }
 
+    /// 入力欄がシートの最初のレスポンダかを表す。シートがキーウィンドウか（アプリが前面か）は反映しない
+    /// （macOS 27 で、アプリが前面でなくても true のまま、キー入力は届かなかった。アプリの kAXFocusedUIElement も同じ）。
+    /// 前面かどうかは、キーを送る直前に注入先ガード（`InjectionTargetGuard`）が確かめる。
+    func isFocused() async throws -> Bool {
+        let element = element
+        return try await onAXQueue { () throws -> Bool in
+            do {
+                let value = try element.copyAttributeValue(kAXFocusedAttribute)
+                return AXAttributeCast.cast(value, to: Bool.self) ?? false
+            } catch let error as AXElementError {
+                // 値が無いことは、フォーカスが無いものとして扱う（要素が消えた invalidUIElement とは分ける）
+                guard error.code != .noValue else { return false }
+                throw GoToSheetAX.injectionError(for: error.code)
+            }
+        }
+    }
+
+    func focus() async throws {
+        let element = element
+        try await onAXQueue { () throws in
+            try PanelControlAX.check(AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue))
+        }
+    }
+
     private func perform(_ action: String) async throws {
         let element = element
         try await onAXQueue { () throws in
