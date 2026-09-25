@@ -8,7 +8,7 @@ upstream:
 - PROJ-TST-001
 downstream: []
 owner: TakehiroT
-updated: 2026-09-24
+updated: 2026-09-25
 ---
 
 # 手動シナリオテスト: openpath（実機確認チェックリスト）
@@ -144,6 +144,23 @@ debug ログは注入したパスなどを含む。実施が終わったら open
 | S-07 | `~/Documents/資料` を作って選ぶ。かな（`しりょう`）でも打つ | 移動できる。かなで打っても候補に出る（受け入れ基準） |  |  |
 | FLOW-06 | NFD の名前のディレクトリ（`mkdir ~/Documents/"$(printf 'データ' \| iconv -f UTF-8 -t UTF-8-MAC)"`）を選ぶ | NFC で打っても候補に出て、移動できる |  |  |
 | FLOW-07 | openpath を終了して `~/Library/Application Support/openpath/history.json` を見る | 確定したパスが保存されている |  |  |
+
+S-01 の備考（パレットが出ないときの切り分け、Issue #83）: debug ログで、ダイアログのウィンドウをどう判定したかが分かる。
+
+1. openpath を終了し、`defaults write jp.tamat.openpath logLevel debug` を実行してから起動し直す。
+2. TextEdit を前面にして ⌘O を押し、2 秒待ってからダイアログを閉じる。
+3. `grep -E 'panel (watch|scan|check|detected|gone)|open panel classified|palette shown' ~/Library/Logs/openpath/openpath.log` の、手順 2 の時刻の行を備考か Issue に貼る。
+4. 終わったら openpath を終了し、`defaults delete jp.tamat.openpath logLevel` で元に戻す。
+
+| ログ | 意味 |
+| --- | --- |
+| `panel check (… identifier: open-panel, candidate: openPanelIdentifier, … result: openPanel, …)` の後に `panel detected` | 検知できた |
+| `panel check (target: window, … subrole: AXStandardWindow, identifier: …, result: rejected: notCandidate)` | ダイアログのウィンドウを候補にしなかった。identifier の値を Issue に書く（`open-panel` 以外なら判定条件の追加が要る） |
+| `result: rejected: noConfirmButton` / `noFileList` / `looksLikeSavePanel`（`+truncated` は探索の上限で打ち切った） | 判定の条件で弾いた。同じ行の `buttons` / `lists` / `textFields` / `search` をそのまま貼る |
+| ⌘O の後も `panel scan (…, windows: N)` の N が増えず、新しい `panel check` も出ない | ダイアログが TextEdit のウィンドウ一覧に現れていない |
+| `panel watch observer failed` | AXObserver を張れていない（ポーリングで補うため、検知はできる想定） |
+
+`panel check` / `panel scan` / `panel watch` の行は、パス・ファイル名・ウィンドウタイトルを含まない（ボタンの表題とロール名だけ。"/" を含む表題は `<path-like>` に伏せる）。ほかの debug ログ（注入したパスなど）は含み得るため、共有する前に §3 の注意のとおり確かめる。
 
 ## 7. パレットの操作（S-08、S-09、PAL）
 
