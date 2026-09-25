@@ -34,6 +34,9 @@ public struct OpenPanelDiagnostic: Equatable, Sendable {
         case savePanel
         /// 確定ボタンかファイル一覧が見つからなかった（条件 2・3）。willRecheck なら、描画途中の可能性があるため後で判定し直す。
         case missingElements(hasConfirmButton: Bool, hasFileList: Bool, willRecheck: Bool)
+        /// 候補の中身を読めなかった（応答のタイムアウトなど）。判定できないため、次の走査で判定し直す。
+        /// 走査のたびに失敗しても、候補ごとに 1 回だけ記録する。
+        case unreadable
     }
 
     public let target: Target

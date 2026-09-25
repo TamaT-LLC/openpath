@@ -216,6 +216,31 @@ struct OpenPanelDiagnosticTests {
         #expect(entry.details?.unexploredAtDepthLimit == 0)
     }
 
+    @Test("候補の中身を読めなければ unreadable を候補ごとに 1 回だけ記録し、探索の結果は変えない")
+    func unreadableCandidateIsReportedOnce() throws {
+        let plain = OpenPanelLocatorHarness()
+        let diagnosing = OpenPanelLocatorHarness()
+        let node = Fixtures.nonModalPanelWindow(id: "open", Fixtures.openPanelBody(.japanese))
+        let window = plain.add(node)
+        diagnosing.add(node)
+        // リモートビューの中身を読めない（応答のタイムアウトなど）
+        plain.tree.failures[StubElement("open/0")] = .unavailable
+        diagnosing.tree.failures[StubElement("open/0")] = .unavailable
+
+        let first = diagnosing.locateDiagnosing(window)
+        let second = diagnosing.locateDiagnosing(window, at: .milliseconds(200))
+
+        #expect(first.lookup == plain.locate(window))
+        #expect(first.lookup == .undetermined(lastKnown: nil))
+        let entry = try #require(first.report.entries.first)
+        #expect(first.report.entries.count == 1)
+        #expect(entry.candidateReason == .openPanelIdentifier)
+        #expect(entry.result == .unreadable)
+        #expect(entry.rejectionReasons == ["unreadable"])
+        #expect(entry.logMessage.contains("candidate: openPanelIdentifier, attempt: 1/5, result: undetermined: unreadable)"))
+        #expect(second.report.entries.isEmpty)
+    }
+
     // MARK: - 子孫の要約
 
     @Test("子孫の要約: ボタンの表題と有効状態、一覧の role・subrole、入力欄の説明・タイトルの有無、role の数")

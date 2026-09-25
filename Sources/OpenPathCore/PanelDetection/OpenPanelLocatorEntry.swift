@@ -9,6 +9,8 @@ extension OpenPanelLocator {
         var identifier: CachedAttribute<String>?
         /// 候補でないウィンドウとして診断を記録したか。初めて見たときだけ記録する
         var isNonCandidateReported = false
+        /// 候補の中身を読めなかったことを診断に記録したか。候補ごとに 1 回だけ記録する
+        var isUnreadableReported = false
         /// パネルの候補（ダイアログ・シート・AXIdentifier が open-panel のウィンドウ）でだけ持つ
         var verdict: CachedVerdict?
         /// 開くパネルと判定した候補でだけ持つ

@@ -14,7 +14,8 @@ extension OpenPanelDiagnostic {
     /// 表題・ロール名などを切る長さ（文字数）。
     static let maxLoggedLabelLength = 24
 
-    /// 弾いた条件（`notCandidate` / `noConfirmButton` / `noFileList` / `looksLikeSavePanel` / `truncated`）。開くパネルなら空。
+    /// 弾いた条件（`notCandidate` / `noConfirmButton` / `noFileList` / `looksLikeSavePanel` / `truncated`）と、
+    /// 判定できなかったこと（`unreadable`）。開くパネルなら空。
     /// `truncated` は、確定ボタンかファイル一覧が見つからず、探索を上限で打ち切っていた場合に添える。
     public var rejectionReasons: [String] {
         switch result {
@@ -24,6 +25,8 @@ extension OpenPanelDiagnostic {
             []
         case .savePanel:
             ["looksLikeSavePanel"]
+        case .unreadable:
+            ["unreadable"]
         case .missingElements(let hasConfirmButton, let hasFileList, _):
             (hasConfirmButton ? [] : ["noConfirmButton"])
                 + (hasFileList ? [] : ["noFileList"])
@@ -75,6 +78,8 @@ extension OpenPanelDiagnostic {
             "openPanel"
         case .missingElements(_, _, let willRecheck):
             "\(willRecheck ? "pending" : "rejected"): \(rejectionReasons.joined(separator: "+"))"
+        case .unreadable:
+            "undetermined: unreadable"
         }
     }
 

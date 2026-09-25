@@ -197,12 +197,18 @@ public struct OpenPanelLocator<Node: Hashable> {
             break
         }
 
-        let classification = try OpenPanelClassifier.classification(
-            of: candidate,
-            reader: reader,
-            collectingDetails: pendingDiagnostics != nil
-        )
         let attempt = (completedRechecks ?? 0) + 1
+        let classification: OpenPanelClassification<Node>
+        do {
+            classification = try OpenPanelClassifier.classification(
+                of: candidate,
+                reader: reader,
+                collectingDetails: pendingDiagnostics != nil
+            )
+        } catch PanelTreeReadError.unavailable {
+            recordUnreadable(candidate, diagnosticTarget, attempt: attempt)
+            throw PanelTreeReadError.unavailable
+        }
         switch classification.verdict {
         case .openPanel:
             recordClassification(of: candidate, diagnosticTarget, classification, result: .openPanel, attempt: attempt, reader: reader)

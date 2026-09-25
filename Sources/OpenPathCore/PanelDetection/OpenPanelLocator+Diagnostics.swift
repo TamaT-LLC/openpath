@@ -60,6 +60,25 @@ extension OpenPanelLocator {
         ))
     }
 
+    /// 候補の中身を読めなかったことを、診断中なら候補ごとに 1 回だけ記録する。
+    /// 読み取りの失敗は覚えず走査のたびに判定し直すため、毎回記録すると 200ms ごとに同じ行が並ぶ。
+    mutating func recordUnreadable(_ candidate: Node, _ diagnosticTarget: CandidateDiagnosticTarget, attempt: Int) {
+        guard pendingDiagnostics != nil, entries[candidate]?.isUnreadableReported == false else { return }
+        entries[candidate]?.isUnreadableReported = true
+        let entry = entries[candidate]
+        pendingDiagnostics?.entries.append(OpenPanelDiagnostic(
+            target: diagnosticTarget.target,
+            role: entry?.role?.value,
+            subrole: entry?.subrole?.value,
+            identifier: entry?.identifier?.value,
+            candidateReason: diagnosticTarget.reason,
+            result: .unreadable,
+            attempt: attempt,
+            maxAttempts: configuration.maxRechecks + 1,
+            details: nil
+        ))
+    }
+
     /// 診断のためだけの読み取り。回数を数え、失敗は nil にする。
     mutating func diagnosticRead(_ body: () throws -> String?) -> String? {
         pendingDiagnostics?.diagnosticReadCount += 1
