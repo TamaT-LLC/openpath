@@ -36,9 +36,34 @@ public enum OpenPanelCriteria {
     /// `PanelContext.ID` の接頭辞。後ろに連番を付ける。
     static let panelIDPrefix = "open-panel-"
 
-    /// パネルの候補（条件 1）か。ダイアログのウィンドウとシートが対象。
-    public static func isPanelCandidate(role: String?, subrole: String?) -> Bool {
-        role == sheetRole || subrole == dialogSubrole || subrole == sheetRole
+    /// NSOpenPanel のウィンドウの `AXIdentifier`（NSSavePanel は `save-panel`）。
+    /// 非モーダルのパネル（NSDocumentController の「ファイル > 開く…」、`begin(completionHandler:)`）は、ウィンドウの
+    /// サブロールが AXDialog ではなく AXStandardWindow になるため、この識別子で候補にする（Issue #83。macOS 27 の
+    /// 自プロセスのパネルで、非モーダル・モーダルとも `open-panel` であることを確認）。ローカライズされない。
+    public static let openPanelIdentifier = "open-panel"
+
+    /// パネルの候補（条件 1）か。ダイアログのウィンドウ、シート、AXIdentifier が `open-panel` のウィンドウが対象。
+    public static func isPanelCandidate(role: String?, subrole: String?, identifier: String? = nil) -> Bool {
+        candidateReason(role: role, subrole: subrole, identifier: identifier) != nil
+    }
+
+    /// パネルの候補（条件 1）にする理由。候補でなければ nil。
+    public static func candidateReason(role: String?, subrole: String?, identifier: String?) -> PanelCandidateReason? {
+        if role == sheetRole || subrole == sheetRole {
+            return .sheet
+        }
+        if subrole == dialogSubrole {
+            return .dialog
+        }
+        if identifier == openPanelIdentifier {
+            return .openPanelIdentifier
+        }
+        return nil
+    }
+
+    /// 保存パネルのファイル名欄を示す語のうち、label に含まれる最初のもの（条件 4）。含まれなければ nil。
+    public static func saveFieldKeyword(in label: String) -> String? {
+        saveFieldKeywords.first { label.contains($0) }
     }
 
     /// ファイル一覧か（条件 3）。サブロールは、ロールが `collectionListRole`（AXList）のときだけ見る。
@@ -53,6 +78,6 @@ public enum OpenPanelCriteria {
 
     /// 保存パネルのファイル名欄の説明・タイトルか（条件 4）。
     public static func isSaveFieldLabel(_ label: String) -> Bool {
-        saveFieldKeywords.contains { label.contains($0) }
+        saveFieldKeyword(in: label) != nil
     }
 }

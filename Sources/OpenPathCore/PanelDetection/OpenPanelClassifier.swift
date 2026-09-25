@@ -31,6 +31,8 @@ public struct OpenPanelClassification<Node> {
     /// パネルにはサイドバー（AXOutline）もファイル一覧のロールで現れる。サイドバーは中身の一覧より前（幅優先の順で先）に
     /// 現れるため、最後に見つけたものを中身の一覧とみなす。見つからなければ nil。
     public let fileList: FileListElement<Node>?
+    /// 子孫の要約（debug ログ用、Issue #83）。`collectingDetails` を true にしたときだけ集める。
+    public let details: OpenPanelClassificationDetails?
 }
 
 extension OpenPanelClassification: Equatable where Node: Equatable {}
@@ -56,15 +58,20 @@ public enum OpenPanelClassifier {
     }
 
     /// `classify(_:reader:search:)` と同じ判定を行い、見つけたファイル一覧の要素も返す。AX の読み取りは増えない。
+    ///
+    /// - Parameter collectingDetails: true なら、debug ログ用に子孫の要約（`OpenPanelClassificationDetails`）も集める。
+    ///   要約のための読み取り（ボタンの有効状態など）は判定の読み取りとは別に数え、失敗しても判定の結果を変えない。
     public static func classification<Reader: PanelTreeReader>(
         of candidate: Reader.Node,
         reader: Reader,
-        search: BoundedBreadthFirstSearch = BoundedBreadthFirstSearch()
+        search: BoundedBreadthFirstSearch = BoundedBreadthFirstSearch(),
+        collectingDetails: Bool = false
     ) throws -> OpenPanelClassification<Reader.Node> {
         var findings = Findings<Reader.Node>()
+        var details = collectingDetails ? ClassificationDetailsRecorder(search: search) : nil
         // ロールの読み取り（AX の往復）を 1 要素 1 回にするため、子を列挙するときにロールも読んで組にする
         _ = try search.descendants(
-            of: ClassifiedNode(node: candidate, role: nil, isCandidate: true),
+            of: ClassifiedNode(node: candidate, role: nil, depth: 0, isCandidate: true),
             children: { element in
                 guard !findings.isSavePanel else { return [] }
                 if let role = element.role, OpenPanelCriteria.prunedRoles.contains(role) {
@@ -74,15 +81,21 @@ public enum OpenPanelClassifier {
                     ? reader.children(of: element.node)
                     : readingDescendant { try reader.children(of: element.node) }
                 return try children.map { child in
-                    ClassifiedNode(node: child, role: try readingDescendant { try reader.role(of: child) }, isCandidate: false)
+                    ClassifiedNode(
+                        node: child,
+                        role: try readingDescendant { try reader.role(of: child) },
+                        depth: element.depth + 1,
+                        isCandidate: false
+                    )
                 }
             },
             where: { element in
-                try readingDescendant { try inspect(element, reader: reader, findings: &findings) }
+                details?.visit(element.node, role: element.role, depth: element.depth, isSearchStopped: findings.isSavePanel, reader: reader)
+                try readingDescendant { try inspect(element, reader: reader, findings: &findings, details: &details) }
                 return false
             }
         )
-        return OpenPanelClassification(verdict: verdict(from: findings), fileList: findings.fileList)
+        return OpenPanelClassification(verdict: verdict(from: findings), fileList: findings.fileList, details: details?.summary)
     }
 
     private static func verdict<Node>(from findings: Findings<Node>) -> OpenPanelVerdict {
@@ -96,25 +109,37 @@ public enum OpenPanelClassifier {
         return .openPanel
     }
 
-    /// 要素を 1 つ調べ、見つかった条件を findings に記録する。
+    /// 要素を 1 つ調べ、見つかった条件を findings に記録する。details があれば、要約も記録する。
     private static func inspect<Reader: PanelTreeReader>(
         _ element: ClassifiedNode<Reader.Node>,
         reader: Reader,
-        findings: inout Findings<Reader.Node>
+        findings: inout Findings<Reader.Node>,
+        details: inout ClassificationDetailsRecorder?
     ) throws {
         guard !findings.isSavePanel, let role = element.role else { return }
         switch role {
         case OpenPanelCriteria.buttonRole:
-            guard !findings.hasConfirmButton, let title = try reader.title(of: element.node) else { return }
-            findings.hasConfirmButton = OpenPanelCriteria.isConfirmButtonTitle(title)
+            // 確定ボタンが見つかった後は、タイトルを読まない（要約を集めるときは、要約の側で読む）
+            var readTitle: String??
+            if !findings.hasConfirmButton {
+                let title = try reader.title(of: element.node)
+                readTitle = .some(title)
+                if let title {
+                    findings.hasConfirmButton = OpenPanelCriteria.isConfirmButtonTitle(title)
+                }
+            }
+            details?.recordButton(element.node, readTitle: readTitle, reader: reader)
         case OpenPanelCriteria.textFieldRole:
-            findings.isSavePanel = try isSaveField(element.node, reader: reader)
+            let labels = try saveFieldLabels(of: element.node, reader: reader)
+            findings.isSavePanel = labels.isSaveField
+            details?.recordTextField(element.node, labels: labels, reader: reader)
         default:
             // サブロールで見分けるのはアイコン表示（AXList）だけなので、それ以外の要素ではサブロールを読まない
             let subrole = role == OpenPanelCriteria.collectionListRole ? try reader.subrole(of: element.node) : nil
             if OpenPanelCriteria.isFileList(role: role, subrole: subrole) {
                 findings.fileList = FileListElement(node: element.node, role: role)
             }
+            details?.recordListIfNeeded(element.node, role: role, readSubrole: subrole, reader: reader)
         }
     }
 
@@ -128,12 +153,12 @@ public enum OpenPanelClassifier {
     }
 
     /// 説明を先に読み、保存パネルの語を含んでいればタイトルは読まない。
-    private static func isSaveField<Reader: PanelTreeReader>(_ node: Reader.Node, reader: Reader) throws -> Bool {
-        if let description = try reader.accessibilityDescription(of: node), OpenPanelCriteria.isSaveFieldLabel(description) {
-            return true
+    private static func saveFieldLabels<Reader: PanelTreeReader>(of node: Reader.Node, reader: Reader) throws -> SaveFieldLabels {
+        let description = try reader.accessibilityDescription(of: node)
+        if let description, OpenPanelCriteria.isSaveFieldLabel(description) {
+            return SaveFieldLabels(description: description, title: nil, isTitleRead: false)
         }
-        guard let title = try reader.title(of: node) else { return false }
-        return OpenPanelCriteria.isSaveFieldLabel(title)
+        return SaveFieldLabels(description: description, title: try reader.title(of: node), isTitleRead: true)
     }
 }
 
@@ -149,6 +174,21 @@ private struct Findings<Node> {
 private struct ClassifiedNode<Node> {
     let node: Node
     let role: String?
+    /// 候補からの深さ（候補が 0、直下が 1）
+    let depth: Int
     /// 判定する候補そのものか（子孫でないか）
     let isCandidate: Bool
+}
+
+/// 入力欄の説明とタイトル（条件 4）。
+struct SaveFieldLabels {
+    let description: String?
+    /// 読んでいなければ nil（isTitleRead が false）
+    let title: String?
+    /// 説明が保存パネルの語を含んでいた場合は、タイトルを読まない
+    let isTitleRead: Bool
+
+    var isSaveField: Bool {
+        description.map(OpenPanelCriteria.isSaveFieldLabel) == true || title.map(OpenPanelCriteria.isSaveFieldLabel) == true
+    }
 }

@@ -15,15 +15,32 @@ enum PanelScanner {
         let selectionEstimates: [PanelContext.ID: PanelSelectionEstimate]
     }
 
-    static func scan(processID: pid_t, detector: any PanelDetecting) -> Scan {
+    /// - Parameters:
+    ///   - bundleIdentifier: 観測中のアプリの bundle id。debug ログ（走査の要約）に出すだけに使う。
+    ///   - diagnostics: 走査の要約の debug ログ。ウィンドウの判定より先に出す。
+    static func scan(
+        processID: pid_t,
+        bundleIdentifier: String?,
+        detector: any PanelDetecting,
+        diagnostics: PanelScanDiagnostics
+    ) -> Scan {
         let application = AXUIElementCreateApplication(processID)
         // パネルの有無は、ウィンドウ一覧を実際に取得できたときだけ判断する。取得エラー（noValue / attributeUnsupported /
         // cannotComplete など）で追跡中のパネルを消えたとみなさないため、すべて unavailable にする。
         // アプリの終了（invalidUIElement）は NSWorkspace の終了通知で扱う
-        guard let windowsValue = try? application.copyAttributeValue(kAXWindowsAttribute),
-              let windows = AXAttributeCast.cast(windowsValue, to: [AXUIElement].self) else {
+        let windowsValue: CFTypeRef
+        do {
+            windowsValue = try application.copyAttributeValue(kAXWindowsAttribute)
+        } catch {
+            let code = (error as? AXElementError)?.code.rawValue
+            diagnostics.record(processID: processID, bundleIdentifier: bundleIdentifier, windowCount: nil, axErrorCode: code)
             return Scan(outcome: .unavailable, panelElements: [], selectionEstimates: [:])
         }
+        guard let windows = AXAttributeCast.cast(windowsValue, to: [AXUIElement].self) else {
+            diagnostics.record(processID: processID, bundleIdentifier: bundleIdentifier, windowCount: nil, axErrorCode: nil)
+            return Scan(outcome: .unavailable, panelElements: [], selectionEstimates: [:])
+        }
+        diagnostics.record(processID: processID, bundleIdentifier: bundleIdentifier, windowCount: windows.count, axErrorCode: nil)
         let panels = windows.compactMap(detector.detectPanel(in:))
         let converter = ScreenCoordinateConverter.forCurrentDisplays()
         let contexts = panels.map { panel in
@@ -33,5 +50,25 @@ enum PanelScanner {
             estimates[panel.context.id] = panel.selectionEstimate
         }
         return Scan(outcome: .found(contexts), panelElements: panels.map(\.element), selectionEstimates: estimates)
+    }
+}
+
+/// 走査の要約（どのアプリのウィンドウを何枚見たか）の debug ログ（Issue #83）。
+/// 200ms ごとのポーリングで同じ行が並ばないよう、直前に出したものと変わったときだけ出す。
+///
+/// `@unchecked Sendable` の根拠: 可変状態（`log`）は、走査と同じく axQueue でだけ触る。
+final class PanelScanDiagnostics: @unchecked Sendable {
+    private var log = PanelScanSummaryLog()
+
+    func record(processID: pid_t, bundleIdentifier: String?, windowCount: Int?, axErrorCode: Int32?) {
+        guard Log.isDebugEnabled else { return }
+        let summary = PanelScanSummary(
+            processID: processID,
+            bundleIdentifier: bundleIdentifier,
+            windowCount: windowCount,
+            axErrorCode: axErrorCode
+        )
+        guard let message = log.messageIfChanged(summary) else { return }
+        Log.debug(message)
     }
 }

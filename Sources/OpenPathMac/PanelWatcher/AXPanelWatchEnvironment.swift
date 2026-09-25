@@ -1,3 +1,4 @@
+import AppKit
 import ApplicationServices
 import Dispatch
 
@@ -12,6 +13,11 @@ final class AXPanelWatchEnvironment: PanelWatchEnvironment {
         kAXUIElementDestroyedNotification,
         kAXFocusedWindowChangedNotification,
     ]
+    /// debug ログに出す通知。要素の破棄はアプリの操作のたびに大量に届くため出さない（Issue #83）
+    private static let loggedNotifications: Set<String> = [
+        kAXWindowCreatedNotification,
+        kAXFocusedWindowChangedNotification,
+    ]
 
     /// 観測中のアプリから AX 通知が届いたときに、そのプロセス ID を渡して呼ぶ。
     var onNotification: ((pid_t) -> Void)?
@@ -24,6 +30,10 @@ final class AXPanelWatchEnvironment: PanelWatchEnvironment {
     private var attachGeneration = 0
     /// 直前の走査で見つけたパネルの選択モードの推定結果（パネルの ID ごと）
     private var selectionEstimates: [PanelContext.ID: PanelSelectionEstimate] = [:]
+    /// 張り付けたアプリのプロセス ID と bundle id。debug ログ（走査の要約など）に出すために持つ
+    private var attachedApplication: (processID: Int32, bundleIdentifier: String?)?
+    /// 走査の要約の debug ログ。axQueue で使う
+    private let scanDiagnostics = PanelScanDiagnostics()
 
     init(detector: any PanelDetecting) {
         self.detector = detector
@@ -43,7 +53,13 @@ final class AXPanelWatchEnvironment: PanelWatchEnvironment {
         let generation = attachGeneration
         let notifications = Self.observedNotifications
         let detector = detector
+        let bundleIdentifier = NSRunningApplication(processIdentifier: processID)?.bundleIdentifier
+        attachedApplication = (processID, bundleIdentifier)
+        Log.debug(PanelWatchLogMessage.attached(processID: processID, bundleIdentifier: bundleIdentifier))
         let handler: AXApplicationObserver.Handler = { [weak self] notification, element in
+            if Self.loggedNotifications.contains(notification) {
+                Log.debug(PanelWatchLogMessage.notificationReceived(processID: processID, notification: notification))
+            }
             if notification == kAXUIElementDestroyedNotification {
                 // 判定のキャッシュを捨てる。この後の走査より先に axQueue で処理されるよう、走査の依頼より前に積む
                 let destroyed = DestroyedElement(element: element)
@@ -73,7 +89,13 @@ final class AXPanelWatchEnvironment: PanelWatchEnvironment {
             case .success(let observer):
                 observer.schedule()
                 self.observer = observer
-            case .failure:
+            case .failure(let error):
+                Log.debug(PanelWatchLogMessage.observationFailed(
+                    processID: processID,
+                    bundleIdentifier: bundleIdentifier,
+                    axErrorCode: error.code.rawValue,
+                    step: error.target
+                ))
                 // 観測は外さず、PanelShown 中もポーリングを続けてもらう（通知の代わりにパネルの消滅を検知する）
                 self.onObservationFailure?(processID)
             }
@@ -82,6 +104,7 @@ final class AXPanelWatchEnvironment: PanelWatchEnvironment {
 
     func detach() {
         attachGeneration += 1
+        attachedApplication = nil
         guard let observer else { return }
         self.observer = nil
         // 先に main でソースを外し、コールバックが届かなくなってから axQueue で登録解除と参照の解放を行う
@@ -95,8 +118,15 @@ final class AXPanelWatchEnvironment: PanelWatchEnvironment {
         let detector = detector
         // 張り替え中なら、別のアプリの observer にパネルの要素を登録しない
         let observer = observer.flatMap { $0.processID == processID ? $0 : nil }
+        let bundleIdentifier = attachedApplication.flatMap { $0.processID == processID ? $0.bundleIdentifier : nil }
+        let scanDiagnostics = scanDiagnostics
         let (outcome, estimates) = await onAXQueue {
-            let scan = PanelScanner.scan(processID: processID, detector: detector)
+            let scan = PanelScanner.scan(
+                processID: processID,
+                bundleIdentifier: bundleIdentifier,
+                detector: detector,
+                diagnostics: scanDiagnostics
+            )
             for element in scan.panelElements {
                 observer?.observeDestruction(of: element)
             }

@@ -6,7 +6,9 @@ import CoreGraphics
 /// 返す `PanelContext.frame` は AX の座標系（左上原点）のまま。NSScreen の座標系への変換は OpenPathMac の PanelScanner で行う。
 ///
 /// ## パネルの候補
-/// - ウィンドウ自身: ダイアログ（`runModal` のパネル）か、ウィンドウ一覧に現れたシート
+/// - ウィンドウ自身: ダイアログ（`runModal` のパネル）か、ウィンドウ一覧に現れたシートか、AXIdentifier が `open-panel` の
+///   ウィンドウ（非モーダルのパネル。NSDocumentController の「ファイル > 開く…」など、サブロールは AXStandardWindow。Issue #83）。
+///   AXIdentifier は、ロール・サブロールで候補にならないウィンドウでだけ、ウィンドウごとに 1 度読む
 /// - ウィンドウの子のシート: `beginSheetModal` のパネルやサンドボックスアプリのパネル（別プロセスで描画され、ホストの
 ///   ウィンドウの子の AXSheet として見える）。開くパネルと判定しなかった候補の子のシートも、2 段まで探す
 ///
@@ -25,6 +27,11 @@ import CoreGraphics
 /// - AX の読み取りに失敗した判定は覚えない。そのウィンドウで直前に見つけたパネルを引き継ぎ、一時的な失敗で消えたとみなさない
 /// - 覚えておく要素の数は `capacity` までとし、最後に使ってから長いものから忘れる。
 ///   ただしパネルの判定と、ウィンドウで直前に見つけたパネルは後回しにする（1 回の走査で容量を超えても ID を保つため）
+///
+/// ## 診断（debug ログ、Issue #83）
+/// `locate(in:reader:now:diagnostics:)` は、新しく分かったこと（候補でないウィンドウを初めて見た、候補を判定した）を
+/// `OpenPanelDiagnostic` として返す。キャッシュが効いている間は返さない。診断のための追加の読み取りは数えて返し、
+/// 失敗しても探索の結果を変えない。
 public struct OpenPanelLocator<Node: Hashable> {
     public let configuration: OpenPanelCacheConfiguration
 
@@ -33,10 +40,13 @@ public struct OpenPanelLocator<Node: Hashable> {
         entries.count
     }
 
-    private var entries: [Node: Entry] = [:]
+    /// 要素ごとに覚えておくこと。診断の記録（OpenPanelLocator+Diagnostics.swift）からも使うため internal にしている
+    var entries: [Node: Entry] = [:]
     /// locate の呼び出しごとに進める。要素を最後に使った時点の記録に使う
     private var tick: UInt64 = 0
     private var nextPanelNumber = 1
+    /// 診断を集めている locate の呼び出しの間だけ non-nil。診断の記録（OpenPanelLocator+Diagnostics.swift）が書き足す
+    var pendingDiagnostics: OpenPanelDiagnosticReport?
 
     public init(configuration: OpenPanelCacheConfiguration = OpenPanelCacheConfiguration()) {
         self.configuration = configuration
@@ -71,6 +81,24 @@ public struct OpenPanelLocator<Node: Hashable> {
         }
     }
 
+    /// `locate(in:reader:now:)` と同じく探し、debug ログ用の診断を diagnostics に足す。
+    /// 返す結果・キャッシュ・ID は `locate(in:reader:now:)` と同じ（診断のための読み取りが増えるだけ）。
+    public mutating func locate<Reader: PanelTreeReader>(
+        in window: Node,
+        reader: Reader,
+        now: ContinuousClock.Instant,
+        diagnostics: inout OpenPanelDiagnosticReport
+    ) -> OpenPanelLookup<Node> where Reader.Node == Node {
+        pendingDiagnostics = OpenPanelDiagnosticReport()
+        defer { pendingDiagnostics = nil }
+        let lookup = locate(in: window, reader: reader, now: now)
+        if let collected = pendingDiagnostics {
+            diagnostics.entries += collected.entries
+            diagnostics.diagnosticReadCount += collected.diagnosticReadCount
+        }
+        return lookup
+    }
+
     /// 要素が破棄された（`kAXUIElementDestroyedNotification`）。覚えている判定結果を捨てる。
     public mutating func forget(_ element: Node) {
         guard let removed = entries.removeValue(forKey: element) else { return }
@@ -91,8 +119,8 @@ public struct OpenPanelLocator<Node: Hashable> {
         now: ContinuousClock.Instant
     ) throws -> LocatedOpenPanel<Node>? where Reader.Node == Node {
         // シート（depth 1 以上）は呼び出し側でロールを確かめてある
-        let isCandidate = try depth > 0 ? true : isPanelCandidate(element, reader: reader)
-        if isCandidate, let panel = try openPanel(element, reader: reader, now: now) {
+        let reason = try depth > 0 ? .sheet : candidateReason(of: element, reader: reader)
+        if let reason, let panel = try openPanel(element, depth: depth, reason: reason, reader: reader, now: now) {
             return panel
         }
         guard depth < OpenPanelCriteria.maxSheetNestingDepth else { return nil }
@@ -111,12 +139,23 @@ public struct OpenPanelLocator<Node: Hashable> {
     }
 
     /// candidate が開くパネルなら、ID・選択モード・矩形を付けて返す。
+    /// - Parameters:
+    ///   - depth: 0 はトップレベルのウィンドウ、1 以上はシート（診断に使う）。
+    ///   - reason: 候補にした理由（診断に使う）。
     private mutating func openPanel<Reader: PanelTreeReader>(
         _ candidate: Node,
+        depth: Int,
+        reason: PanelCandidateReason,
         reader: Reader,
         now: ContinuousClock.Instant
     ) throws -> LocatedOpenPanel<Node>? where Reader.Node == Node {
-        guard let (id, isNewlyClassified) = try openPanelID(of: candidate, reader: reader, now: now) else { return nil }
+        let target: OpenPanelDiagnostic.Target = depth == 0 ? .window : .sheet(nesting: depth)
+        guard let (id, isNewlyClassified) = try openPanelID(
+            of: candidate,
+            diagnosticTarget: CandidateDiagnosticTarget(target: target, reason: reason),
+            reader: reader,
+            now: now
+        ) else { return nil }
         let selectionModeState = entries[candidate]?.selectionMode
         let selectionEstimate = selectionModeState?.estimate ?? .notSampled
         let selectionMode = selectionEstimate.mode
@@ -139,6 +178,7 @@ public struct OpenPanelLocator<Node: Hashable> {
     /// 開くパネルと判定したときに選択モードを推定し、推定し直す予定があれば時刻を見て推定し直す。
     private mutating func openPanelID<Reader: PanelTreeReader>(
         of candidate: Node,
+        diagnosticTarget: CandidateDiagnosticTarget,
         reader: Reader,
         now: ContinuousClock.Instant
     ) throws -> (PanelContext.ID, isNewlyClassified: Bool)? where Reader.Node == Node {
@@ -157,9 +197,15 @@ public struct OpenPanelLocator<Node: Hashable> {
             break
         }
 
-        let classification = try OpenPanelClassifier.classification(of: candidate, reader: reader)
+        let classification = try OpenPanelClassifier.classification(
+            of: candidate,
+            reader: reader,
+            collectingDetails: pendingDiagnostics != nil
+        )
+        let attempt = (completedRechecks ?? 0) + 1
         switch classification.verdict {
         case .openPanel:
+            recordClassification(of: candidate, diagnosticTarget, classification, result: .openPanel, attempt: attempt, reader: reader)
             let id = makePanelID()
             entries[candidate]?.verdict = .openPanel(id)
             entries[candidate]?.selectionMode = SelectionModeState(
@@ -170,9 +216,16 @@ public struct OpenPanelLocator<Node: Hashable> {
             )
             return (id, true)
         case .savePanel:
+            recordClassification(of: candidate, diagnosticTarget, classification, result: .savePanel, attempt: attempt, reader: reader)
             entries[candidate]?.verdict = .rejected
-        case .missingElements:
+        case .missingElements(let hasConfirmButton, let hasFileList):
             let verdict = verdictAfterMissingElements(completedRechecks: completedRechecks ?? 0, now: now)
+            let result = OpenPanelDiagnostic.Result.missingElements(
+                hasConfirmButton: hasConfirmButton,
+                hasFileList: hasFileList,
+                willRecheck: verdict.isAwaitingRecheck
+            )
+            recordClassification(of: candidate, diagnosticTarget, classification, result: result, attempt: attempt, reader: reader)
             entries[candidate]?.verdict = verdict
         }
         return nil
@@ -191,17 +244,39 @@ public struct OpenPanelLocator<Node: Hashable> {
 
     // MARK: - ロール
 
-    private mutating func isPanelCandidate<Reader: PanelTreeReader>(
-        _ window: Node,
+    /// トップレベルのウィンドウを候補（条件 1）にする理由。候補でなければ nil。
+    /// AXIdentifier は、ロール・サブロールで候補にならないときだけ読む（診断中は、ログに出すため候補でも読む）。
+    private mutating func candidateReason<Reader: PanelTreeReader>(
+        of window: Node,
         reader: Reader
-    ) throws -> Bool where Reader.Node == Node {
+    ) throws -> PanelCandidateReason? where Reader.Node == Node {
         let role = try role(of: window, reader: reader)
-        if let cached = entries[window]?.subrole {
-            return OpenPanelCriteria.isPanelCandidate(role: role, subrole: cached.value)
+        let subrole = try cachedAttribute(\.subrole, of: window) { try reader.subrole(of: window) }
+        let identifier: String?
+        if OpenPanelCriteria.candidateReason(role: role, subrole: subrole, identifier: nil) == nil {
+            identifier = try cachedAttribute(\.identifier, of: window) { try reader.identifier(of: window) }
+        } else {
+            identifier = diagnosticIdentifier(of: window, reader: reader)
         }
-        let subrole = try reader.subrole(of: window)
-        entries[window]?.subrole = CachedAttribute(value: subrole)
-        return OpenPanelCriteria.isPanelCandidate(role: role, subrole: subrole)
+        let reason = OpenPanelCriteria.candidateReason(role: role, subrole: subrole, identifier: identifier)
+        if reason == nil {
+            recordNonCandidate(window, role: role, subrole: subrole, identifier: identifier)
+        }
+        return reason
+    }
+
+    /// 要素ごとに変わらない属性を 1 度だけ読む。
+    private mutating func cachedAttribute(
+        _ keyPath: WritableKeyPath<Entry, CachedAttribute<String>?>,
+        of element: Node,
+        read: () throws -> String?
+    ) throws -> String? {
+        if let cached = entries[element]?[keyPath: keyPath] {
+            return cached.value
+        }
+        let value = try read()
+        entries[element]?[keyPath: keyPath] = CachedAttribute(value: value)
+        return value
     }
 
     private mutating func role<Reader: PanelTreeReader>(
@@ -249,46 +324,4 @@ public struct OpenPanelLocator<Node: Hashable> {
             forget(victim.key)
         }
     }
-}
-
-extension OpenPanelLocator {
-    /// 要素ごとに覚えておくこと。
-    private struct Entry {
-        var role: CachedAttribute<String>?
-        /// トップレベルのウィンドウでだけ読む
-        var subrole: CachedAttribute<String>?
-        /// パネルの候補（ダイアログ・シート）でだけ持つ
-        var verdict: CachedVerdict?
-        /// 開くパネルと判定した候補でだけ持つ
-        var selectionMode: SelectionModeState<Node>?
-        /// トップレベルのウィンドウで最後に見つけたパネル。読み取りに失敗したときに引き継ぐ
-        var lastPanel: LocatedOpenPanel<Node>?
-        var lastUsedTick: UInt64
-
-        /// パネルの ID（開くパネルの判定）か、ウィンドウで直前に見つけたパネルを持つか。容量を超えても後回しに忘れる。
-        var holdsPanel: Bool {
-            if case .openPanel = verdict {
-                return true
-            }
-            return lastPanel != nil
-        }
-
-        init(lastUsedTick: UInt64) {
-            self.lastUsedTick = lastUsedTick
-        }
-    }
-}
-
-/// 読み取った属性。属性を持たない（nil）ことも覚えておくために包む。
-private struct CachedAttribute<Value> {
-    let value: Value?
-}
-
-/// パネルの候補の判定結果。
-private enum CachedVerdict {
-    case openPanel(PanelContext.ID)
-    /// 開くパネルではないと確定した（保存パネル、または判定し直しても要素が欠けていた）
-    case rejected
-    /// 要素が欠けていた。notBefore 以降に判定し直す
-    case awaitingRecheck(completedRechecks: Int, notBefore: ContinuousClock.Instant)
 }
