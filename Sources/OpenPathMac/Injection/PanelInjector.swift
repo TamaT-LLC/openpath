@@ -9,6 +9,7 @@ import OpenPathCore
 /// ここでは NSPasteboard / CGEvent / AX / NSWorkspace のアダプタを組み立てて渡すだけにする。
 /// - パスの正規化（DSN-001 §4）
 /// - 主方式（⌘⇧G + ペースト、§3.1）と、シートが出ない・貼り付けられない場合の副方式（AX 直接セット、§3.2）
+/// - キー入力（⌘A / ⌘V / Return）の前の、移動先シートの入力欄のフォーカスの待ち合わせ（`GoToFieldFocusWait`、Issue #74）
 /// - 確定（Return・「移動」）の前の、移動先シートの入力欄と候補の選択の確認（`GoToSheetSubmitGate`、Issue #74）
 /// - auto_confirm / Cmd+Enter の「開く」の押下（§3.1 ステップ 8）
 /// - キー操作・AX 操作の直前ごとの注入先の確認（別のアプリへの誤送出の防止）
@@ -40,6 +41,7 @@ public final class PanelInjector: PathInjecting {
         let keyboard = KeyboardEventPoster()
         let goToFieldLocator = GoToFieldLocator(targetWindow: targetWindow)
         let submitGate = GoToSheetSubmitGate(locator: goToFieldLocator, clock: clock)
+        let fieldFocus = GoToFieldFocusWait(locator: goToFieldLocator, clock: clock)
         let autoConfirm = OpenButtonAutoConfirm(
             locator: OpenButtonLocator(targetWindow: targetWindow),
             targetGuard: targetGuard,
@@ -52,6 +54,7 @@ public final class PanelInjector: PathInjecting {
                 keyboard: keyboard,
                 sheetDetector: GoToSheetDetector(frontmostProcessID: targetProcessID),
                 targetGuard: targetGuard,
+                fieldFocus: fieldFocus,
                 submitGate: submitGate,
                 hooks: PathInjectionHooks(prepareForKeyEvents: prepareForKeyEvents, didSubmitGoToSheet: autoConfirm.hook),
                 clock: clock
@@ -62,6 +65,7 @@ public final class PanelInjector: PathInjecting {
                 keyboard: keyboard,
                 prepareForKeyEvents: prepareForKeyEvents,
                 submitGate: submitGate,
+                fieldFocus: fieldFocus,
                 didSubmit: autoConfirm.hook,
                 clock: clock
             ),

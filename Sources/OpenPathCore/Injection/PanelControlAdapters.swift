@@ -16,6 +16,11 @@ public protocol PanelElementOperating {
     func hasDisappeared() async -> Bool
     /// kAXValue の文字列（入力欄に入っている値）。値が無い・文字列でなければ nil。
     func value() async throws -> String?
+    /// kAXFocused（要素がキー入力の受け先か）。値が無ければ false。
+    /// - Throws: 要素が消えていれば `.panelGone`、読めなければ（属性が無い等）`.axError`。
+    func isFocused() async throws -> Bool
+    /// kAXFocused に true をセットし、要素をキー入力の受け先にする。
+    func focus() async throws
 }
 
 /// 移動先シートの候補リスト（macOS 13 以降の移動先シートが入力欄の下に出す、移動先の候補）。

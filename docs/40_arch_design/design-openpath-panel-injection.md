@@ -118,13 +118,19 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
 4. 最大 600ms、50ms 間隔（50, 100, …, 550ms）で「移動先シート」の出現を基準比で判定
    - 判定: 2. の基準より AXSheet 数またはパス入力欄数が増えた
    - パネル自体がシートとして表示される場合（サンドボックスアプリ等、⌘⇧G 前から AXSheet がある場合）も、基準からの増分で見るため誤検知しない
-5. シート出現を確認できたら、NSPasteboard.general の全 items を退避（types ごとに Data で保持。いずれかの item が org.nspasteboard.ConcealedType を持つ場合はデータを読み出さず退避もしない）→ path を org.nspasteboard.TransientType 付きで setString(_:forType: .string)
-6. CGEvent: Cmd+A → Cmd+V（フィールドの既存値を置換）
-7. 100ms 待機（ペースト反映）
-8. CGEvent: Return（シート確定 → パネルが移動）
+   - 出現を確認したら、移動先シートの入力欄（§3.2 の 1. と同じ探し方）が kAXFocused を持つまで、入力欄を探す時間を含めて最大 250ms、50ms 間隔で待つ（Issue #74）。来なければ、または待つ間に入力欄が消えたら、ペーストボードに触れずに timeout(.waitPaste) として副方式へ回す。入力欄が見つからない・フォーカスを読めなければ待たずに進む
+5. 4. を終えたら（フォーカスを確かめられない場合も）、NSPasteboard.general の全 items を退避（types ごとに Data で保持。いずれかの item が org.nspasteboard.ConcealedType を持つ場合はデータを読み出さず退避もしない）→ path を org.nspasteboard.TransientType 付きで setString(_:forType: .string)
+6. CGEvent: Cmd+A → Cmd+V（フィールドの既存値を置換）。送る前に入力欄の値を読んでおく（10. の判定に使う）
+7. 100ms 待機（ペースト反映）の後、確定前の確認（`GoToSheetSubmitGate`、PR #79）: 入力欄の値と候補リストの選択が移動先になるまで最大 250ms、50ms 間隔で待つ
+   - 入力欄の値が移動先にならない（fieldMismatch）: Return を送らず、ペーストボードを戻して timeout(.waitPaste) として副方式へ回す（前回の移動先へ確定してしまうのを防ぐ）
+   - 候補の選択だけが追いつかない（suggestionNotUpdated）・入力欄を読めない（unavailable）: そのまま 8. へ
+8. CGEvent: Return（シート確定 → パネルが移動）。送る直前に、7. で確かめた入力欄がまだ kAXFocused を持つかを 1 回確かめ、持たなければ（入力欄が消えた場合も）Return を送らずに timeout(.waitPaste) として副方式へ回す（別のシートにフォーカスが移っていると、Return がそちらに届くため。Issue #74）
 9. auto_confirm または Cmd+Enter の場合: 300ms 待機後、パネル内「開く」ボタンを AXPress（auto_confirm フック。DSN-001 §2.2 のタイトル一覧で確定ボタンを探す）
-10. Return から 200ms 後（9. のフックが 200ms を超えた場合はフック完了直後）に、ペーストボードの changeCount が 5. でパスを書き込んだ直後の値から変わっていなければ退避内容へ復元する。変わっていれば、注入中に書き込まれた新しい内容を優先し復元しない。元の内容が機密（5. の ConcealedType）だった場合は復元せず、差し替えたパスを消して空にする
+10. Return から 200ms 後（9. のフックが 200ms を超えた場合はフック完了直後）に、ペーストボードの changeCount が 5. でパスを書き込んだ直後の値から変わっていなければ退避内容へ復元する。変わっていれば、注入中に書き込まれた新しい内容を優先し復元しない。元の内容が機密（5. の ConcealedType）だった場合は復元せず、差し替えたパスを消して空にする。ただし 7. で入力欄が 6. の前の値（移動先でない値）から移動先に変わったことを確かめられた場合は、⌘V は処理済みのため Return の前に復元し、Return の後は待たない（Issue #74）
 ```
+
+- **入力欄のフォーカスを待ってから ⌘A / ⌘V を送る**（Issue #74）。macOS 26.6.2 の QA で、移動先シートの検知の 1ms 後に送った ⌘A / ⌘V が入力欄に届かず、確定前の確認（fieldMismatch）で毎回副方式に回っていた（注入に約 940ms）。入力欄がシートの最初のレスポンダになる前に送ったキーは入力欄に届かない。フォーカスが来ないときに AX で与えることはしない（シートがキーウィンドウでなければキー入力は届かないため）。kAXFocused はシートがキーウィンドウか（アプリが前面か）を反映しない（macOS 27 で確認）ため、前面かどうかは従来どおり注入先ガードがキー送出の直前に確かめる。
+- **貼り付けを確かめたら Return の前にペーストボードを戻す**（Issue #74）。7. で入力欄が別の値から移動先に変わったなら ⌘V は処理済みで、Return 後の 200ms 待ちは不要になる。最初から移動先が入っていた（前回と同じ移動先）場合や、入力欄を読めない場合は ⌘V が処理されたか分からないため、従来どおり Return の 200ms 後に戻す。Return の前に戻せなかった場合も Return は送り、最後に `pasteboardRestoreFailed` を返す。
 
 - **機密の内容（`org.nspasteboard.ConcealedType`）は注入後に復元しない**（オーナー判断）。パスワードマネージャーは一定時間後に自分が置いた内容を消すが、openpath が書き戻すと changeCount が進んで「ユーザーが別の内容をコピーした」とみなされ、自動消去が働かなくなるため。空にするのは意図どおりなので `pasteboardRestoreFailed` にはしない（空にする書き込みが失敗しても、利用者の内容は失われていないため失敗にしない）。パスを書き込めなかった場合（`timeout(.waitPaste)`）も書き戻さない。機密の内容は型の一覧だけで判定し、データを読み出して複製を持つこともしない。退避した通常の内容も、復元を済ませた時点で手放す。
 - 機密かの判定と退避はペーストボードを別々に読むため、その間に機密の内容へ書き換わると、機密の内容を退避して書き戻してしまい得る。判定の直前の changeCount を記録し、判定の直後と退避の直後に変わっていたら、何も書き込まずに `timeout(.waitPaste)` として副方式（ペーストボードを使わない AX 直接セット）へ回す。
@@ -143,14 +149,16 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
 主方式が `timeout(.waitSheet)` または `timeout(.waitPaste)` になった場合に、⌘⇧G で出たはずの移動先 UI を別の手掛かりで探し直す（`GoToFieldSearch`）。「⌘⇧G がまったく効かない」場合は救えないが、「移動先 UI は出たが主方式の基準比較で拾えなかった」場合（600ms より後に出た、AXSheet ではない要素として出た等）を救うためのもの（PR #54）。
 
 ```
-1. 注入開始時に記録したウィンドウ（とそのシート）を走査し、次の順で入力欄を選ぶ
-   a. 「移動」/「Go」ボタンと同じシートにある AXTextField / AXComboBox（旧来の移動先シート）
-   b. placeholder がパスを示す入力欄（主方式と同じ語）
+1. 注入開始時に記録したウィンドウ（とそのシート）を走査し、次の順で入力欄を選ぶ（同じシートの候補リスト AXTable も組にする）
+   a. AXIdentifier が PathTextField の入力欄（macOS 13 以降の移動先シート。placeholder も「移動」ボタンも無い、PR #79）
+   b. 「移動」/「Go」ボタンと同じシートにある AXTextField / AXComboBox（旧来の移動先シート）
+   c. placeholder がパスを示す入力欄（主方式と同じ語）
    （検索フィールドは対象外。起点が通常のウィンドウなら、シートの外の要素は対象外）
 2. 入力欄が見つからなければ、主方式のエラー（timeout(.waitSheet) または timeout(.waitPaste)）をそのまま返す
 3. AXUIElementSetAttributeValue(field, kAXValueAttribute, path as CFString)
-4. シート内 AXButton(title: "移動" / "Go") を AXPress。無ければ field に kAXConfirmAction
-5. 以降は主方式のステップ 9〜10 と同じ（副方式はペーストボードを使わないため、timeout(.waitPaste) 経由のフォールバックでも退避・復元は発生しない）
+4. 確定前の確認（主方式の 7. と同じ）。入力欄の値が移動先にならなければ確定せず timeout(.waitPaste)（「パスの貼り付けに失敗」）を返す
+5. シート内 AXButton(title: "移動" / "Go") を AXPress。無ければ、パレットにキーを手放させ、入力欄が kAXFocused を持つまで最大 250ms 待ってから Return を送る（Issue #74）。来なければ kAXFocused に true をセットし、入力欄が持ったことを確かめてから送る（持たなければ 50ms 後に 1 回確かめ直す）。与えても持たない場合と、待つ間に入力欄が消えた場合は、Return がパネルの「開く」など別の要素に届かないよう、送らずに timeout(.waitPaste) を返す。フォーカスを読めない場合は、確かめられないため従来どおり送る。Return を送れなければ field に kAXConfirmAction（macOS 27 の入力欄は kAXConfirmAction に成功を返すが移動しないため、PR #79）
+6. 以降は主方式のステップ 9〜10 と同じ（副方式はペーストボードを使わないため、timeout(.waitPaste) 経由のフォールバックでも退避・復元は発生しない）
 ```
 
 - `timeout(.waitPaste)`（シートは出たがペーストボードの書き込み・キー送出に失敗）でもフォールバックする。Return を送る前の失敗なのでパネルはまだ移動しておらず、ペーストボードもキー操作も使わない AX 直接セットで救えるため（PR #54）。

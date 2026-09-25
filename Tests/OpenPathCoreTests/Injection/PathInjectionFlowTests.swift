@@ -36,19 +36,20 @@ struct PathInjectionFlowTests {
         #expect(harness.elementOperations.isEmpty)
     }
 
-    @Test("auto_confirm なら Return の 300ms 後に「開く」を押し、その直後にペーストボードを戻す")
+    @Test("auto_confirm なら Return の 300ms 後に「開く」を押す。貼り付けを確かめたペーストボードは Return の前に戻す")
     func primaryWithAutoConfirmTimeline() async throws {
         let harness = FlowHarness(sheetAppearsAt: .milliseconds(150))
 
         try await harness.run(path: Self.rawPath, autoConfirm: true)
 
-        let tail = harness.log.entries.drop { $0.event != .key(.returnKey) }
+        let tail = harness.log.entries.drop { $0.event != .key(.paste) }
         let expected: [InjectionEventLog.Entry] = [
+            .init(time: .milliseconds(150), event: .key(.paste)),
+            .init(time: .milliseconds(250), event: .pasteboardWrite(.userClipboard)),
             .init(time: .milliseconds(250), event: .key(.returnKey)),
             .init(time: .milliseconds(250), event: .didSubmitGoToSheet(autoConfirm: true)),
             .init(time: .milliseconds(550), event: .lookUpOpenButton),
             .init(time: .milliseconds(550), event: .press(element: "open")),
-            .init(time: .milliseconds(550), event: .pasteboardWrite(.userClipboard)),
         ]
         #expect(Array(tail) == expected)
     }

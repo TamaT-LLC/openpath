@@ -30,6 +30,11 @@ public enum GoToSheetReadiness: String, Equatable, Sendable {
     case fieldMismatch
     /// 移動先シートを AX で読めない（入力欄が見つからない・値を読めない）。確かめられない。
     case unavailable
+
+    /// 入力欄の値が移動先であることを確かめられたか（候補の選択は問わない）。
+    public var confirmsFieldValue: Bool {
+        self == .ready || self == .suggestionNotUpdated
+    }
 }
 
 /// 確定前の確認の待ち時間。
@@ -95,7 +100,9 @@ public final class GoToSheetSubmitGate {
     public func waitUntilReady(path: String, controls knownControls: GoToFieldControls? = nil) async throws -> GoToSheetReadiness {
         try Task.checkCancellation()
         let timeline = ElapsedTimeline(clock: clock)
-        guard let controls = try await resolveControls(knownControls, on: timeline) else {
+        guard let controls = try await GoToFieldLookup.resolve(
+            knownControls, with: locator, within: timing.lookupLimit, on: timeline, context: "確定前の確認"
+        ) else {
             Log.debug("確定前の確認: 移動先シートの入力欄が見つからないため確かめません")
             return .unavailable
         }
@@ -112,19 +119,15 @@ public final class GoToSheetSubmitGate {
         }
     }
 
-    private func resolveControls(_ knownControls: GoToFieldControls?, on timeline: ElapsedTimeline) async throws -> GoToFieldControls? {
-        if let knownControls {
-            return knownControls
-        }
+    /// 入力欄の値がいま path か（確定前の確認と同じく表記を揃えて比べる）。貼り付けの前に読み、貼り付けが効いたことの確認に使う。
+    /// - Parameter controls: 見つけ済みの入力欄。nil なら探さずに nil を返す。
+    /// - Returns: 値が無ければ false。入力欄を見つけていない・値を読めなければ nil（分からない）。
+    public func fieldMatches(path: String, controls: GoToFieldControls?) async -> Bool? {
+        guard let controls else { return nil }
         do {
-            return try await withScanCutoff(at: timeline.elapsed + timing.lookupLimit, on: timeline) { cutoff in
-                try await locator.locateGoToField(cutoff: cutoff)
-            }
+            let value = try await controls.field.value()
+            return value.map(normalizer.normalize) == normalizer.normalize(path)
         } catch {
-            if error is CancellationError || Task.isCancelled {
-                throw CancellationError()
-            }
-            Log.debug("確定前の確認: 移動先シートを探せませんでした（\(type(of: error))）")
             return nil
         }
     }

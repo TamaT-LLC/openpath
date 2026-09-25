@@ -211,6 +211,42 @@ struct GoToSheetSubmitGateTests {
         #expect(harness.locator.lookupCount == 0)
     }
 
+    @Test(
+        "入力欄の値がいま移動先か（貼り付けの前の確認）: 表記を揃えて比べ、値が無ければ false",
+        arguments: [
+            ("/Users/me/Library", true),
+            ("~/Library/", true),
+            ("/Users/me/Desktop", false),
+            (nil, false),
+        ] as [(String?, Bool)]
+    )
+    func fieldMatchesPath(value: String?, expected: Bool) async {
+        let harness = Harness()
+        harness.field.valueProvider = { value }
+        let controls = GoToFieldControls(field: harness.field, goButton: nil)
+
+        #expect(await harness.gate.fieldMatches(path: Self.path, controls: controls) == expected)
+    }
+
+    @Test("入力欄の値を読めない・入力欄を見つけていなければ、移動先かは分からない（nil）")
+    func fieldMatchIsUnknownWithoutReadableField() async {
+        let harness = Harness()
+        harness.field.valueReadError = InjectionError.axError(code: -25_204)
+        let controls = GoToFieldControls(field: harness.field, goButton: nil)
+
+        #expect(await harness.gate.fieldMatches(path: Self.path, controls: controls) == nil)
+        #expect(await harness.gate.fieldMatches(path: Self.path, controls: nil) == nil)
+        #expect(harness.locator.lookupCount == 0)
+    }
+
+    @Test("入力欄の値が移動先であることを確かめられた判定（ready・suggestionNotUpdated）")
+    func confirmsFieldValue() {
+        #expect(GoToSheetReadiness.ready.confirmsFieldValue)
+        #expect(GoToSheetReadiness.suggestionNotUpdated.confirmsFieldValue)
+        #expect(!GoToSheetReadiness.fieldMismatch.confirmsFieldValue)
+        #expect(!GoToSheetReadiness.unavailable.confirmsFieldValue)
+    }
+
     @Test("待っている間にキャンセルされたら CancellationError を投げる")
     func cancelledWhileWaiting() async {
         let harness = Harness()
