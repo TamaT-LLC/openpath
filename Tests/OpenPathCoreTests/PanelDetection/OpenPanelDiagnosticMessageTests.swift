@@ -153,20 +153,42 @@ struct OpenPanelDiagnosticMessageTests {
         ))
     }
 
-    @Test("role・subrole は AX の定数（AX で始まる英数字）だけそのまま出し、それ以外は長さだけを出す")
+    @Test("role・subrole は AX の既知の定数だけそのまま出し、それ以外（AX で始まるものも）は長さだけを出す")
     func customRolesAreClassified() throws {
         let entry = try Self.firstEntry(Fixtures.dialog(id: "open", [
             StubNode(role: "MyPrivateRole"),
             StubNode(role: "AXList", subrole: "AX秘密"),
+            StubNode(role: "AXList", subrole: "AXSecretProject123"),
+            StubNode(role: "AXList", subrole: "AXCollectionList"),
             Fixtures.textField(description: "検索", subrole: "SecretField"),
+            Fixtures.textField(description: "検索", subrole: "AXSearchField"),
         ]))
 
-        #expect(!entry.logMessage.contains("MyPrivateRole"))
-        #expect(!entry.logMessage.contains("秘密"))
-        #expect(!entry.logMessage.contains("SecretField"))
-        #expect(entry.logMessage.contains("lists: [AXList(<custom len: 4>)]"))
-        #expect(entry.logMessage.contains("textFields: [<custom len: 11>(desc: yes, title: no)]"))
+        for secret in ["MyPrivateRole", "秘密", "SecretProject", "SecretField"] {
+            #expect(!entry.logMessage.contains(secret), "\(secret)")
+        }
+        #expect(entry.logMessage.contains(
+            "lists: [AXList(<custom len: 4>), AXList(<custom len: 18>), AXList(AXCollectionList)*]"
+        ))
+        #expect(entry.logMessage.contains(
+            "textFields: [<custom len: 11>(desc: yes, title: no), AXSearchField(desc: yes, title: no)]"
+        ))
         #expect(entry.logMessage.contains("<custom len: 13>×1"))
+    }
+
+    @Test(
+        "パネルとウィンドウでよく見る role・subrole はそのまま出す",
+        arguments: [
+            "AXWindow", "AXStandardWindow", "AXDialog", "AXFloatingWindow", "AXSystemDialog", "AXSheet", "AXGroup",
+            "AXScrollArea", "AXSplitGroup", "AXBrowser", "AXOutline", "AXTable", "AXList", "AXCollectionList",
+            "AXSectionList", "AXButton", "AXPopUpButton", "AXMenuButton", "AXCheckBox", "AXTextField", "AXSearchField",
+            "AXStaticText", "AXImage", "AXRow", "AXWebArea", "AXUnknown",
+        ]
+    )
+    func knownRolesAreLogged(role: String) throws {
+        let entry = try Self.firstEntry(StubNode(id: "window", role: "AXWindow", subrole: role))
+
+        #expect(entry.logMessage.contains("subrole: \(role),"))
     }
 
     @Test("ボタンは 12 個まで並べ、超える分は数だけ出す")

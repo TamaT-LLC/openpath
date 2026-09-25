@@ -5,7 +5,7 @@ import Foundation
 /// QA が `logLevel debug` で S-01 を再実行し、そのログだけでどの条件で弾いたかを見分けられるようにする。
 /// パス・ファイル名・ウィンドウタイトル・入力欄の文字列は出さない。アプリが決める文字列は、決まった値だけをそのまま出し、
 /// それ以外は長さなどの分類だけを出す（ファイル名などを含み得るため。Issue #83 の CodeRabbit の指摘）。
-/// - role・subrole: AX の定数（`AX` で始まる英数字）だけ。それ以外は `<custom len: N>`
+/// - role・subrole: SDK が定めた AX の定数（`KnownAXRoles`）だけ。それ以外は `<custom len: N>`
 /// - AXIdentifier: `loggedIdentifiers`（`open-panel` / `save-panel`）だけ。それ以外は `<other len: N>`（`panel` を含めば添える）
 /// - ボタンの表題: パネルでよく使う表題（`loggedButtonTitles`）だけ。それ以外は長さと、含む確定ボタンの表題（定数）
 /// - 入力欄: 説明・タイトルの有無と、保存パネルの語（`OpenPanelCriteria.saveFieldKeywords`）のどれに一致したか
@@ -183,11 +183,11 @@ extension OpenPanelDiagnostic {
         return "<other \(attributes.joined(separator: ", "))>"
     }
 
-    /// role・subrole。AX の定数（`AX` で始まる ASCII の英数字）だけそのまま出し、それ以外は長さだけを出す。
+    /// role・subrole。SDK が定めた AX の定数（`KnownAXRoles`）だけそのまま出し、それ以外は長さだけを出す。
+    /// 「AX で始まる」などの形では見分けない（アプリは `AXSecretProject123` のような値も設定できるため）。
     static func roleLabel(_ value: String?) -> String {
         guard let value, !value.isEmpty else { return "none" }
-        let isAXConstant = value.hasPrefix("AX") && value.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
-        return isAXConstant ? value : "<custom len: \(value.count)>"
+        return KnownAXRoles.all.contains(value) ? value : "<custom len: \(value.count)>"
     }
 
     /// AXIdentifier。NSOpenPanel / NSSavePanel の識別子だけそのまま出し、それ以外は長さと、`panel` を含むかだけを出す。
