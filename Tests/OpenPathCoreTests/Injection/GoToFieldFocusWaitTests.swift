@@ -210,6 +210,60 @@ struct GoToFieldFocusWaitTests {
         #expect(harness.clock.elapsed == .zero)
     }
 
+    @Test("AX でフォーカスを与えて入力欄が持てば、待たずに focused を返す")
+    func requestFocusSucceeds() async throws {
+        let harness = Harness()
+        harness.field.hasFocus = false
+        let controls = GoToFieldControls(field: harness.field, goButton: nil)
+
+        #expect(try await harness.wait.requestFocus(of: controls) == .focused)
+        #expect(harness.log.events == [.focusField(element: "path")])
+        #expect(harness.clock.elapsed == .zero)
+    }
+
+    @Test("与えた直後にまだ持っていなければ、間隔 1 回分（50ms）待って確かめ直す")
+    func requestFocusWaitsOneInterval() async throws {
+        let harness = Harness()
+        harness.field.acceptsFocusRequest = false
+        harness.focusArrives(at: .milliseconds(30))
+        let controls = GoToFieldControls(field: harness.field, goButton: nil)
+
+        #expect(try await harness.wait.requestFocus(of: controls) == .focused)
+        #expect(harness.clock.elapsed == .milliseconds(50))
+        #expect(harness.field.focusReadCount == 2)
+    }
+
+    @Test("与えても持たなければ（与えるのに失敗した場合も）、50ms 後に notFocused を返す")
+    func requestFocusFails() async throws {
+        let harness = Harness()
+        harness.field.hasFocus = false
+        harness.field.focusRequestError = InjectionError.axError(code: Self.axCannotCompleteCode)
+        let controls = GoToFieldControls(field: harness.field, goButton: nil)
+
+        #expect(try await harness.wait.requestFocus(of: controls) == .notFocused)
+        #expect(harness.clock.elapsed == .milliseconds(50))
+    }
+
+    @Test("与えるのに失敗しても、入力欄がフォーカスを持っていれば focused を返す")
+    func requestFocusErrorButFocused() async throws {
+        let harness = Harness()
+        harness.field.focusRequestError = InjectionError.axError(code: Self.axCannotCompleteCode)
+        let controls = GoToFieldControls(field: harness.field, goButton: nil)
+
+        #expect(try await harness.wait.requestFocus(of: controls) == .focused)
+    }
+
+    @Test("与えた後にフォーカスを読めなければ unavailable、入力欄が消えていれば fieldGone を返す")
+    func requestFocusUnreadable() async throws {
+        let harness = Harness()
+        let controls = GoToFieldControls(field: harness.field, goButton: nil)
+        harness.field.focusReadError = InjectionError.axError(code: Self.axCannotCompleteCode)
+        #expect(try await harness.wait.requestFocus(of: controls) == .unavailable)
+
+        harness.field.focusReadError = InjectionError.panelGone
+        #expect(try await harness.wait.requestFocus(of: controls) == .fieldGone)
+    }
+
     @Test("待っている間にキャンセルされたら CancellationError を投げる")
     func cancelledWhileWaiting() async {
         let harness = Harness()

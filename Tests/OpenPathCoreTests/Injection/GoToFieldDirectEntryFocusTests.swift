@@ -107,16 +107,57 @@ struct GoToFieldDirectEntryFocusTests {
         ])
     }
 
-    @Test("AX でフォーカスを与えられなくても、従来どおり Return は送る")
-    func sendsReturnEvenIfFocusRequestFails() async throws {
+    @Test(
+        "AX でフォーカスを与えても入力欄が持たなければ（与えるのに失敗した場合も）、Return が別の要素（パネルの「開く」等）に届かないよう送らずに timeout(waitPaste) を投げる",
+        arguments: [false, true]
+    )
+    func doesNotSendReturnWhenFocusCannotBeGiven(requestFails: Bool) async {
         let harness = Harness()
         harness.focusArrives(at: nil)
+        harness.field.acceptsFocusRequest = false
+        if requestFails {
+            harness.field.focusRequestError = InjectionError.axError(code: Self.axCannotCompleteCode)
+        }
+
+        await #expect(throws: InjectionError.timeout(step: .waitPaste)) {
+            try await harness.run()
+        }
+
+        #expect(harness.log.events.contains(.focusField(element: "path")))
+        #expect(harness.log.keyStrokes.isEmpty)
+        #expect(!harness.log.events.contains(.didSubmitGoToSheet(autoConfirm: false)))
+        // フォーカス待ち（250ms）と、与えた後の確かめ直し（50ms）
+        #expect(harness.clock.elapsed == .milliseconds(300))
+    }
+
+    @Test("与えるのに失敗しても、その間にフォーカスが来ていれば Return を送る")
+    func sendsReturnWhenFocusArrivesDespiteRequestFailure() async throws {
+        let harness = Harness()
+        harness.field.acceptsFocusRequest = false
+        harness.focusArrives(at: .milliseconds(280))
         harness.field.focusRequestError = InjectionError.axError(code: Self.axCannotCompleteCode)
 
         try await harness.run()
 
+        #expect(harness.returnTime == .milliseconds(300))
+    }
+
+    @Test("与えた後にフォーカスを読めなければ、確かめられないため従来どおり Return を送る")
+    func sendsReturnWhenFocusBecomesUnreadableAfterRequest() async throws {
+        let harness = Harness()
+        harness.field.acceptsFocusRequest = false
+        harness.field.focusRequestError = InjectionError.axError(code: Self.axCannotCompleteCode)
+        harness.field.focusProvider = { [clock = harness.clock, field = harness.field] in
+            // フォーカス待ちの最後の確認（250ms）の後から、フォーカスを読めなくなる
+            if clock.elapsed >= .milliseconds(250) {
+                field.focusReadError = InjectionError.axError(code: Self.axCannotCompleteCode)
+            }
+            return false
+        }
+
+        try await harness.run()
+
         #expect(harness.log.keyStrokes == [.returnKey])
-        #expect(harness.log.events.last == .didSubmitGoToSheet(autoConfirm: false))
     }
 
     @Test("フォーカスを与える前の確認で注入先が無効なら、フォーカスも Return も送らずに投げる")

@@ -107,6 +107,26 @@ public final class GoToFieldFocusWait {
         try await readFocus(of: controls.field)
     }
 
+    /// AX で入力欄にフォーカスを与え（kAXFocused に true をセット）、持ったかを確かめる。
+    /// 与えた直後にまだ持っていなければ、間隔 1 回分だけ待って確かめ直す。与えるのに失敗しても、持っていれば `.focused`。
+    /// - Throws: キャンセル時は `CancellationError`。AX の失敗は投げずに判定で返す。
+    public func requestFocus(of controls: GoToFieldControls) async throws -> GoToFieldFocus {
+        let timeline = ElapsedTimeline(clock: clock)
+        do {
+            try await controls.field.focus()
+        } catch {
+            try Task.checkCancellation()
+            Log.debug("入力欄のフォーカス: AX で与えられませんでした（\(error)）")
+        }
+        var focus = try await readFocus(of: controls.field)
+        if focus == .notFocused {
+            try await timeline.sleep(untilElapsed: timing.pollInterval)
+            focus = try await readFocus(of: controls.field)
+        }
+        Log.debug("入力欄のフォーカス: AX で与えた後 \(focus.rawValue)（\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
+        return focus
+    }
+
     private func readFocus(of field: any PanelElementOperating) async throws -> GoToFieldFocus {
         do {
             return try await field.isFocused() ? .focused : .notFocused

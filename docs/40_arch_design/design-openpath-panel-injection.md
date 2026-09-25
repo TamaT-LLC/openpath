@@ -155,7 +155,7 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
 2. 入力欄が見つからなければ、主方式のエラー（timeout(.waitSheet) または timeout(.waitPaste)）をそのまま返す
 3. AXUIElementSetAttributeValue(field, kAXValueAttribute, path as CFString)
 4. 確定前の確認（主方式の 7. と同じ）。入力欄の値が移動先にならなければ確定せず timeout(.waitPaste)（「パスの貼り付けに失敗」）を返す
-5. シート内 AXButton(title: "移動" / "Go") を AXPress。無ければ、パレットにキーを手放させ、入力欄が kAXFocused を持つまで最大 250ms 待ってから Return を送る（Issue #74）。来なければ kAXFocused に true をセットしてから送る（セットできなくても送る）。待つ間に入力欄が消えたら、Return がパネルの「開く」に届かないよう送らずに timeout(.waitPaste) を返す。Return を送れなければ field に kAXConfirmAction（macOS 27 の入力欄は kAXConfirmAction に成功を返すが移動しないため、PR #79）
+5. シート内 AXButton(title: "移動" / "Go") を AXPress。無ければ、パレットにキーを手放させ、入力欄が kAXFocused を持つまで最大 250ms 待ってから Return を送る（Issue #74）。来なければ kAXFocused に true をセットし、入力欄が持ったことを確かめてから送る（持たなければ 50ms 後に 1 回確かめ直す）。与えても持たない場合と、待つ間に入力欄が消えた場合は、Return がパネルの「開く」など別の要素に届かないよう、送らずに timeout(.waitPaste) を返す。フォーカスを読めない場合は、確かめられないため従来どおり送る。Return を送れなければ field に kAXConfirmAction（macOS 27 の入力欄は kAXConfirmAction に成功を返すが移動しないため、PR #79）
 6. 以降は主方式のステップ 9〜10 と同じ（副方式はペーストボードを使わないため、timeout(.waitPaste) 経由のフォールバックでも退避・復元は発生しない）
 ```
 

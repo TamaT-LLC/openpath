@@ -112,28 +112,26 @@ public final class GoToFieldDirectEntry {
     }
 
     /// 副方式は Return の他に確定の手段が無い（入力欄の kAXConfirmAction は macOS 27 で移動しない）ため、
-    /// フォーカスが来なくても AX で与えてから送る。主方式と違い、送らずに諦めると移動できないまま終わるため。
+    /// フォーカスが来なければ AX で与える。与えても入力欄が持たなければ、Return はキーウィンドウの別の要素
+    /// （パネルの「開く」等）に届いて別の場所で確定しかねないため、送らずに `timeout(.waitPaste)` を投げる。
+    /// フォーカスを読めない場合は確かめられないため、従来どおり送る。
     private func waitForFieldFocus(controls: GoToFieldControls, on timeline: ElapsedTimeline) async throws {
         guard let fieldFocus else { return }
-        let result = try await fieldFocus.waitUntilFocused(controls: controls)
-        Log.debug("副方式: 入力欄のフォーカスを待ちました（\(result.focus.rawValue)、+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
-        switch result.focus {
+        var focus = try await fieldFocus.waitUntilFocused(controls: controls).focus
+        Log.debug("副方式: 入力欄のフォーカスを待ちました（\(focus.rawValue)、+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
+        if focus == .notFocused {
+            try await InjectionTargetCheck.ensureAvailable(targetGuard, on: timeline)
+            focus = try await fieldFocus.requestFocus(of: controls)
+            Log.debug("副方式: 入力欄に AX でフォーカスを与えました（\(focus.rawValue)、+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
+        }
+        switch focus {
         case .focused, .unavailable:
             return
-        case .fieldGone:
+        case .notFocused, .fieldGone:
             // シートごとパネルが閉じていれば、貼り付けの失敗ではなくパネルが消えたことを伝える
             try await InjectionTargetCheck.ensureAvailable(targetGuard, on: timeline)
-            Log.warning("移動先シートの入力欄が消えたため、Return を送りません")
+            Log.warning("移動先シートの入力欄がキー入力を受け取れない（\(focus.rawValue)）ため、Return を送りません")
             throw InjectionError.timeout(step: .waitPaste)
-        case .notFocused:
-            try await InjectionTargetCheck.ensureAvailable(targetGuard, on: timeline)
-            do {
-                try await controls.field.focus()
-                Log.debug("副方式: 入力欄に AX でフォーカスを与えました")
-            } catch {
-                try Task.checkCancellation()
-                Log.debug("副方式: 入力欄に AX でフォーカスを与えられませんでした（\(error)）")
-            }
         }
     }
 }
