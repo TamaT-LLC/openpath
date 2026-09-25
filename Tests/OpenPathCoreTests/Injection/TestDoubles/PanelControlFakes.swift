@@ -63,10 +63,27 @@ final class PanelElementFake: PanelElementOperating {
     var valueReadError: (any Error)?
     /// 値を読み取った回数。
     private(set) var valueReadCount = 0
+    /// キー入力の受け先（フォーカス）か。`focusProvider` があればそちらを使う。
+    var hasFocus = true
+    /// 設定すると、フォーカスの読み取り（`isFocused()`）はこれの結果を返す（遅れて来るフォーカスを再現する）。
+    var focusProvider: (@MainActor () -> Bool)?
+    /// フォーカスの読み取りで投げるエラー。
+    var focusReadError: (any Error)?
+    /// AX でフォーカスを与えたとき（`focus()`）に投げるエラー。
+    var focusRequestError: (any Error)?
+    /// AX でフォーカスを与えたら、フォーカスを持つようになるか。
+    var acceptsFocusRequest = true
+    /// フォーカスを読み取った回数。
+    private(set) var focusReadCount = 0
 
     init(_ name: String, log: InjectionEventLog) {
         self.name = name
         self.log = log
+    }
+
+    /// その時点でフォーカスを持っているか（キー入力が入力欄に届くかの判定に使う。読み取りの回数には数えない）。
+    var isFocusedNow: Bool {
+        focusProvider.map { $0() } ?? hasFocus
     }
 
     func setValue(_ value: String) async throws {
@@ -102,6 +119,24 @@ final class PanelElementFake: PanelElementOperating {
             throw valueReadError
         }
         return valueProvider.map { $0() } ?? currentValue
+    }
+
+    func isFocused() async throws -> Bool {
+        focusReadCount += 1
+        if let focusReadError {
+            throw focusReadError
+        }
+        return isFocusedNow
+    }
+
+    func focus() async throws {
+        log.record(.focusField(element: name))
+        if let focusRequestError {
+            throw focusRequestError
+        }
+        guard acceptsFocusRequest else { return }
+        focusProvider = nil
+        hasFocus = true
     }
 
     private func activate(failingWith error: (any Error)?) throws {

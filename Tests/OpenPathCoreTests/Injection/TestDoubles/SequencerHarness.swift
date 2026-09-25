@@ -26,10 +26,12 @@ final class SequencerHarness {
     ///   - sheetAppearsAt: この経過時間以降の判定で移動先シートが出たことにする。nil なら出ない。
     ///   - clipboard: 注入前にユーザーがコピーしていた内容。
     ///   - checksBeforeSubmit: Return の前に入力欄の値と候補の選択を確かめるか（`GoToSheetSubmitGate`、Issue #74）。
+    ///   - waitsForFieldFocus: ⌘A / ⌘V の前に入力欄がフォーカスを持つまで待つか（`GoToFieldFocusWait`、Issue #74）。
     init(
         sheetAppearsAt: Duration? = .milliseconds(150),
         clipboard: PasteboardSnapshot = .userClipboard,
-        checksBeforeSubmit: Bool = false
+        checksBeforeSubmit: Bool = false,
+        waitsForFieldFocus: Bool = false
     ) {
         let log = InjectionEventLog(clock: clock)
         let pasteboard = FakePasteboard(contents: clipboard)
@@ -46,10 +48,11 @@ final class SequencerHarness {
         goToFieldLocator.logsLookups = false
         goToFieldLocator.field = goToField
         goToFieldLocator.suggestionList = suggestions
-        if checksBeforeSubmit {
-            // ⌘V で、そのときのペーストボードの文字列が入力欄に入る（OS の貼り付けを再現する）
+        if checksBeforeSubmit || waitsForFieldFocus {
+            // ⌘V で、そのときのペーストボードの文字列が入力欄に入る（OS の貼り付けを再現する）。
+            // キー入力はフォーカスを持つ要素に届くため、入力欄がフォーカスを持っていなければ入らない
             keyboard.onPost = { [goToField, pasteboard] keyStroke in
-                guard keyStroke == .paste else { return }
+                guard keyStroke == .paste, goToField.isFocusedNow else { return }
                 goToField.simulateTyping(pasteboard.contents.plainText)
             }
         }
@@ -58,6 +61,7 @@ final class SequencerHarness {
             keyboard: keyboard,
             sheetDetector: sheetDetector,
             targetGuard: targetGuard,
+            fieldFocus: waitsForFieldFocus ? GoToFieldFocusWait(locator: goToFieldLocator, clock: clock) : nil,
             submitGate: checksBeforeSubmit
                 ? GoToSheetSubmitGate(
                     locator: goToFieldLocator,
