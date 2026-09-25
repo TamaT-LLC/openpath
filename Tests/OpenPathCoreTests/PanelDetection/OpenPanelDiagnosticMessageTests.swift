@@ -136,6 +136,39 @@ struct OpenPanelDiagnosticMessageTests {
         #expect(entry.logMessage.contains("buttons: [\(expected)"), "\(entry.logMessage)")
     }
 
+    @Test(
+        "AXIdentifier は open-panel / save-panel だけそのまま出し、それ以外は長さと panel を含むかだけを出す",
+        arguments: [
+            ("open-panel", "open-panel"),
+            ("save-panel", "save-panel"),
+            ("com.example.秘密の書類", "<other len: 17>"),
+            ("custom-panel-v2", "<other len: 15, contains: panel>"),
+        ]
+    )
+    func identifiersAreClassified(identifier: String, expected: String) throws {
+        let entry = try Self.firstEntry(StubNode(id: "window", role: "AXWindow", subrole: "AXStandardWindow", identifier: identifier))
+
+        #expect(entry.logMessage.hasPrefix(
+            "panel check (target: window, role: AXWindow, subrole: AXStandardWindow, identifier: \(expected), "
+        ))
+    }
+
+    @Test("role・subrole は AX の定数（AX で始まる英数字）だけそのまま出し、それ以外は長さだけを出す")
+    func customRolesAreClassified() throws {
+        let entry = try Self.firstEntry(Fixtures.dialog(id: "open", [
+            StubNode(role: "MyPrivateRole"),
+            StubNode(role: "AXList", subrole: "AX秘密"),
+            Fixtures.textField(description: "検索", subrole: "SecretField"),
+        ]))
+
+        #expect(!entry.logMessage.contains("MyPrivateRole"))
+        #expect(!entry.logMessage.contains("秘密"))
+        #expect(!entry.logMessage.contains("SecretField"))
+        #expect(entry.logMessage.contains("lists: [AXList(<custom len: 4>)]"))
+        #expect(entry.logMessage.contains("textFields: [<custom len: 11>(desc: yes, title: no)]"))
+        #expect(entry.logMessage.contains("<custom len: 13>×1"))
+    }
+
     @Test("ボタンは 12 個まで並べ、超える分は数だけ出す")
     func buttonCountIsBounded() throws {
         let buttons = (1 ... 14).map { Fixtures.button("Button \($0)") } + [Fixtures.button("キャンセル"), Fixtures.button("開く")]

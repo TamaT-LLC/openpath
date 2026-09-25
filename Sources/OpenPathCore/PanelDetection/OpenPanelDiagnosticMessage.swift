@@ -3,17 +3,17 @@ import Foundation
 /// パネル判定の診断の debug ログの文言（Issue #83）。
 ///
 /// QA が `logLevel debug` で S-01 を再実行し、そのログだけでどの条件で弾いたかを見分けられるようにする。
-/// パス・ファイル名・ウィンドウタイトル・入力欄の文字列は出さない。出すのはロール名・AXIdentifier と、
-/// 保存パネルの語（`OpenPanelCriteria.saveFieldKeywords`）のどれに一致したかだけ。ボタンの表題は、パネルでよく使う
-/// 表題（`loggedButtonTitles`）だけをそのまま出し、それ以外は長さと、含む確定ボタンの表題（定数）だけを出す。
-/// 表題はアプリが決める文字列で、ファイル名などを含み得るため（Issue #83 の CodeRabbit の指摘）。
+/// パス・ファイル名・ウィンドウタイトル・入力欄の文字列は出さない。アプリが決める文字列は、決まった値だけをそのまま出し、
+/// それ以外は長さなどの分類だけを出す（ファイル名などを含み得るため。Issue #83 の CodeRabbit の指摘）。
+/// - role・subrole: AX の定数（`AX` で始まる英数字）だけ。それ以外は `<custom len: N>`
+/// - AXIdentifier: `loggedIdentifiers`（`open-panel` / `save-panel`）だけ。それ以外は `<other len: N>`（`panel` を含めば添える）
+/// - ボタンの表題: パネルでよく使う表題（`loggedButtonTitles`）だけ。それ以外は長さと、含む確定ボタンの表題（定数）
+/// - 入力欄: 説明・タイトルの有無と、保存パネルの語（`OpenPanelCriteria.saveFieldKeywords`）のどれに一致したか
 extension OpenPanelDiagnostic {
     /// ボタンを並べる数の上限。超えた分は数だけ出す。
     static let maxLoggedButtons = 12
     /// ロールの数を並べる種類の上限。
     static let maxLoggedRoles = 12
-    /// 表題・ロール名などを切る長さ（文字数）。
-    static let maxLoggedLabelLength = 24
     /// そのまま出すボタンの表題（前後の空白を除いて完全一致）。確定ボタンの表題と、開く・保存パネルやアラートの
     /// 決まった表題。これ以外の表題は本文を出さない。
     static let loggedButtonTitles: Set<String> = OpenPanelCriteria.confirmButtonTitles.union([
@@ -21,6 +21,10 @@ extension OpenPanelDiagnostic {
         "オプションを表示", "Show Options", "オプションを隠す", "Hide Options",
         "保存", "Save", "移動", "Go", "完了", "Done", "OK",
     ])
+    /// そのまま出す AXIdentifier。NSOpenPanel / NSSavePanel のウィンドウの識別子。
+    static let loggedIdentifiers: Set<String> = [OpenPanelCriteria.openPanelIdentifier, "save-panel"]
+    /// AXIdentifier の `<other …>` に、含むかを添える語。パネルらしい別の識別子を見分けるため。
+    static let identifierHint = "panel"
     /// `<other …>` に添える確定ボタンの表題を探す順（長いものを先に。同じ長さなら名前の順）。
     private static let confirmTitlesByLength = OpenPanelCriteria.confirmButtonTitles.sorted { lhs, rhs in
         lhs.count != rhs.count ? lhs.count > rhs.count : lhs < rhs
@@ -54,9 +58,9 @@ extension OpenPanelDiagnostic {
     public var logMessage: String {
         var fields = [
             "target: \(targetText)",
-            "role: \(Self.label(role))",
-            "subrole: \(Self.label(subrole))",
-            "identifier: \(Self.label(identifier))",
+            "role: \(Self.roleLabel(role))",
+            "subrole: \(Self.roleLabel(subrole))",
+            "identifier: \(Self.identifierLabel(identifier))",
         ]
         if result == .notCandidate {
             fields.append("result: rejected: notCandidate")
@@ -125,7 +129,7 @@ extension OpenPanelDiagnostic {
             return "\(titleLabel(title))\(button.isConfirm ? "*" : "")(enabled: \(enabled))"
         }
         let description = if let confirmTitle = button.descriptionConfirmTitle {
-            "\(sanitized(confirmTitle))*"
+            "\(confirmTitle)*"
         } else {
             button.hasDescription ? "yes" : "no"
         }
@@ -134,8 +138,8 @@ extension OpenPanelDiagnostic {
 
     /// `AXList(AXCollectionList)*`（* はファイル一覧とみなしたもの）。
     private static func listText(_ list: OpenPanelClassificationDetails.ListElement) -> String {
-        let subrole = list.subrole.map { "(\(sanitized($0)))" } ?? ""
-        return "\(sanitized(list.role))\(subrole)\(list.isFileList ? "*" : "")"
+        let subrole = list.subrole.map { "(\(roleLabel($0)))" } ?? ""
+        return "\(roleLabel(list.role))\(subrole)\(list.isFileList ? "*" : "")"
     }
 
     /// `AXSearchField(desc: yes, title: no)`、保存パネルの語に一致したら `…, saveKeyword: 名前 in desc)`。
@@ -144,16 +148,19 @@ extension OpenPanelDiagnostic {
         if let match = field.saveKeywordMatch {
             attributes.append("saveKeyword: \(match.keyword) in \(match.source.rawValue)")
         }
-        return "\(sanitized(field.subrole ?? OpenPanelCriteria.textFieldRole))(\(attributes.joined(separator: ", ")))"
+        return "\(roleLabel(field.subrole ?? OpenPanelCriteria.textFieldRole))(\(attributes.joined(separator: ", ")))"
     }
 
-    /// 数の多い順（同数ならロール名の順）に `AXGroup×20 AXButton×8`。
+    /// 数の多い順（同数ならロール名の順）に `AXGroup×20 AXButton×8`。ロールを読めなかった要素は `nil`。
     private static func rolesText(_ roleCounts: [String: Int]) -> String {
         guard !roleCounts.isEmpty else { return "none" }
-        let sorted = roleCounts.sorted { lhs, rhs in
+        let labeled = roleCounts.reduce(into: [String: Int]()) { labeled, entry in
+            labeled[entry.key == "nil" ? "nil" : roleLabel(entry.key), default: 0] += entry.value
+        }
+        let sorted = labeled.sorted { lhs, rhs in
             lhs.value != rhs.value ? lhs.value > rhs.value : lhs.key < rhs.key
         }
-        var items = sorted.prefix(maxLoggedRoles).map { "\(sanitized($0.key))×\($0.value)" }
+        var items = sorted.prefix(maxLoggedRoles).map { "\($0.key)×\($0.value)" }
         if sorted.count > maxLoggedRoles {
             items.append("+\(sorted.count - maxLoggedRoles) more")
         }
@@ -161,11 +168,6 @@ extension OpenPanelDiagnostic {
     }
 
     // MARK: - 文字列の整形
-
-    private static func label(_ value: String?) -> String {
-        guard let value, !value.isEmpty else { return "none" }
-        return sanitized(value)
-    }
 
     /// ボタンの表題の出し方。よく使う表題はそのまま、それ以外は長さと、含む確定ボタンの表題（大文字小文字を区別しない）だけ。
     /// 確定ボタンの表題の違い（「開く…」など）を、表題の本文を出さずに見分けられるようにする。
@@ -181,13 +183,20 @@ extension OpenPanelDiagnostic {
         return "<other \(attributes.joined(separator: ", "))>"
     }
 
-    /// 改行などの制御文字を空白にし、パスらしいもの（"/" を含む）は伏せ、長いものは切る。
-    static func sanitized(_ value: String) -> String {
-        guard !value.contains("/") else { return "<path-like>" }
-        let flattened = String(value.unicodeScalars.map { scalar in
-            CharacterSet.controlCharacters.contains(scalar) || CharacterSet.newlines.contains(scalar) ? " " : Character(scalar)
-        })
-        guard flattened.count > maxLoggedLabelLength else { return flattened }
-        return "\(flattened.prefix(maxLoggedLabelLength))…"
+    /// role・subrole。AX の定数（`AX` で始まる ASCII の英数字）だけそのまま出し、それ以外は長さだけを出す。
+    static func roleLabel(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "none" }
+        let isAXConstant = value.hasPrefix("AX") && value.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        return isAXConstant ? value : "<custom len: \(value.count)>"
+    }
+
+    /// AXIdentifier。NSOpenPanel / NSSavePanel の識別子だけそのまま出し、それ以外は長さと、`panel` を含むかだけを出す。
+    static func identifierLabel(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "none" }
+        if loggedIdentifiers.contains(value) {
+            return value
+        }
+        let hint = value.range(of: identifierHint, options: .caseInsensitive) != nil ? ", contains: \(identifierHint)" : ""
+        return "<other len: \(value.count)\(hint)>"
     }
 }

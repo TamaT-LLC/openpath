@@ -155,13 +155,13 @@ S-01 の備考（パレットが出ないときの切り分け、Issue #83）: d
 | ログ | 意味 |
 | --- | --- |
 | `panel check (… identifier: open-panel, candidate: openPanelIdentifier, … result: openPanel, …)` の後に `panel detected` | 検知できた |
-| `panel check (target: window, … subrole: AXStandardWindow, identifier: …, result: rejected: notCandidate)` | ダイアログのウィンドウを候補にしなかった。identifier の値を Issue に書く（`open-panel` 以外なら判定条件の追加が要る） |
+| `panel check (target: window, … subrole: AXStandardWindow, identifier: …, result: rejected: notCandidate)` | ダイアログのウィンドウを候補にしなかった。identifier の表示（`save-panel`・`<other len: …, contains: panel>` など）を Issue に書く（`open-panel` 以外なら判定条件の追加が要る） |
 | `result: rejected: noConfirmButton` / `noFileList` / `looksLikeSavePanel`（`+truncated` は探索の上限で打ち切った） | 判定の条件で弾いた。同じ行の `buttons` / `lists` / `textFields` / `search` をそのまま貼る。`noConfirmButton` で `buttons` に `<other len: …, contains: 開く>` があれば、確定ボタンの表題が「開く」と少し違う（「開く…」など） |
 | `result: undetermined: unreadable` | 候補にしたが、中身を読めなかった（応答のタイムアウトなど）。直後の `panel detection undetermined` の行もあわせて貼る |
 | ⌘O の後も `panel scan (…, windows: N)` の N が増えず、新しい `panel check` も出ない | ダイアログが TextEdit のウィンドウ一覧に現れていない |
 | `panel watch observer failed` | AXObserver を張れていない（ポーリングで補うため、検知はできる想定） |
 
-`panel check` / `panel scan` / `panel watch` の行は、パス・ファイル名・ウィンドウタイトルを含まない（ロール名と、パネルでよく使うボタンの表題だけ。それ以外の表題は `<other len: 3, contains: 開く>` のように長さと、含む確定ボタンの表題だけを出す）。ほかの debug ログ（注入したパスなど）は含み得るため、共有する前に §3 の注意のとおり確かめる。
+`panel check` / `panel scan` / `panel watch` の行は、パス・ファイル名・ウィンドウタイトルを含まない（AX の定数のロール名、`open-panel` / `save-panel` の AXIdentifier、パネルでよく使うボタンの表題だけ。それ以外は `<other len: 3, contains: 開く>` のように長さなどの分類だけを出す）。ほかの debug ログ（注入したパスなど）は含み得るため、共有する前に §3 の注意のとおり確かめる。
 
 ## 7. パレットの操作（S-08、S-09、PAL）
 
