@@ -125,6 +125,34 @@ enum PanelTreeFixtures {
         sheet(id: id, [group([group(body)])])
     }
 
+    /// 非モーダルの NSOpenPanel（NSDocumentController の「ファイル > 開く…」、`begin(completionHandler:)`）。
+    /// ホストのウィンドウ一覧に、サブロールが AXStandardWindow、AXIdentifier が `open-panel` のウィンドウとして現れる
+    /// （macOS 27 の自プロセスのパネルで確認。Issue #83）。サンドボックスアプリでは中身がリモートビューの下にある。
+    /// - Parameter identifier: `AXIdentifier`。非モーダルの保存パネルは `save-panel`。
+    static func nonModalPanelWindow(id: String, identifier: String? = "open-panel", _ body: [StubNode]) -> StubNode {
+        StubNode(
+            id: id,
+            role: "AXWindow",
+            subrole: "AXStandardWindow",
+            identifier: identifier,
+            frame: dialogFrame,
+            children: [group([group(body)])]
+        )
+    }
+
+    /// TextEdit の「開く」パネルの中身。NSOpenPanel の中身に、書類ベースのアプリのボタンとアクセサリビューが加わる。
+    static func textEditOpenPanelBody(_ language: PanelUILanguage) -> [StubNode] {
+        let isJapanese = language == .japanese
+        return openPanelBody(language) + [
+            button(isJapanese ? "新規書類" : "New Document"),
+            button(isJapanese ? "オプションを表示" : "Show Options"),
+            group([
+                StubNode(role: "AXPopUpButton", description: isJapanese ? "プレーンテキストのエンコーディング:" : "Plain Text Encoding:"),
+                StubNode(role: "AXCheckBox", title: isJapanese ? "リッチテキストコマンドを無視" : "Ignore rich text commands"),
+            ]),
+        ]
+    }
+
     /// 通常のウィンドウ。シートは子要素として末尾に付く。
     static func documentWindow(id: String, sheets: [StubNode] = []) -> StubNode {
         StubNode(id: id, role: "AXWindow", subrole: "AXStandardWindow", frame: documentFrame, children: [

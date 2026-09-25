@@ -45,6 +45,10 @@ final class AXPanelTreeReader: PanelTreeReader {
         try value(kAXDescriptionAttribute, of: node, as: String.self)
     }
 
+    func identifier(of node: AXUIElement) throws -> String? {
+        try value(kAXIdentifierAttribute, of: node, as: String.self)
+    }
+
     func children(of node: AXUIElement) throws -> [AXUIElement] {
         let children = try value(kAXChildrenAttribute, of: node, as: [AXUIElement].self) ?? []
         return children.map(Self.limitingMessagingTimeout)

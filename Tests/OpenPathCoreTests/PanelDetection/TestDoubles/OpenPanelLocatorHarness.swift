@@ -24,6 +24,16 @@ final class OpenPanelLocatorHarness {
         locate(window, at: elapsed).panel
     }
 
+    /// 診断（debug ログ用）を集めながら探す。
+    func locateDiagnosing(
+        _ window: StubElement,
+        at elapsed: Duration = .zero
+    ) -> (lookup: OpenPanelLookup<StubElement>, report: OpenPanelDiagnosticReport) {
+        var report = OpenPanelDiagnosticReport()
+        let lookup = locator.locate(in: window, reader: tree, now: start.advanced(by: elapsed), diagnostics: &report)
+        return (lookup, report)
+    }
+
     /// パネルの候補を判定したか。子のシートを探すときは候補の直下の子（とそのロール）しか読まないため、
     /// それより深い読み取りや、タイトル・説明の読み取りがあれば判定したとみなす。子孫のない候補には使えない。
     func didClassify(_ candidate: StubElement) -> Bool {

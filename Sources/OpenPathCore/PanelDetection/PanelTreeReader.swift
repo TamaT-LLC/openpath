@@ -19,6 +19,8 @@ public protocol PanelTreeReader {
     func title(of node: Node) throws -> String?
     /// `AXDescription`。
     func accessibilityDescription(of node: Node) throws -> String?
+    /// `AXIdentifier`（開発者が付ける識別子。NSOpenPanel のウィンドウは `open-panel`、NSSavePanel は `save-panel`）。
+    func identifier(of node: Node) throws -> String?
     /// 直下の子要素（並び順どおり）。
     func children(of node: Node) throws -> [Node]
     /// 要素の矩形（`AXPosition` / `AXSize`）。AX の座標系（左上原点）のまま返す。

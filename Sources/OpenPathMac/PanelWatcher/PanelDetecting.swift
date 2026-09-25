@@ -9,6 +9,8 @@ public protocol PanelDetecting: Sendable {
     /// 観測中のアプリの `kAXWindowsAttribute` の各ウィンドウについて呼ばれ、NSOpenPanel ならそれを返す。
     ///
     /// - サンドボックスアプリや `beginSheetModal` のパネルはウィンドウの子要素（AXSheet）として現れるため、子も調べること。
+    /// - 非モーダルのパネル（NSDocumentController の「ファイル > 開く…」など）は、サブロールが AXStandardWindow の
+    ///   ウィンドウとして現れる（AXIdentifier は `open-panel`、Issue #83）。
     /// - 同じパネルには同じ `PanelContext.ID` を返すこと。id が変わると別のパネルとみなし、`panelGone` → `panelAppeared` を送る。
     /// - nil を返すと、追跡中のパネルは消えたとみなされる。AX の一時的な失敗では、直前の結果を返すこと。
     func detectPanel(in window: AXUIElement) -> DetectedPanel?

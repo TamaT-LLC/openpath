@@ -54,7 +54,7 @@ final class PanelWatcher {
 
 ```swift
 func isOpenPanel(_ window: AXUIElement) -> Bool {
-    guard isDialogOrSheet(window) else { return false }  // AXSubrole in [AXDialog, AXSheet] または AXRole == AXSheet
+    guard isDialogOrSheet(window) || window.identifier == "open-panel" else { return false }  // AXSubrole in [AXDialog, AXSheet] または AXRole == AXSheet、または AXIdentifier == "open-panel"（非モーダル、Issue #83）
     let confirmTitles: Set<String> = ["開く", "Open", "選択", "Choose", "追加", "Add", "アップロード", "Upload"]
     let hasConfirm = window.descendants(role: kAXButtonRole, maxDepth: 6)
         .contains { confirmTitles.contains($0.title ?? "") }
@@ -72,6 +72,7 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
 ```
 
 - ロールが `AXSheet` の要素も候補にする（サブロールだけでなく、シートは通常ロールも `AXSheet` のため。当初案のコードはサブロールのみ比較していた、PR #56）。
+- `AXIdentifier` が `open-panel` のトップレベルのウィンドウも候補にする。非モーダルの NSOpenPanel（NSDocumentController の「ファイル > 開く…」。TextEdit の ⌘O など書類ベースのアプリ、`begin(completionHandler:)`）は、ホストのウィンドウ一覧に AXWindow として現れるが、サブロールが `AXDialog` ではなく `AXStandardWindow`（`AXModal` は false）になり、当初の条件 1 で弾かれていた。`runModal`（`choose folder` など）は `AXDialog`。識別子はモーダルでも同じ `open-panel`、保存パネルは `save-panel` で、ローカライズされない（macOS 27 の自プロセスのパネルで確認。ウィンドウの所有者はホストのプロセスで、中身はリモートビュー）。通常のウィンドウ全般は、これまでどおり候補にしない。`AXIdentifier` は、ロール・サブロールで候補にならないトップレベルのウィンドウでだけ、ウィンドウごとに 1 回読んでキャッシュする（Issue #83）。ロール・サブロールと同じく、識別子もアプリが決める属性で、パネルであることの証明にはならない（候補にする手がかりとしてだけ使い、条件 2〜4 の判定を経る）。偽のパネルでパレットが出ても、注入は利用者の確定と注入先の確認（§3）を経る点は、`AXDialog` による既存の条件と変わらない。
 - 確定ボタンに「アップロード」/「Upload」を追加した（Safari の `input[type=file]` パネル対策。TST-001 S-06）。
 - ファイル一覧の条件（判定条件 3）に、アイコン表示（ロールが `AXList` でサブロールが `AXCollectionList` の要素）を加えた。`AXList` 全般ではなくサブロールを `AXCollectionList` に限定したのは、`AXList` が設定シートの一覧などファイル一覧でない要素にも使われ、限定しないと確定ボタンを持つ設定シート等を開くパネルと誤判定するため（`AXCollectionList` は `NSCollectionView` の公開サブロールでローカライズされない）。サブロールは `AXList` の要素だけ読むため、リスト表示・カラム表示の判定では AX 呼び出しは増えない（PR #64）。
 - 子のシートを 2 段まで探す（リモートビューが外側のシートの下にさらにシートを重ねる構成に対応）。ただし、ファイル一覧の行（ファイル名を保存欄と誤認しないため）と、子のシート自体の中（開くパネルでないダイアログをパネルと誤判定しないため）へは降りない。
@@ -81,8 +82,9 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
 - 判定はクロージャ（`PanelDetector`）ではなく `PanelDetecting` プロトコル（既定実装 `OpenPanelDetector()`）として持つ（PR #56。#17 時点のクロージャ API は削除）。`AXApplicationObserver` の破棄通知は対象要素も判定側へ渡し、走査で見つけたパネルの要素にも `kAXUIElementDestroyedNotification` を追加登録する（最大 8 要素、古いものから解除。PR #46 で見送った対処案を PR #56 で採用）。
 - AX の要素参照には 1 回 0.25 秒のメッセージングタイムアウトを設定する（既定の約 6 秒のままだと応答しないアプリで `axQueue` が止まるため）。タイムアウトした要素は子なしとして扱い、一時的な失敗としてパネルを消えたとはみなさない。
 - `panelAppeared` を送るとき `panel detected` を、パネルの消滅では `panel gone` を info でログに出す（`Log.configure` が必須。TST-001 §4 のスモークスクリプトが grep する。Idle に戻った後の再通知でも出す）。判定のコスト（AX 呼び出し回数・所要ミリ秒）は debug で出す。どちらもパスは含まない（PR #56）。
+- 判定の診断を debug で出す（`logLevel debug`、Issue #83）。ウィンドウを初めて見たときと候補を判定したとき（判定し直しを含む）だけ、`panel check (…)` を 1 行ずつ出す: 対象（ウィンドウ / シート）、role・subrole・AXIdentifier、候補にした理由、弾いた条件（`notCandidate` / `noConfirmButton` / `noFileList` / `looksLikeSavePanel`、探索の上限で打ち切ったら `truncated`。中身を読めなかった候補は `unreadable` を候補ごとに 1 回だけ）、子孫の要約（ボタンの表題と有効状態、一覧の role・subrole、入力欄の説明・タイトルの有無と一致した保存パネルの語、訪問数と深さ、role ごとの数）。走査の要約 `panel scan (pid, bundleId, windows)` は変わったときだけ、張り付け・AXObserver の失敗・ウィンドウ生成とフォーカス移動の通知は `panel watch …` で出す。パス・ファイル名・ウィンドウタイトル・入力欄の文字列は出さない（アプリが決める文字列は、決まった値だけをそのまま出し、それ以外は分類だけを出す。ファイル名などを含み得るため。role・subrole は SDK が定めた AX の定数（`KnownAXRoles`。「AX で始まる」などの形では見分けない）だけ、AXIdentifier は `open-panel` / `save-panel` だけ、ボタンの表題はパネルでよく使う表題（確定ボタン・キャンセル・新規フォルダなど）だけ。それ以外は `<other len: 3, contains: 開く>` のように長さと、含む確定ボタンの表題（AXIdentifier は `panel`）だけ）。要約のための AX の読み取りは debug のときだけ行い、失敗しても判定の結果を変えない。`open panel classified` の `axCalls` からは除き、`diagnosticAXCalls` として別に出す（`elapsedMs` には含まれる）。
 - パレットを表示するたびに `palette shown (id: …)` を info でログに出す（`PalettePresenter` がウィンドウを出した直後。同じパネルの再表示・ホットキーでの再表示でも出す）。`panel detected (id: …)` と同じパネル ID を含むため、同じ ID の `panel detected` の後の最初の `palette shown` とのタイムスタンプ（ミリ秒）の差を検知レイテンシ（FR-DETECT-03）として計測できる（#30）。パスは含まない。
-- サンドボックスアプリでは、パネルは `openAndSavePanelService` のプロセスで描画されるが、AX ツリー上はホストアプリのウィンドウの `AXSheet` 子要素として見える。ホスト側の観測だけで検知できるが、要素アクセスの往復が遅いため判定は `axQueue` 上で同期的に行う（各ウィンドウに判定関数を適用する形。DSN-001 の当初案は判定関数を async にする想定だったが、axQueue 上の 1 ジョブにまとめる方が単純で速い、PR #46）。
+- サンドボックスアプリでは、パネルは `openAndSavePanelService` のプロセスで描画されるが、AX ツリー上はホストアプリのウィンドウの `AXSheet` 子要素（シート型）か、ホストのウィンドウ一覧の AXWindow（ダイアログ型・非モーダル。上記）として見える。ホスト側の観測だけで検知できるが、要素アクセスの往復が遅いため判定は `axQueue` 上で同期的に行う（各ウィンドウに判定関数を適用する形。DSN-001 の当初案は判定関数を async にする想定だったが、axQueue 上の 1 ジョブにまとめる方が単純で速い、PR #46）。
 
 ### 2.3 パネルの選択モード推定
 

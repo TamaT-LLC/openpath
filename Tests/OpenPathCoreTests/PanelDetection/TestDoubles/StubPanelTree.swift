@@ -24,6 +24,8 @@ struct StubNode {
     var subrole: String?
     var title: String?
     var description: String?
+    /// `AXIdentifier`
+    var identifier: String?
     var frame: CGRect?
     var children: [StubNode] = []
     /// `AXURL`
@@ -46,7 +48,7 @@ final class StubPanelTree: PanelTreeReader {
     private static let rowRole = "AXRow"
 
     enum Attribute: Hashable {
-        case role, subrole, title, description, children, frame
+        case role, subrole, title, description, identifier, children, frame
         case visibleRows, visibleChildren, columns, titleElement, url, isEnabled, textOpacity
         /// `itemCount(_:of:)`（AXUIElementGetAttributeValueCount）
         case itemCount(PanelTreeItemsAttribute)
@@ -64,6 +66,7 @@ final class StubPanelTree: PanelTreeReader {
         var subrole: String?
         var title: String?
         var description: String?
+        var identifier: String?
         var frame: CGRect?
         var children: [StubElement]
         var url: URL?
@@ -137,6 +140,10 @@ final class StubPanelTree: PanelTreeReader {
 
     func accessibilityDescription(of node: StubElement) throws -> String? {
         try read(node, .description).description
+    }
+
+    func identifier(of node: StubElement) throws -> String? {
+        try read(node, .identifier).identifier
     }
 
     func children(of node: StubElement) throws -> [StubElement] {
@@ -227,6 +234,7 @@ final class StubPanelTree: PanelTreeReader {
             subrole: node.subrole,
             title: node.title,
             description: node.description,
+            identifier: node.identifier,
             frame: node.frame,
             children: children,
             url: node.url,
