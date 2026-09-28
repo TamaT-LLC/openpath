@@ -8,7 +8,7 @@ upstream:
 - PROJ-TST-001
 downstream: []
 owner: TakehiroT
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # 手動シナリオテスト: openpath（実機確認チェックリスト）
@@ -125,7 +125,7 @@ debug ログは注入したパスなどを含む。実施が終わったら open
 | SMK-01 | config.toml を `roots = ["~/repos"]`、`[ghq] enabled = true` にして保存 | ログに `設定の変更に合わせて候補を再構築します` |  |  |
 | SMK-02 | `./scripts/smoke-open-panel.sh`（ダイアログが最前面に出なければクリックする） | 最後の行が `OK`、終了コード 0。`panel detected` の時刻と、同じパネル ID の `palette shown` までの時間（`palette shown: …（panel detected から Nms）`）を備考に写す |  |  |
 
-## 6. 中心フロー（S-01〜S-05、S-07、FLOW）
+## 6. 中心フロー（S-01〜S-05、S-07a、S-07b、FLOW）
 
 出典: TST-001 §3 と §3.1（再通知・履歴、注入）、PR #65 §2、REQ-001 §5。
 
@@ -141,8 +141,9 @@ debug ログは注入したパスなどを含む。実施が終わったら open
 | S-04 | Cursor の File > Open Folder で `open` → Enter → Enter | 該当フォルダを開ける（受け入れ基準） |  |  |
 | S-05 | VS Code の File > Open… で候補を選んで Cmd+Enter | 移動して「開く」まで押される。次にパネルを開くと、その場所が空入力の上位に出る（履歴の記録） |  |  |
 | FLOW-05 | `auto_confirm = true` にして Enter（確かめたら戻す） | 移動して「開く」まで押され、パネルが閉じた後も履歴に残る |  |  |
-| S-07 | `~/Documents/資料` を作って選ぶ。かな（`しりょう`）でも打つ | 移動できる。かなで打っても候補に出る（受け入れ基準） |  |  |
-| FLOW-06 | NFD の名前のディレクトリ（`mkdir ~/Documents/"$(printf 'データ' \| iconv -f UTF-8 -t UTF-8-MAC)"`）を選ぶ | NFC で打っても候補に出て、移動できる |  |  |
+| S-07a | `~/Documents/資料` を作って選ぶ | 正しく移動できる（日本語を含むパスの注入、REQ-001 §5 受け入れ基準） |  |  |
+| S-07b | カタカナ名のディレクトリ（例 `~/repos/シリョウ`）を作り、ひらがな（`しりょう`）で検索する | 候補に出て移動できる（かな同一視、DSN-002 §5）。漢字の読みでの検索（`しりょう` で `資料` を検索すること）は現仕様の対象外（Issue #87、Phase 2） |  |  |
+| FLOW-06 | NFD の名前のディレクトリ（`mkdir ~/Documents/"$(printf 'データ' \| iconv -f UTF-8 -t UTF-8-MAC)"`）を選ぶ | NFC で打っても候補に出て、移動できる（NFC/NFD 同一視、DSN-002 §5） |  | Issue #86 の QA で確認済み |
 | FLOW-07 | openpath を終了して `~/Library/Application Support/openpath/history.json` を見る | 確定したパスが保存されている |  |  |
 
 S-01 の備考（パレットが出ないときの切り分け、Issue #83）: debug ログで、ダイアログのウィンドウをどう判定したかが分かる。
@@ -277,8 +278,8 @@ DEBUG ビルド（`swift run openpath` など）の debug ログや、プロセ�
 | 変更した箇所（`Sources/` 配下） | 確かめる項目 |
 | --- | --- |
 | パネルの検知（`OpenPathCore/PanelDetection`、`OpenPathMac/PanelWatcher`） | SMK-02、S-01、S-02、S-06、S-11、S-12、DET-01〜DET-07 |
-| パレット・検索（`Palette`、`Search`） | S-01、S-02、S-08、PAL-01〜PAL-08、FLOW-01、FLOW-02 |
-| 注入（`Injection`） | S-03〜S-05、S-07、S-10、FLOW-03、FLOW-06、CLIP-01〜CLIP-03、INJ-01〜INJ-05 |
+| パレット・検索（`Palette`、`Search`） | S-01、S-02、S-07b、S-08、PAL-01〜PAL-08、FLOW-01、FLOW-02 |
+| 注入（`Injection`） | S-03〜S-05、S-07a、S-10、FLOW-03、FLOW-06、CLIP-01〜CLIP-03、INJ-01〜INJ-05 |
 | 状態機械（`Coordinator`） | S-03、S-08、S-09、FLOW-03〜FLOW-05、INJ-01、CLIP-03 |
 | 候補・履歴（`CandidateSources`、`Index`、`History`） | S-05、FLOW-02、FLOW-07、MENU-03〜MENU-06、CFG-03 |
 | 設定（`Config`） | CFG-01〜CFG-03、S-12、SMK-01 |
