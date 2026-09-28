@@ -5,7 +5,7 @@
 #   --version  省略時は HEAD の vX.Y.Z タグ、タグが無ければ Resources/Info.plist の値。
 #              いずれも Resources/Info.plist と一致しなければ止まる（バージョンは書き換えない）
 # 成果物: build/openpath-<version>.zip, build/Casks/openpath.rb
-# GitHub Release の作成と tap リポジトリへの反映は行わず、最後に手順を表示する。
+# GitHub Release は annotated tag の push で Actions が作成する。ローカル実行は成果物の検証用。
 set -euo pipefail
 
 # shellcheck source=scripts/lib/common.sh
@@ -77,10 +77,14 @@ main() {
   log "  ${dist_zip}"
   log "  ${CASK_OUTPUT}"
   cat >&2 <<EOF
-次の手順（このスクリプトでは実行しません）:
-  1. git tag ${TAG_PREFIX}${version} && git push origin ${TAG_PREFIX}${version}   # 未作成の場合
-  2. gh release create ${TAG_PREFIX}${version} "${dist_zip}"
-  3. ${CASK_OUTPUT} を tap リポジトリの Casks/${APP_NAME}.rb にコピーしてコミット
+正式公開の手順（このスクリプトでは実行しません）:
+  1. main に含まれる検証済みコミットに annotated tag ${TAG_PREFIX}${version} を付けて push
+     git tag -a ${TAG_PREFIX}${version} -m "openpath ${version}"
+     git push origin refs/tags/${TAG_PREFIX}${version}
+  2. Actions の Release macOS がビルド・署名・公証し、GitHub Release を作成するまで待つ
+  3. Release に添付された ${APP_NAME}.rb を tap の Casks/${APP_NAME}.rb に反映する
+ローカルの ZIP と CI の ZIP は署名時刻等で異なるため、正式版の cask は Release 添付版を使ってください。
+詳細: docs/40_arch_design/guide-release-distribution.md
 EOF
 }
 

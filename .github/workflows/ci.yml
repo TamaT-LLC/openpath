@@ -46,6 +46,9 @@ jobs:
           # 古いキャッシュで再リンクされない事態を避けるよう Info.plist もキーに含める
           key: ${{ runner.os }}-${{ runner.arch }}-xcode-${{ steps.toolchain.outputs.xcode-version }}-spm-${{ hashFiles('Package.swift', 'Package.resolved', 'Resources/Info.plist') }}
 
+      - name: Test release gates
+        run: python3 scripts/release_ci_test.py
+
       - name: Build
         run: swift build
 

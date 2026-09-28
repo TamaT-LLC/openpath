@@ -123,7 +123,45 @@ export OPENPATH_NOTARY_PROFILE=<profile>
 ./scripts/release.sh                            # HEAD の vX.Y.Z タグ（無ければ Info.plist）のバージョンで作る
 ```
 
-できた `build/openpath-<version>.zip` を `gh release create v<version> build/openpath-<version>.zip` で GitHub Releases に添付し、`build/Casks/openpath.rb` を tap リポジトリの `Casks/openpath.rb` にコピーします。cask の URL は `https://github.com/TamaT-LLC/openpath/releases/download/v#{version}/openpath-#{version}.zip` を前提にしています。
+ローカルの成果物は署名・公証の検証に使えます。正式公開は次の GitHub Actions の経路を使ってください。
+Homebrew tap には、正式 Release に添付された `openpath.rb` を反映します。
+ローカルと CI では署名時刻などで ZIP の SHA256 が異なるため、cask を混在させないでください。
+
+### GitHub Actions でリリースする
+
+`Release macOS` は、Fern と同じ Smoke / Preview / Stable の3経路で配布物を作ります。
+手動実行は公開前のビルド確認、タグの push は GitHub Release の公開に使います。
+
+| 経路 | 起動条件 | 署名・公証 | 出力 |
+|---|---|---|---|
+| Smoke | `workflow_dispatch` | ad-hoc 署名、公証なし | Actions artifact のみ |
+| Preview | annotated tag `preview-vX.Y.Z-N` | ad-hoc 署名、公証なし | prerelease、Latest にしない |
+| Stable | annotated tag `vX.Y.Z` | Developer ID 署名・公証・staple | 正式 Release、Latest にする |
+
+タグは `main` に含まれるコミットに付け、バージョンを `Resources/Info.plist` と一致させます。
+ZIP は Apple Silicon / Intel の両方を含む Universal 形式です。
+すべての経路で `SHA256SUMS` を生成し、Stable にだけ Homebrew cask を添付します。
+公開手順と失敗時の復旧は [リリース運用](docs/40_arch_design/guide-release-distribution.md)を参照してください。
+
+リポジトリの Settings → Secrets and variables → Actions に、次の値を登録します。
+
+| 種別 | 名前 | 値 |
+|---|---|---|
+| Secret | `APPLE_CERTIFICATE_BASE64` | 秘密鍵付き Developer ID Application 証明書（P12）の Base64 |
+| Secret | `APPLE_CERTIFICATE_PASSWORD` | P12 の書き出しパスワード |
+| Secret | `APPLE_NOTARY_PRIVATE_KEY_BASE64` | openpath 専用の Team API キー（P8）の Base64 |
+| Variable | `APPLE_SIGNING_IDENTITY` | `Developer ID Application: 組織名 (TEAMID)` |
+| Variable | `APPLE_TEAM_ID` | 証明書の Team ID |
+| Variable | `APPLE_NOTARY_KEY_ID` | Team API キーの Key ID |
+| Variable | `APPLE_NOTARY_ISSUER_ID` | App Store Connect の Issuer ID |
+
+公証用の Team API キーは Developer 権限で作成します。
+プロジェクトごとに別のキーを作ると、個別に失効・交換できます。
+同じ組織の署名証明書は共用できます。
+workflow は一時キーチェーンに認証情報を保存し、終了時に削除します。
+
+CI では `OPENPATH_NOTARY_KEYCHAIN` に一時キーチェーンのパスを指定します。
+ローカルで省略した場合は、従来どおり標準のキーチェーンからプロファイルを探します。
 
 ## 予定している技術スタック
 
