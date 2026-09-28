@@ -6,12 +6,13 @@ scope: global
 status: Draft
 upstream:
 - PROJ-ARCH-001
+- PROJ-ARCH-002
 - PROJ-DSN-001
 - PROJ-DSN-002
 downstream:
 - PROJ-TST-002
 owner: TakehiroT
-updated: 2026-09-26
+updated: 2026-09-28
 ---
 
 # テスト計画: openpath
@@ -20,7 +21,7 @@ updated: 2026-09-26
 
 - `OpenPathCore`（ファジーマッチ、frecency、設定パース、状態機械）は Swift Testing によるユニットテストで網羅する。XCTest と違い Xcode を必要とせず Command Line Tools だけで実行できるため、Swift Testing を採用する。ローカルでは `./scripts/test.sh` を使う（Command Line Tools のみの環境では素の `swift test` が `no such module 'Testing'` で失敗するためのラッパー。CLT が選択されているときだけ `-F`・rpath・cross-import overlay の無効化を足し、Xcode 環境では素の `swift test` と同じ、PR #32）。
 - `OpenPathMac`（AX 観測、注入）は自動化が困難なため、手動シナリオテストと、Finder の「開く」ダイアログを使ったスモークスクリプト（AppleScript で `choose folder` を出す）で確認する。
-- CI（GitHub Actions）は `macos-15` ランナー、Xcode 16.4（`DEVELOPER_DIR` で明示）でユニットテストと `swift build` のみ実行する。`macos-14` は既定の Xcode が 15.4（Swift 5.10）で swift-tools-version 6.0 のマニフェストを扱えず、2026-11-02 にサポートも終了するため採用しない（PR #33）。AX を要するテストはローカル限定。
+- CI（GitHub Actions）は `macos-15` ランナー、Xcode 16.4（`DEVELOPER_DIR` で明示）でユニットテスト、`swift build`、リリース条件のテストを実行する。`macos-14` は既定の Xcode が 15.4（Swift 5.10）で swift-tools-version 6.0 のマニフェストを扱えず、2026-11-02 にサポートも終了するため採用しない（PR #33）。AX を要するテストはローカル限定。
 
 ## 2. ユニットテスト（OpenPathCoreTests）
 
@@ -167,3 +168,16 @@ open build/openpath.app          # アクセシビリティ権限を付与して
 - 2 章のユニットテストがすべて通る（CI）。
 - 3 章の S-01〜S-13 がすべて期待どおり（ローカル、チェックリストを PR に添付）。
 - 5 章の合格基準を満たす。
+
+## リリース条件の自動検証
+
+`python3 scripts/release_ci_test.py` で [リリース運用](../40_arch_design/guide-release-distribution.md)の公開条件を検証する。
+通常の CI と release workflow の両方で実行する。
+
+- annotated tag、main への包含、checkout とタグの一致、Info.plist と AppInfo のバージョン一致。
+- Preview 番号とバージョンの不正形式、lightweight tag、main 外のコミットの拒否。
+- チェックサム不一致、成果物不足、余分なファイル、既存 Release の拒否。
+- アップロード不足時に Draft を維持し、Preview は prerelease / 非 Latest、Stable は正式版 / Latest とすること。
+
+ローカルの Smoke は `./scripts/package_release.sh smoke <X.Y.Z>` で Universal ZIP と SHA256SUMS を確認する。
+Apple への公証提出、staple、配布後の Gatekeeper 評価は最初の Stable 実行で確認する。

@@ -123,14 +123,25 @@ export OPENPATH_NOTARY_PROFILE=<profile>
 ./scripts/release.sh                            # HEAD の vX.Y.Z タグ（無ければ Info.plist）のバージョンで作る
 ```
 
-できた `build/openpath-<version>.zip` を `gh release create v<version> build/openpath-<version>.zip` で GitHub Releases に添付し、`build/Casks/openpath.rb` を tap リポジトリの `Casks/openpath.rb` にコピーします。cask の URL は `https://github.com/TamaT-LLC/openpath/releases/download/v#{version}/openpath-#{version}.zip` を前提にしています。
+ローカルの成果物は署名・公証の検証に使えます。正式公開は次の GitHub Actions の経路を使ってください。
+Homebrew tap には、正式 Release に添付された `openpath.rb` を反映します。
+ローカルと CI では署名時刻などで ZIP の SHA256 が異なるため、cask を混在させないでください。
 
-### GitHub Actions で署名・公証する
+### GitHub Actions でリリースする
 
-Actions の `Signed release artifacts` を `main` で手動実行すると、署名・公証済みの ZIP と Homebrew cask を取得できます。
-Swift のテスト後に `scripts/release.sh` を実行し、成果物を14日間保存します。
-バージョンは `Resources/Info.plist` の値を使います。
-GitHub Release の公開と tap への反映は、成果物を確認してから行ってください。
+`Release macOS` は、Fern と同じ Smoke / Preview / Stable の3経路で配布物を作ります。
+手動実行は公開前のビルド確認、タグの push は GitHub Release の公開に使います。
+
+| 経路 | 起動条件 | 署名・公証 | 出力 |
+|---|---|---|---|
+| Smoke | `workflow_dispatch` | ad-hoc 署名、公証なし | Actions artifact のみ |
+| Preview | annotated tag `preview-vX.Y.Z-N` | ad-hoc 署名、公証なし | prerelease、Latest にしない |
+| Stable | annotated tag `vX.Y.Z` | Developer ID 署名・公証・staple | 正式 Release、Latest にする |
+
+タグは `main` に含まれるコミットに付け、バージョンを `Resources/Info.plist` と一致させます。
+ZIP は Apple Silicon / Intel の両方を含む Universal 形式です。
+すべての経路で `SHA256SUMS` を生成し、Stable にだけ Homebrew cask を添付します。
+公開手順と失敗時の復旧は [リリース運用](docs/40_arch_design/guide-release-distribution.md)を参照してください。
 
 リポジトリの Settings → Secrets and variables → Actions に、次の値を登録します。
 

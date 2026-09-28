@@ -1,13 +1,17 @@
-name: Signed release artifacts
+name: Release macOS
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+      - "preview-v*"
 
 permissions:
   contents: read
 
 concurrency:
-  group: signed-release-${{ github.ref }}
+  group: release-macos-${{ github.ref }}
   cancel-in-progress: false
 
 defaults:
@@ -15,18 +19,51 @@ defaults:
     shell: bash
 
 jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      channel: ${{ steps.metadata.outputs.channel }}
+      version: ${{ steps.metadata.outputs.version }}
+      preview_number: ${{ steps.metadata.outputs.preview_number }}
+      commit: ${{ steps.metadata.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate source and release tag
+        id: metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            python3 scripts/release_metadata.py --smoke >> "${GITHUB_OUTPUT}"
+          else
+            # checkout が annotated tag を commit に置換しても、正本の tag object を検証する。
+            # private repository でも fetch できるよう、このコマンドにだけ認証を渡す。
+            auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 | tr -d '\n')"
+            echo "::add-mask::${auth}"
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
+              fetch --force --no-tags origin \
+              "+refs/heads/main:refs/remotes/origin/main" \
+              "+refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+            python3 scripts/release_metadata.py --tag "${GITHUB_REF_NAME}" >> "${GITHUB_OUTPUT}"
+          fi
+
   package:
-    if: github.ref == 'refs/heads/main'
+    needs: prepare
     runs-on: macos-15
     timeout-minutes: 90
     env:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
-      OPENPATH_SIGN_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
-      OPENPATH_NOTARY_PROFILE: openpath-ci
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.prepare.outputs.commit }}
           persist-credentials: false
+
+      - name: Test release gates
+        run: python3 scripts/release_ci_test.py
 
       - name: Test
         run: |
@@ -34,7 +71,10 @@ jobs:
           grep -Eq 'Test run with [1-9][0-9]* tests?' "${RUNNER_TEMP}/swift-test.log"
 
       - name: Prepare signing and notarization
+        if: needs.prepare.outputs.channel == 'stable'
         env:
+          OPENPATH_SIGN_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          OPENPATH_NOTARY_PROFILE: openpath-ci
           APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
@@ -81,26 +121,36 @@ jobs:
             --issuer "${APPLE_NOTARY_ISSUER_ID}" --keychain "${keychain}"
           rm "${credential_dir}/certificate.p12" "${credential_dir}/AuthKey.p8"
 
-      - name: Build, sign, notarize, and package
+      - name: Package smoke or preview
+        if: needs.prepare.outputs.channel != 'stable'
         env:
+          RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          PREVIEW_NUMBER: ${{ needs.prepare.outputs.preview_number }}
+        run: ./scripts/package_release.sh "${RELEASE_CHANNEL}" "${RELEASE_VERSION}" "${PREVIEW_NUMBER}"
+
+      - name: Package signed and notarized stable
+        if: needs.prepare.outputs.channel == 'stable'
+        env:
+          OPENPATH_SIGN_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          OPENPATH_NOTARY_PROFILE: openpath-ci
           OPENPATH_NOTARY_KEYCHAIN: ${{ runner.temp }}/openpath-signing/signing.keychain-db
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-        run: |
-          ./scripts/release.sh
-          codesign --display --verbose=2 build/openpath.app 2>&1 | grep -Fx "TeamIdentifier=${APPLE_TEAM_ID}"
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: ./scripts/package_release.sh stable "${RELEASE_VERSION}"
 
-      - name: Upload signed artifacts
-        uses: actions/upload-artifact@v7
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: openpath-signed-${{ github.sha }}
-          path: |
-            build/openpath-*.zip
-            build/Casks/openpath.rb
+          name: openpath-${{ needs.prepare.outputs.channel }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/release-dist/*
           if-no-files-found: error
           retention-days: 14
+          compression-level: 0
+          overwrite: false
 
       - name: Remove signing credentials
-        if: always()
+        if: always() && needs.prepare.outputs.channel == 'stable'
         run: |
           credential_dir="${RUNNER_TEMP}/openpath-signing"
           if [[ -f "${credential_dir}/original-keychains.txt" ]]; then
@@ -114,3 +164,23 @@ jobs:
             security delete-keychain "${credential_dir}/signing.keychain-db"
           fi
           rm -rf "${credential_dir}"
+
+  publish:
+    needs: [prepare, package]
+    if: needs.prepare.outputs.channel == 'preview' || needs.prepare.outputs.channel == 'stable'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: openpath-${{ needs.prepare.outputs.channel }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist
+      - name: Publish verified assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/publish_release.py --repo "${GITHUB_REPOSITORY}" --tag "${GITHUB_REF_NAME}" --directory dist
