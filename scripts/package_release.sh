@@ -29,7 +29,7 @@ else
   "${REPO_ROOT}/scripts/build.sh" --version "${version}"
   OPENPATH_SIGN_IDENTITY="" "${REPO_ROOT}/scripts/sign.sh"
 fi
-lipo -verify_arch arm64 x86_64 "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
+lipo "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}" -verify_arch arm64 x86_64
 codesign --verify --deep --strict "${APP_BUNDLE}"
 
 dist="${BUILD_DIR}/release-dist"

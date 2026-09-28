@@ -181,3 +181,7 @@ open build/openpath.app          # アクセシビリティ権限を付与して
 
 ローカルの Smoke は `./scripts/package_release.sh smoke <X.Y.Z>` で Universal ZIP と SHA256SUMS を確認する。
 Apple への公証提出、staple、配布後の Gatekeeper 評価は最初の Stable 実行で確認する。
+
+2026-09-28 のローカル検証では、Smoke `0.1.0` と Preview `0.1.0-1` の両方で Universal ZIP を生成できた。
+arm64 / x86_64 の包含、ad-hoc 署名、SHA256SUMS を検証し、Preview の公開前成果物チェックも成功した。
+リリース条件の自動テストは13件成功した。Apple への実際の公証と Release 公開は未実施。
