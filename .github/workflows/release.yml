@@ -1,0 +1,116 @@
+name: Signed release artifacts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signed-release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  package:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      OPENPATH_SIGN_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+      OPENPATH_NOTARY_PROFILE: openpath-ci
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Test
+        run: |
+          ./scripts/test.sh 2>&1 | tee "${RUNNER_TEMP}/swift-test.log"
+          grep -Eq 'Test run with [1-9][0-9]* tests?' "${RUNNER_TEMP}/swift-test.log"
+
+      - name: Prepare signing and notarization
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ vars.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          for name in APPLE_CERTIFICATE_BASE64 APPLE_CERTIFICATE_PASSWORD \
+            APPLE_NOTARY_PRIVATE_KEY_BASE64 APPLE_NOTARY_KEY_ID \
+            APPLE_NOTARY_ISSUER_ID APPLE_TEAM_ID OPENPATH_SIGN_IDENTITY; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::${name} is not configured"
+              exit 1
+            fi
+          done
+          umask 077
+          credential_dir="${RUNNER_TEMP}/openpath-signing"
+          mkdir "${credential_dir}"
+          keychain="${credential_dir}/signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          echo "::add-mask::${keychain_password}"
+          printf '%s' "${APPLE_CERTIFICATE_BASE64}" | base64 --decode > "${credential_dir}/certificate.p12"
+          printf '%s' "${APPLE_NOTARY_PRIVATE_KEY_BASE64}" | base64 --decode > "${credential_dir}/AuthKey.p8"
+          security list-keychains -d user > "${credential_dir}/original-keychains.txt"
+          security create-keychain -p "${keychain_password}" "${keychain}"
+          security set-keychain-settings -lut 7200 "${keychain}"
+          security unlock-keychain -p "${keychain_password}" "${keychain}"
+          security import "${credential_dir}/certificate.p12" -k "${keychain}" \
+            -P "${APPLE_CERTIFICATE_PASSWORD}" -T /usr/bin/codesign -T /usr/bin/security
+          curl --fail --silent --show-error --retry 3 \
+            https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer \
+            -o "${credential_dir}/DeveloperIDG2CA.cer"
+          security import "${credential_dir}/DeveloperIDG2CA.cer" -k "${keychain}"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "${keychain_password}" "${keychain}" > /dev/null
+          python3 - "${credential_dir}/original-keychains.txt" "${keychain}" <<'PY'
+          import pathlib, shlex, subprocess, sys
+          original = shlex.split(pathlib.Path(sys.argv[1]).read_text())
+          subprocess.run(['security', 'list-keychains', '-d', 'user', '-s', sys.argv[2], *original], check=True)
+          PY
+          security find-identity -v -p codesigning "${keychain}" | grep -F "\"${OPENPATH_SIGN_IDENTITY}\""
+          xcrun notarytool store-credentials "${OPENPATH_NOTARY_PROFILE}" \
+            --key "${credential_dir}/AuthKey.p8" --key-id "${APPLE_NOTARY_KEY_ID}" \
+            --issuer "${APPLE_NOTARY_ISSUER_ID}" --keychain "${keychain}"
+          rm "${credential_dir}/certificate.p12" "${credential_dir}/AuthKey.p8"
+
+      - name: Build, sign, notarize, and package
+        env:
+          OPENPATH_NOTARY_KEYCHAIN: ${{ runner.temp }}/openpath-signing/signing.keychain-db
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          ./scripts/release.sh
+          codesign --display --verbose=2 build/openpath.app 2>&1 | grep -Fx "TeamIdentifier=${APPLE_TEAM_ID}"
+
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: openpath-signed-${{ github.sha }}
+          path: |
+            build/openpath-*.zip
+            build/Casks/openpath.rb
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Remove signing credentials
+        if: always()
+        run: |
+          credential_dir="${RUNNER_TEMP}/openpath-signing"
+          if [[ -f "${credential_dir}/original-keychains.txt" ]]; then
+            python3 - "${credential_dir}/original-keychains.txt" <<'PY'
+          import pathlib, shlex, subprocess, sys
+          original = shlex.split(pathlib.Path(sys.argv[1]).read_text())
+          subprocess.run(['security', 'list-keychains', '-d', 'user', '-s', *original], check=True)
+          PY
+          fi
+          if [[ -f "${credential_dir}/signing.keychain-db" ]]; then
+            security delete-keychain "${credential_dir}/signing.keychain-db"
+          fi
+          rm -rf "${credential_dir}"

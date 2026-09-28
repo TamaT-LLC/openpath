@@ -3,6 +3,7 @@
 #
 # 使い方: OPENPATH_NOTARY_PROFILE=<profile> scripts/notarize.sh
 #   OPENPATH_NOTARY_PROFILE  `xcrun notarytool store-credentials <profile>` で keychain に保存したプロファイル名
+#   OPENPATH_NOTARY_KEYCHAIN  任意。CI などで認証情報を保存した一時キーチェーンのパス
 # 成果物: build/openpath-<version>.zip（staple 済みの .app を ditto で固めたもの。cask.sh の入力）
 set -euo pipefail
 
@@ -21,6 +22,15 @@ error: OPENPATH_NOTARY_PROFILE が未設定です。
     export OPENPATH_NOTARY_PROFILE=<profile>
 EOF
   exit 1
+}
+
+# CI の一時キーチェーンは明示し、ローカルでは従来の検索先を使う。
+run_notarytool() {
+  if [[ -n "${OPENPATH_NOTARY_KEYCHAIN:-}" ]]; then
+    xcrun notarytool "$@" --keychain "${OPENPATH_NOTARY_KEYCHAIN}"
+  else
+    xcrun notarytool "$@"
+  fi
 }
 
 # Notarization は Developer ID Application 証明書・Hardened Runtime・セキュアタイムスタンプの 3 つが揃っていないと
@@ -60,7 +70,7 @@ submit() {
   log "xcrun notarytool submit --wait（数分かかります）"
   # 終了コードだけでは審査結果（Accepted / Invalid / Rejected）を区別できないため、出力の status で判定する
   local exit_code=0
-  xcrun notarytool submit "${zip_path}" \
+  run_notarytool submit "${zip_path}" \
     --keychain-profile "${profile}" \
     --wait \
     --timeout "${NOTARY_WAIT_TIMEOUT}" \
@@ -78,7 +88,7 @@ submit() {
   cat "${result_path}" >&2 || true
   if [[ -n "${submission_id}" ]]; then
     warn "審査ログ（xcrun notarytool log ${submission_id}）:"
-    xcrun notarytool log "${submission_id}" --keychain-profile "${profile}" >&2 || true
+    run_notarytool log "${submission_id}" --keychain-profile "${profile}" >&2 || true
   fi
   die "Notarization が受理されませんでした"
 }
