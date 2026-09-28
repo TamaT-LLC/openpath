@@ -3,10 +3,12 @@
 import hashlib
 import importlib.util
 import json
+import os
 import pathlib
 import plistlib
 import subprocess
 import tempfile
+import textwrap
 import unittest
 from unittest.mock import patch
 
@@ -165,6 +167,39 @@ class PublicationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.module.publish('TamaT-LLC/openpath', 'v1.2.3', self.root)
             self.assertEqual(gh.call_count, 3)
+
+
+class CleanupTests(unittest.TestCase):
+    def test_all_cleanup_operations_are_attempted_even_after_failure(self):
+        workflow = (SCRIPTS.parent / '.github/workflows/release.yml').read_text()
+        section = workflow.split('      - name: Remove signing credentials\n', 1)[1]
+        body = section.split('        run: |\n', 1)[1].split('\n  publish:', 1)[0]
+        script = textwrap.dedent(body)
+        for failures in ['', 'python3', 'security', 'rm', 'python3 security rm']:
+            with self.subTest(failures=failures), tempfile.TemporaryDirectory() as temp:
+                root = pathlib.Path(temp)
+                credentials = root / 'openpath-signing'
+                credentials.mkdir()
+                for name in ['original-keychains.txt', 'signing.keychain-db', 'AuthKey.p8']:
+                    (credentials / name).write_text('fixture')
+                commands = root / 'bin'
+                commands.mkdir()
+                log = root / 'calls'
+                for name in ['python3', 'security', 'rm']:
+                    stub = commands / name
+                    stub.write_text('#!/bin/bash\n'
+                                    + f'echo {name} >> "$CALL_LOG"\n'
+                                    + f'case " $FAIL_COMMANDS " in *" {name} "*) exit 7;; esac\n'
+                                    + ('exec /bin/rm "$@"\n' if name == 'rm' else 'exit 0\n'))
+                    stub.chmod(0o755)
+                env = dict(os.environ, RUNNER_TEMP=temp, CALL_LOG=str(log), FAIL_COMMANDS=failures,
+                           PATH=str(commands) + ':' + os.environ['PATH'])
+                result = subprocess.run(['/bin/bash', '-e', '-o', 'pipefail', '-c', script], env=env,
+                                        capture_output=True, text=True)
+                self.assertEqual(log.read_text().splitlines(), ['python3', 'security', 'rm'])
+                self.assertEqual(result.returncode, 1 if failures else 0, result.stderr)
+                if 'rm' not in failures:
+                    self.assertFalse(credentials.exists())
 
 
 if __name__ == '__main__':

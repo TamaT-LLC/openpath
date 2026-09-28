@@ -177,6 +177,7 @@ open build/openpath.app          # アクセシビリティ権限を付与して
 - annotated tag、main への包含、checkout とタグの一致、Info.plist と AppInfo のバージョン一致。
 - Preview 番号とバージョンの不正形式、lightweight tag、main 外のコミットの拒否。
 - チェックサム不一致、成果物不足、余分なファイル、既存 Release の拒否。
+- キーチェーン復元・削除・ファイル削除の失敗を注入し、後続の削除を試みたうえで失敗を返すこと。
 - アップロード不足時に Draft を維持し、Preview は prerelease / 非 Latest、Stable は正式版 / Latest とすること。
 
 ローカルの Smoke は `./scripts/package_release.sh smoke <X.Y.Z>` で Universal ZIP と SHA256SUMS を確認する。

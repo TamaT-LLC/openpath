@@ -153,17 +153,19 @@ jobs:
         if: always() && needs.prepare.outputs.channel == 'stable'
         run: |
           credential_dir="${RUNNER_TEMP}/openpath-signing"
+          cleanup_status=0
           if [[ -f "${credential_dir}/original-keychains.txt" ]]; then
-            python3 - "${credential_dir}/original-keychains.txt" <<'PY'
+            python3 - "${credential_dir}/original-keychains.txt" <<'PY' || cleanup_status=1
           import pathlib, shlex, subprocess, sys
           original = shlex.split(pathlib.Path(sys.argv[1]).read_text())
           subprocess.run(['security', 'list-keychains', '-d', 'user', '-s', *original], check=True)
           PY
           fi
           if [[ -f "${credential_dir}/signing.keychain-db" ]]; then
-            security delete-keychain "${credential_dir}/signing.keychain-db"
+            security delete-keychain "${credential_dir}/signing.keychain-db" || cleanup_status=1
           fi
-          rm -rf "${credential_dir}"
+          rm -rf "${credential_dir}" || cleanup_status=1
+          exit "${cleanup_status}"
 
   publish:
     needs: [prepare, package]
