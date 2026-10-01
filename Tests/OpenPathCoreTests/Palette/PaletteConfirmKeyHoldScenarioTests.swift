@@ -73,6 +73,28 @@ struct PaletteConfirmKeyHoldScenarioTests {
         #expect(keys.passedKeys.isEmpty)
     }
 
+    @Test("上限を超えて押し続けた後に Esc を押しても閉じず、離した後の Esc で閉じる")
+    func escapeAfterLimitWhileStillHoldingIsIgnored() {
+        keys.keyDown(KeyStroke.returnKey.input())
+        keys.clock.advance(by: Self.initialRepeatDelay)
+        var elapsed = Self.initialRepeatDelay
+        while elapsed < PaletteConfirmKeyHold.maximumHold + .milliseconds(500) {
+            keys.keyDown(KeyStroke.returnKey.input(isRepeat: true))
+            keys.clock.advance(by: Self.repeatInterval)
+            elapsed += Self.repeatInterval
+        }
+        keys.keyDown(KeyStroke.escape.input())
+        keys.keyDown(KeyStroke.returnKey.input(isRepeat: true))
+        let sentWhileHeld = keys.sentEvents
+        keys.keyUp(.returnKey)
+        keys.keyUp(.escape)
+        keys.keyDown(KeyStroke.escape.input())
+
+        #expect(sentWhileHeld.isEmpty)
+        #expect(keys.sentEvents == [.dismiss])
+        #expect(keys.passedKeys.isEmpty)
+    }
+
     @Test("Esc は従来どおり keyDown で閉じる")
     func escapeDismissesOnKeyDown() {
         keys.keyDown(KeyStroke.escape.input())

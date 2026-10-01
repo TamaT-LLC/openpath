@@ -107,21 +107,22 @@ struct PaletteConfirmKeyHoldTests {
         arguments: KeyChord.paletteChords + KeyChord.textInputChords
     )
     func everyKeyDownIsDiscardedWhileHolding(chord: KeyChord) {
-        let hold = holdingConfirm()
+        var hold = holdingConfirm()
         clock.advance(by: Self.justBeforeLimit)
 
-        #expect(hold.resolve(chord.input()) == .discard)
-        #expect(hold.resolve(chord.input(isRepeat: true)) == .discard)
+        let resolutions = [chord.input(), chord.input(isRepeat: true)].map { hold.resolve($0) }
+
+        #expect(resolutions == [.discard, .discard])
     }
 
     @Test("預かっていなければ、キーの扱いは PaletteKeyBinding と同じ", arguments: KeyChord.paletteChords + KeyChord.textInputChords)
     func resolveFollowsKeyBindingWhenNotHolding(chord: KeyChord) {
-        let hold = makeHold()
+        var hold = makeHold()
         let inputs = [chord.input(), chord.input(isRepeat: true), chord.input(hasMarkedText: true), chord.input(isLocked: true)]
 
-        for input in inputs {
-            #expect(hold.resolve(input) == PaletteKeyBinding.resolve(input))
-        }
+        let resolutions = inputs.map { hold.resolve($0) }
+
+        #expect(resolutions == inputs.map(PaletteKeyBinding.resolve))
     }
 
     // MARK: - 上限
@@ -152,13 +153,18 @@ struct PaletteConfirmKeyHoldTests {
         #expect(second == .unrelated)
     }
 
-    @Test("上限を過ぎたらキーの扱いは PaletteKeyBinding に戻る（Enter のリピートは従来どおり消費し、↓ は選択を動かす）")
+    @Test("上限を過ぎ、リピートも来ていなければ、キーの扱いは PaletteKeyBinding に戻る（Enter のリピートは従来どおり消費し、↓ は選択を動かす）")
     func keysFollowKeyBindingAfterExpiry() {
-        let hold = holdingConfirm()
-        clock.advance(by: PaletteConfirmKeyHold.maximumHold)
+        var hold = holdingConfirm()
+        clock.advance(by: max(PaletteConfirmKeyHold.maximumHold, PaletteConfirmKeyHold.repeatTimeout))
 
-        #expect(hold.resolve(KeyStroke.returnKey.input(isRepeat: true)) == .discard)
-        #expect(hold.resolve(KeyStroke.downArrow.input()) == .perform(.moveSelection(by: 1)))
+        let returnRepeat = hold.resolve(KeyStroke.returnKey.input(isRepeat: true))
+        // 直前の Enter のリピートで押し続けているとみなされないよう、リピートの途切れを待ってから↓を押す
+        clock.advance(by: PaletteConfirmKeyHold.repeatTimeout)
+        let downArrow = hold.resolve(KeyStroke.downArrow.input())
+
+        #expect(returnRepeat == .discard)
+        #expect(downArrow == .perform(.moveSelection(by: 1)))
     }
 
     @Test("上限を過ぎた後に押し直した Enter は、新しい確定として預かる")
@@ -194,6 +200,75 @@ struct PaletteConfirmKeyHoldTests {
         #expect(isHoldingBeforeLimit)
         #expect(!isHoldingAtLimit)
         #expect(release == .expired)
+    }
+
+    // MARK: - 上限で取り消した後も押し続けている場合
+
+    @Test(
+        "上限で取り消した後も、そのキーのリピートが続いている間はキー入力をすべて捨てる（Esc で閉じると残りのリピートが背後のパネルへ届くため）",
+        arguments: [KeyStroke.escape, .tab, .downArrow, .a]
+    )
+    func keysStayOwnedWhileRepeatContinuesAfterExpiry(otherKey: KeyStroke) {
+        var hold = holdingConfirm()
+        let resolutionsWhileHeld = repeatingReturn(&hold, until: PaletteConfirmKeyHold.maximumHold + .milliseconds(500))
+        let otherKeyWhileHeld = hold.resolve(otherKey.input())
+
+        let release = hold.keyUp(keyCode: Self.returnKeyCode)
+        let otherKeyAfterRelease = hold.resolve(otherKey.input())
+
+        #expect(resolutionsWhileHeld.allSatisfy { $0 == .discard })
+        #expect(otherKeyWhileHeld == .discard)
+        #expect(release == .expired)
+        #expect(otherKeyAfterRelease == PaletteKeyBinding.resolve(otherKey.input()))
+    }
+
+    @Test("上限で取り消した後、リピートが途切れたら（keyUp を取りこぼした）キーの扱いを PaletteKeyBinding に戻す")
+    func keysAreReleasedWhenRepeatStopsAfterExpiry() {
+        var hold = holdingConfirm()
+        _ = repeatingReturn(&hold, until: PaletteConfirmKeyHold.maximumHold + .milliseconds(200))
+
+        clock.advance(by: PaletteConfirmKeyHold.repeatTimeout - .milliseconds(1))
+        let escapeBeforeTimeout = hold.resolve(KeyStroke.escape.input())
+        clock.advance(by: PaletteConfirmKeyHold.repeatTimeout)
+        let escapeAfterTimeout = hold.resolve(KeyStroke.escape.input())
+
+        #expect(escapeBeforeTimeout == .discard)
+        #expect(escapeAfterTimeout == .perform(.dismiss))
+    }
+
+    @Test(
+        "上限で取り消した後に同じキーを押し直したら（前の keyUp を取りこぼした）、新しい確定として扱う",
+        arguments: [false, true]
+    )
+    func pressingSameKeyAgainAfterExpiryStartsNewConfirm(isRepeating: Bool) {
+        var hold = holdingConfirm()
+        if isRepeating {
+            _ = repeatingReturn(&hold, until: PaletteConfirmKeyHold.maximumHold + .milliseconds(200))
+        } else {
+            clock.advance(by: PaletteConfirmKeyHold.maximumHold)
+        }
+        let retried = PaletteEvent.confirm(path: "/Users/example/repos/fern", openImmediately: false)
+
+        let resolution = hold.resolve(KeyStroke.returnKey.input())
+        let immediate = hold.receive(retried, onKeyDownOf: Self.returnKeyCode)
+        let release = hold.keyUp(keyCode: Self.returnKeyCode)
+
+        #expect(resolution == .perform(.confirm(openImmediately: false)))
+        #expect(immediate == nil)
+        #expect(release == .confirm(retried))
+    }
+
+    /// Enter のリピート（50ms 間隔）を、keyDown からの経過時間が `until` に達するまで渡す。
+    private func repeatingReturn(_ hold: inout PaletteConfirmKeyHold, until end: Duration) -> [PaletteKeyResolution] {
+        let interval: Duration = .milliseconds(50)
+        var elapsed: Duration = .zero
+        var resolutions: [PaletteKeyResolution] = []
+        while elapsed < end {
+            clock.advance(by: interval)
+            elapsed += interval
+            resolutions.append(hold.resolve(KeyStroke.returnKey.input(isRepeat: true)))
+        }
+        return resolutions
     }
 
     // MARK: - 取り消し
