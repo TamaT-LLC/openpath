@@ -18,6 +18,7 @@ public struct KeyEventPostingError: Error, Equatable {
 ///   横取りされることがある。注入先のプロセスへ送ったキーでシートが出なかったときの代替（`GoToSheetFallback`）で使う。
 /// - 仮想キーコードは、現在の入力ソースのキー配列から目的の文字を入力するキーを求める（Issue #68。Dvorak 等）。
 ///   求められなければ QWERTY の物理位置で送る。
+/// 送り先（AX の読み取り）とキーイベントは `prepare` で決め、送るのは呼び出し側が注入先を確かめた直後の `post()` にする。
 /// どちらの経路でも、キー入力を NSOpenPanel に向けるため、パレットはキーウィンドウを手放している必要がある
 /// （`PathInjectionHooks.prepareForKeyEvents`）。
 @MainActor
@@ -29,11 +30,11 @@ public final class KeyboardEventPoster: KeyStrokePosting {
         self.targetProcessID = targetProcessID
     }
 
-    public func post(_ keyStroke: InjectionKeyStroke, via route: InjectionKeyRoute) async throws {
+    /// 送り先を決める AX の読み取りはここで済ませる。呼び出し側は、注入先の確認の直後に待ちを挟まず `post()` で送る。
+    public func prepare(_ keyStroke: InjectionKeyStroke, via route: InjectionKeyRoute) async throws -> PreparedKeyStroke {
         let spec = keyStroke.spec
         // 文字に依らないキー（Return）では、キー配列を読まない
         let key = InjectionKeyCodeResolver.resolve(spec, translate: spec.character == nil ? nil : KeyboardLayoutTranslator.current())
-        // 送り先を決める AX の読み取りは、イベントを作る前に済ませる（キーの組み立てから送出までの間に待ちを挟まない）
         let destination = route == .targetProcess ? try await destinationProcessID(for: keyStroke) : nil
         guard let source = CGEventSource(stateID: .combinedSessionState),
               let keyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(key.keyCode), keyDown: true),
@@ -44,14 +45,16 @@ public final class KeyboardEventPoster: KeyStrokePosting {
         let flags = Self.eventFlags(for: key.modifiers)
         keyDown.flags = flags
         keyUp.flags = flags
-        if let destination {
-            keyDown.postToPid(destination.processID)
-            keyUp.postToPid(destination.processID)
-        } else {
-            keyDown.post(tap: .cghidEventTap)
-            keyUp.post(tap: .cghidEventTap)
+        return PreparedKeyStroke {
+            if let destination {
+                keyDown.postToPid(destination.processID)
+                keyUp.postToPid(destination.processID)
+            } else {
+                keyDown.post(tap: .cghidEventTap)
+                keyUp.post(tap: .cghidEventTap)
+            }
+            Log.debug("キーを送りました（\(keyStroke.logName)、\(Self.describe(destination))、\(Self.describe(key))）")
         }
-        Log.debug("キーを送りました（\(keyStroke.logName)、\(Self.describe(destination))、\(Self.describe(key))）")
     }
 
     /// 送り先のプロセス。注入先のアプリのフォーカス中の要素を持つプロセスを優先し、読めなければ注入先のアプリとする。

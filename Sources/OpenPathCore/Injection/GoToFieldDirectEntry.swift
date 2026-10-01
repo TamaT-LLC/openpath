@@ -107,14 +107,29 @@ public final class GoToFieldDirectEntry {
     private func submitByReturnKey(controls: GoToFieldControls, via route: InjectionKeyRoute, on timeline: ElapsedTimeline) async throws {
         await prepareForKeyEvents()
         try await waitForFieldFocus(controls: controls, on: timeline)
+        // 送り先を決める（AX の読み取りを伴う）準備は確認の前に済ませ、確認の後は待ちを挟まずに送る
+        let prepared = try await prepareReturnKey(via: route)
         // パレットにキーを手放させている間に切り替わっていないか、送る直前に確かめ直す
         try await InjectionTargetCheck.ensureAvailable(targetGuard, on: timeline)
-        do {
-            try await keyboard.post(.returnKey, via: route)
-            Log.debug("副方式: Return を送りました（経路: \(route.rawValue)、+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
-        } catch {
+        guard let prepared else {
             Log.debug("副方式: Return を送れなかったため、入力欄を確定します")
             try await PanelControlOperation.activate(controls.field, by: .confirm)
+            return
+        }
+        try Task.checkCancellation()
+        prepared.post()
+        Log.debug("副方式: Return を送りました（経路: \(route.rawValue)、+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
+    }
+
+    /// - Returns: Return を送れない（キーイベントを作れない・送り先を決められない）場合は nil。
+    /// - Throws: キャンセル時は `CancellationError`。
+    private func prepareReturnKey(via route: InjectionKeyRoute) async throws -> PreparedKeyStroke? {
+        try Task.checkCancellation()
+        do {
+            return try await keyboard.prepare(.returnKey, via: route)
+        } catch {
+            try Task.checkCancellation()
+            return nil
         }
     }
 

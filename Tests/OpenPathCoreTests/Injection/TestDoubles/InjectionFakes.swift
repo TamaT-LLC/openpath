@@ -44,6 +44,8 @@ final class KeyboardSpy: KeyStrokePosting {
     var onPost: ((InjectionKeyStroke) -> Void)?
     /// 送出を記録した直後に、経路と一緒に呼ばれる（経路によって届く・届かないを再現するため）。
     var onRoutedPost: ((InjectionKeyStroke, InjectionKeyRoute) -> Void)?
+    /// 送る準備（送り先の決定）の中で呼ばれる（送り先を決めている間の切り替わり・キャンセルを再現するため）。
+    var onPrepare: ((InjectionKeyStroke) -> Void)?
     /// 送ったキー操作と経路（発生順）。共有のログには経路を残さないため、こちらで確かめる。
     private(set) var routedKeyStrokes: [RoutedKeyStroke] = []
 
@@ -51,12 +53,16 @@ final class KeyboardSpy: KeyStrokePosting {
         self.log = log
     }
 
-    func post(_ keyStroke: InjectionKeyStroke, via route: InjectionKeyRoute) async throws {
+    /// キーは `post()` で送ったときに記録する（準備しただけでは記録しない）。
+    func prepare(_ keyStroke: InjectionKeyStroke, via route: InjectionKeyRoute) async throws -> PreparedKeyStroke {
         guard !failingKeyStrokes.contains(keyStroke) else { throw AdapterFailure() }
-        log.record(.key(keyStroke))
-        routedKeyStrokes.append(RoutedKeyStroke(keyStroke: keyStroke, route: route))
-        onPost?(keyStroke)
-        onRoutedPost?(keyStroke, route)
+        onPrepare?(keyStroke)
+        return PreparedKeyStroke { [self] in
+            log.record(.key(keyStroke))
+            routedKeyStrokes.append(RoutedKeyStroke(keyStroke: keyStroke, route: route))
+            onPost?(keyStroke)
+            onRoutedPost?(keyStroke, route)
+        }
     }
 }
 

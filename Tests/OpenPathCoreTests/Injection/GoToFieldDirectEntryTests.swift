@@ -132,6 +132,22 @@ struct GoToFieldDirectEntryTests {
         ])
     }
 
+    @Test("Return の送り先を決めている間に注入先が無効になったら、Return を送らずに投げる")
+    func checksTargetAfterResolvingReturnDestination() async {
+        let harness = Harness()
+        harness.locator.goButton = nil
+        harness.keyboard.onPrepare = { [targetGuard = harness.targetGuard] _ in
+            targetGuard.invalidation = (fromCheck: targetGuard.checkCount, status: .notFrontmost)
+        }
+
+        await #expect(throws: InjectionError.targetNotFrontmost) {
+            try await harness.run()
+        }
+
+        #expect(harness.log.keyStrokes.isEmpty)
+        #expect(!harness.log.events.contains(.didSubmitGoToSheet(autoConfirm: false)))
+    }
+
     @Test("「移動」ボタンが無く Return も送れなければ、入力欄を確定する（kAXConfirmAction）")
     func confirmsFieldWhenReturnCannotBePosted() async throws {
         let harness = Harness()

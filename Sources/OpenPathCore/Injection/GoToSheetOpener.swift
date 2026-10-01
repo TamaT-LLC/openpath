@@ -6,15 +6,28 @@ struct InjectionKeySender {
 
     /// 送る直前に注入先がまだ有効かを確かめる。注入中に別のアプリへ切り替わると、システム経由のキーはそのアプリに届いてしまう
     /// （チャットアプリでの送信など）。注入先のプロセスへ送るキーは別のアプリには届かないが、注入先の別のウィンドウに届くため同じく確かめる。
+    /// 送り先を決める（AX の読み取りを伴う）準備は確認の前に済ませ、確認とキャンセルの確認の後は待ちを挟まずに送る。
     func post(
         _ keyStroke: InjectionKeyStroke,
         via route: InjectionKeyRoute,
         failingAs step: InjectionStep,
         on timeline: ElapsedTimeline
     ) async throws {
+        let prepared = try await prepare(keyStroke, via: route, failingAs: step)
         try await InjectionTargetCheck.ensureAvailable(targetGuard, on: timeline)
+        try Task.checkCancellation()
+        prepared.post()
+    }
+
+    /// 送る準備（送り先の決定とキーイベントの組み立て）。失敗はステップの失敗に寄せる。
+    func prepare(
+        _ keyStroke: InjectionKeyStroke,
+        via route: InjectionKeyRoute,
+        failingAs step: InjectionStep
+    ) async throws -> PreparedKeyStroke {
+        try Task.checkCancellation()
         do {
-            try await keyboard.post(keyStroke, via: route)
+            return try await keyboard.prepare(keyStroke, via: route)
         } catch {
             throw Self.injectionError(from: error, failingAs: step)
         }

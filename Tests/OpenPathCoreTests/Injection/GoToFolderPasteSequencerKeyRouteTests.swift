@@ -260,6 +260,39 @@ struct GoToFolderPasteSequencerKeyRouteTests {
         #expect(harness.pasteboard.contents == .userClipboard)
     }
 
+    @Test("送り先を決めている（AX を読んでいる）間に注入先が最前面でなくなったら、そのキーを送らずに targetNotFrontmost。ペーストボードは戻す")
+    func checksTargetAfterResolvingDestination() async {
+        let harness = SequencerHarness(sheetAppearsAt: .milliseconds(150))
+        harness.keyboard.onPrepare = { [targetGuard = harness.targetGuard] keyStroke in
+            guard keyStroke == .paste else { return }
+            targetGuard.invalidation = (fromCheck: targetGuard.checkCount, status: .notFrontmost)
+        }
+
+        await #expect(throws: InjectionError.targetNotFrontmost) {
+            try await harness.run(path: Self.path)
+        }
+
+        #expect(harness.log.keyStrokes == [.goToFolder, .selectAll])
+        #expect(harness.pasteboard.contents == .userClipboard)
+    }
+
+    @Test("送り先を決めている間にキャンセルされたら、そのキーを送らずに CancellationError")
+    func checksCancellationAfterResolvingDestination() async {
+        let harness = SequencerHarness(sheetAppearsAt: .milliseconds(150))
+        harness.keyboard.onPrepare = { keyStroke in
+            if keyStroke == .returnKey {
+                cancelCurrentTask()
+            }
+        }
+
+        await #expect(throws: CancellationError.self) {
+            try await harness.run(path: Self.path)
+        }
+
+        #expect(harness.log.keyStrokes == [.goToFolder, .selectAll, .paste])
+        #expect(harness.pasteboard.contents == .userClipboard)
+    }
+
     @Test("次の注入は、また注入先のプロセスへ送るところから始める")
     func nextInjectionStartsWithTargetProcess() async throws {
         let harness = Self.makeHarness()

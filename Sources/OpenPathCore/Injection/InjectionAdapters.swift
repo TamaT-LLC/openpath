@@ -49,12 +49,31 @@ public enum InjectionKeyRoute: String, Equatable, Sendable {
     case systemWide
 }
 
+/// 送る準備ができたキー操作（送り先とキーイベントが決まっている）。
+/// 送る直前の注入先の確認と送出の間に待ちを挟まないよう、`post()` は同期的に送るだけにする。
+@MainActor
+public struct PreparedKeyStroke {
+    private let send: @MainActor () -> Void
+
+    public init(send: @escaping @MainActor () -> Void) {
+        self.send = send
+    }
+
+    /// 送る。
+    public func post() {
+        send()
+    }
+}
+
 /// キー操作の送出（CGEvent の抽象）。
+///
+/// 送り先を決める AX の読み取りなど待ちを伴う処理は `prepare` で済ませ、呼び出し側は注入先の確認の直後に `post()` で送る。
+/// 送り先を決めている間にフォーカスが移ったりキャンセルされたりしても、送る前の確認で止められるようにするため。
 @MainActor
 public protocol KeyStrokePosting {
     /// - Parameter route: 送る経路。`.targetProcess` では、注入先のアプリ（パネルを別プロセスが描く場合はフォーカス中の要素のプロセス）へ送る。
-    /// - Throws: キーイベントを作れない・送り先を決められず送れなかった場合。
-    func post(_ keyStroke: InjectionKeyStroke, via route: InjectionKeyRoute) async throws
+    /// - Throws: キーイベントを作れない・送り先を決められない場合。
+    func prepare(_ keyStroke: InjectionKeyStroke, via route: InjectionKeyRoute) async throws -> PreparedKeyStroke
 }
 
 /// ⌘⇧G で開く移動先シートの出現判定（AX の抽象）。
