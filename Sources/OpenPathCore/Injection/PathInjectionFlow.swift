@@ -75,7 +75,12 @@ public final class PathInjectionFlow {
             try Task.checkCancellation()
             Log.info("主方式が \(step.rawValue) で失敗したため、副方式（AX 直接セット）へ切り替えます")
             do {
-                try await secondary.run(path: normalizedPath, autoConfirm: autoConfirm, fallingBackFrom: error)
+                try await secondary.run(
+                    path: normalizedPath,
+                    autoConfirm: autoConfirm,
+                    fallingBackFrom: error,
+                    keyRoute: primary.lastKeyRoute
+                )
             } catch {
                 Log.debug("副方式の注入に失敗しました（\(error)、+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
                 throw error

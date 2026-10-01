@@ -3,7 +3,8 @@
 /// 手順（括弧内は DSN-001 §3.1 のステップ番号）:
 /// 1. 移動先シートの判定基準を記録する（`GoToSheetDetecting.makeProbe`）
 /// 2. `hooks.prepareForKeyEvents` でキー入力を NSOpenPanel へ向ける
-/// 3. ⌘⇧G を送り（3）、最大 600ms・50ms 間隔でシートの出現を待つ（4）。
+/// 3. ⌘⇧G を注入先のプロセスへ送り（3）、最大 600ms・50ms 間隔でシートの出現を待つ（4）。出なければ代替として、
+///    / かシステム経由の ⌘⇧G で送り直して最大 500ms 待ち、以降のキーもシステム経由で送る（`GoToSheetOpener`）。
 ///    ただし基準の時点で移動先シートが既に開いていて、その入力欄を AXIdentifier で特定できれば、⌘⇧G を送らず・待たずに
 ///    そのシートの入力欄を使う（Issue #95。開いているシートに ⌘⇧G を送っても新しいシートは出ない）
 /// 4. 移動先シートの入力欄がフォーカスを持つまで最大 250ms 待つ（`GoToFieldFocusWait`、Issue #74）。
@@ -19,6 +20,9 @@
 /// - ペーストボードは差し替えた後なら、成功・失敗・キャンセルのどの経路でも戻す。
 ///   失敗・キャンセル時は 200ms を待たずにすぐ戻す。戻せなければ `InjectionError.pasteboardRestoreFailed` を投げる。
 ///   元の内容が機密（パスワードマネージャー等）なら戻さずに空にする（`PasteboardSwap`。失敗ではない）。
+/// - キーは注入先のプロセスへ直接送る（`InjectionKeyRoute.targetProcess`）。他アプリのグローバルホットキー（Raycast の ⌘⇧G 等）に
+///   横取りされないため。シートが出ず代替で送り直した後と、開いていたシートで ⌘A / ⌘V が入力欄に届かなかった後は、
+///   システム経由で送る（副方式の Return も `lastKeyRoute` で引き継ぐ）。
 /// - キーを送る直前ごとに注入先がまだ有効か（アプリが最前面で、ウィンドウが残っているか）を確かめ、
 ///   無効なら送らずに `.targetNotFrontmost` / `.panelGone` を投げる。注入先の記録は呼び出し元（`PathInjectionFlow`）が行う。
 /// - キャンセルには各ステップの間と待機中に応じ、以降のキー操作は送らない。
@@ -28,7 +32,8 @@
 @MainActor
 public final class GoToFolderPasteSequencer {
     private let pasteboard: any PasteboardAccessing
-    private let keyboard: any KeyStrokePosting
+    private let sender: InjectionKeySender
+    private let opener: GoToSheetOpener
     private let sheetDetector: any GoToSheetDetecting
     private let targetGuard: any InjectionTargetGuarding
     private let fieldFocus: GoToFieldFocusWait?
@@ -38,10 +43,15 @@ public final class GoToFolderPasteSequencer {
     private let clock: any Clock<Duration>
     private let gate = InjectionSerialGate()
 
+    /// 直近の注入で、最後に使ったキーの経路。主方式が失敗した後、副方式が Return を同じ経路で送るために使う
+    /// （注入先のプロセスへ送ったキーが効かず、システム経由に切り替えた場合も引き継ぐ）。
+    public private(set) var lastKeyRoute: InjectionKeyRoute = .targetProcess
+
     /// - Parameters:
     ///   - targetGuard: キーを送る直前ごとに注入先を確かめる。配線漏れで誤送出を防げなくならないよう、既定値を持たせない。
     ///   - fieldFocus: ⌘A / ⌘V の前に、移動先シートの入力欄がフォーカスを持つまで待つ。nil なら待たずに送る。
     ///   - submitGate: Return の前に移動先シートの入力欄と候補の選択を確かめる。nil なら確かめずに Return を送る。
+    ///   - sheetFallback: 注入先のプロセスへ送った ⌘⇧G でシートが出なかったときの代替。nil なら代替を試さずに `timeout(.waitSheet)` を投げる。
     ///   - clock: 待機に使う。テストでは実時間を待たない Clock を渡す。
     public init(
         pasteboard: any PasteboardAccessing,
@@ -50,12 +60,15 @@ public final class GoToFolderPasteSequencer {
         targetGuard: any InjectionTargetGuarding,
         fieldFocus: GoToFieldFocusWait? = nil,
         submitGate: GoToSheetSubmitGate? = nil,
+        sheetFallback: GoToSheetFallback? = nil,
         hooks: PathInjectionHooks = .none,
         timing: PathInjectionTiming = .standard,
         clock: any Clock<Duration> = ContinuousClock()
     ) {
         self.pasteboard = pasteboard
-        self.keyboard = keyboard
+        let sender = InjectionKeySender(keyboard: keyboard, targetGuard: targetGuard)
+        self.sender = sender
+        opener = GoToSheetOpener(sender: sender, fallback: sheetFallback, timing: timing)
         self.sheetDetector = sheetDetector
         self.targetGuard = targetGuard
         self.fieldFocus = fieldFocus
@@ -73,17 +86,15 @@ public final class GoToFolderPasteSequencer {
         defer { gate.leave() }
         try Task.checkCancellation()
         let timeline = ElapsedTimeline(clock: clock)
+        lastKeyRoute = .targetProcess
 
         let probe = try await makeProbe(on: timeline)
         let preopenedControls = try await locatePreopenedField(probe, on: timeline)
         await hooks.prepareForKeyEvents()
         try Task.checkCancellation()
         if preopenedControls == nil {
-            try await post(.goToFolder, failingAs: .waitSheet, on: timeline)
-            Self.logStep("⌘⇧G を送りました", on: timeline)
-            try await waitForSheet(probe, on: timeline)
+            try await openGoToSheet(probe, on: timeline)
             try Task.checkCancellation()
-            Self.logStep("移動先シートが出ました", on: timeline)
         }
         let controls = try await waitForFieldFocus(knownControls: preopenedControls, on: timeline)
         try Task.checkCancellation()
@@ -92,7 +103,15 @@ public final class GoToFolderPasteSequencer {
         // （副方式へのフォールバック）にペーストボードへ触れずに済む
         let restoration = PasteboardRestoration(try replacePasteboard(with: path))
         do {
-            try await pasteAndSubmit(path: path, controls: controls, restoration: restoration, autoConfirm: autoConfirm, on: timeline)
+            try await pasteAndSubmit(
+                path: path,
+                controls: controls,
+                restoration: restoration,
+                autoConfirm: autoConfirm,
+                // 開いていたシートでは、注入先のプロセスへ送ったキーが届くかをまだ確かめていない
+                isKeyRouteUnverified: preopenedControls != nil,
+                on: timeline
+            )
         } catch {
             try Self.restore(restoration)
             throw error
@@ -115,7 +134,7 @@ public final class GoToFolderPasteSequencer {
                 try await sheetDetector.makeProbe(cutoff: cutoff)
             }
         } catch {
-            throw Self.injectionError(from: error, failingAs: .waitSheet)
+            throw InjectionKeySender.injectionError(from: error, failingAs: .waitSheet)
         }
     }
 
@@ -134,33 +153,17 @@ public final class GoToFolderPasteSequencer {
         return controls
     }
 
-    /// 最初の確認は間隔 1 回分待ってから行う。⌘⇧G の直後にシートが出ていることはなく、AX の往復が無駄になるため。
-    /// 走査は期限で打ち切るため、期限の時点から始める確認は行わない。
-    private func waitForSheet(_ probe: any GoToSheetProbe, on timeline: ElapsedTimeline) async throws {
-        let deadline = timeline.elapsed + timing.sheetWaitLimit
-        var nextCheck = timeline.elapsed + timing.sheetPollInterval
-        while nextCheck < deadline {
-            try await timeline.sleep(untilElapsed: nextCheck)
-            if try await isSheetShown(probe, cutoffAt: deadline, on: timeline) {
-                return
-            }
-            nextCheck = timeline.elapsed + timing.sheetPollInterval
+    /// ⌘⇧G を注入先のプロセスへ送ってシートを開く。出なければ代替で送り直し、以降のキーをシステム経由に切り替える。
+    private func openGoToSheet(_ probe: any GoToSheetProbe, on timeline: ElapsedTimeline) async throws {
+        if try await opener.openThroughTargetProcess(probe, on: timeline) {
+            return
         }
-        throw InjectionError.timeout(step: .waitSheet)
-    }
-
-    private func isSheetShown(
-        _ probe: any GoToSheetProbe,
-        cutoffAt deadline: Duration,
-        on timeline: ElapsedTimeline
-    ) async throws -> Bool {
-        do {
-            return try await withScanCutoff(at: deadline, on: timeline) { cutoff in
-                try await probe.isSheetShown(cutoff: cutoff)
-            }
-        } catch {
-            throw Self.injectionError(from: error, failingAs: .waitSheet)
+        guard opener.canFallBack else {
+            throw InjectionError.timeout(step: .waitSheet)
         }
+        // 注入先のプロセスへ送ったキーが届かなかったとみなし、代替が失敗しても副方式の Return はシステム経由で送る
+        lastKeyRoute = .systemWide
+        try await opener.openThroughSystemRoute(probe, on: timeline)
     }
 
     /// シートが AX に現れた直後は入力欄がまだキー入力の受け先になっておらず、⌘A / ⌘V が入力欄に届かないことがある
@@ -198,14 +201,20 @@ public final class GoToFolderPasteSequencer {
         controls: GoToFieldControls?,
         restoration: PasteboardRestoration,
         autoConfirm: Bool,
+        isKeyRouteUnverified: Bool,
         on timeline: ElapsedTimeline
     ) async throws {
         let heldPathBeforePaste = await submitGate?.fieldMatches(path: path, controls: controls)
-        try await post(.selectAll, failingAs: .waitPaste, on: timeline)
-        try await post(.paste, failingAs: .waitPaste, on: timeline)
+        try await sender.post(.selectAll, via: lastKeyRoute, failingAs: .waitPaste, on: timeline)
+        try await sender.post(.paste, via: lastKeyRoute, failingAs: .waitPaste, on: timeline)
         Self.logStep("⌘A と ⌘V を送りました", on: timeline)
         try await timeline.sleep(untilElapsed: timeline.elapsed + timing.pasteSettleDelay)
-        let readiness = try await ensureReadyToSubmit(path: path, controls: controls, on: timeline)
+        let readiness = try await ensureReadyToSubmit(
+            path: path,
+            controls: controls,
+            switchesRouteOnMismatch: isKeyRouteUnverified,
+            on: timeline
+        )
         // 貼り付けで入力欄が別の値から移動先に変わったなら、⌘V は処理済みでペーストボードの役目は終わっている。
         // 最初から移動先が入っていた（前回と同じ移動先）場合は、⌘V が処理されたか分からないため Return の後まで戻さない
         if heldPathBeforePaste == false, readiness?.confirmsFieldValue == true {
@@ -213,7 +222,7 @@ public final class GoToFolderPasteSequencer {
             Self.logStep("貼り付けたパスが入力欄に入ったため、Return の前にペーストボードを戻しました", on: timeline)
         }
         try await ensureFieldStillFocused(controls, on: timeline)
-        try await post(.returnKey, failingAs: .waitPaste, on: timeline)
+        try await sender.post(.returnKey, via: lastKeyRoute, failingAs: .waitPaste, on: timeline)
         Self.logStep("Return を送りました", on: timeline)
 
         let submittedAt = timeline.elapsed
@@ -224,16 +233,23 @@ public final class GoToFolderPasteSequencer {
 
     /// 入力欄の値が移動先でないまま Return を送ると、移動先シートに残っていた前回の場所へ移動してしまう（Issue #74）。
     /// その場合は Return を送らずに `timeout(.waitPaste)` を投げ、AX で値を直接セットする副方式に任せる。
+    /// - Parameter switchesRouteOnMismatch: 入力欄が移動先にならなければ、注入先のプロセスへ送ったキーが届かなかったとみなし、
+    ///   副方式の Return をシステム経由で送るよう切り替えるか（注入先のプロセスへ送るキーをまだ確かめていない、開いていたシートの場合）。
     /// - Returns: 確定前の確認の判定。確かめない（submitGate が無い）場合は nil。
     private func ensureReadyToSubmit(
         path: String,
         controls: GoToFieldControls?,
+        switchesRouteOnMismatch: Bool,
         on timeline: ElapsedTimeline
     ) async throws -> GoToSheetReadiness? {
         guard let submitGate else { return nil }
         let readiness = try await submitGate.waitUntilReady(path: path, controls: controls)
         Self.logStep("確定前の確認を終えました（\(readiness.rawValue)）", on: timeline)
         guard readiness != .fieldMismatch else {
+            if switchesRouteOnMismatch, lastKeyRoute == .targetProcess {
+                lastKeyRoute = .systemWide
+                Self.logStep("注入先のプロセスへ送った ⌘A / ⌘V が入力欄に届かなかったため、以降のキーはシステム経由で送ります", on: timeline)
+            }
             Log.warning("移動先シートの入力欄が貼り付けたパスになっていないため、Return を送らずに副方式へ切り替えます")
             throw InjectionError.timeout(step: .waitPaste)
         }
@@ -254,23 +270,8 @@ public final class GoToFolderPasteSequencer {
         throw InjectionError.timeout(step: .waitPaste)
     }
 
-    /// キーはその時点のキーウィンドウに届くため、送る直前に注入先がまだ有効かを確かめる。
-    /// 注入中に別のアプリへ切り替わると、⌘A / ⌘V / Return がそのアプリに届いてしまう（チャットアプリでの送信など）。
-    private func post(
-        _ keyStroke: InjectionKeyStroke,
-        failingAs step: InjectionStep,
-        on timeline: ElapsedTimeline
-    ) async throws {
-        try await InjectionTargetCheck.ensureAvailable(targetGuard, on: timeline)
-        do {
-            try keyboard.post(keyStroke)
-        } catch {
-            throw Self.injectionError(from: error, failingAs: step)
-        }
-    }
-
     /// 手順の進み具合を、注入の開始からの経過時間付きで debug ログに残す。
-    private static func logStep(_ step: String, on timeline: ElapsedTimeline) {
+    static func logStep(_ step: String, on timeline: ElapsedTimeline) {
         Log.debug("主方式: \(step)（+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
     }
 
@@ -285,17 +286,5 @@ public final class GoToFolderPasteSequencer {
         case .restored, .skippedBecauseReplacedByOthers, .alreadyRestored:
             break
         }
-    }
-
-    /// OS 側の操作の失敗を InjectionError に寄せる。InjectionError とキャンセルはそのまま通す。
-    private static func injectionError(from error: any Error, failingAs step: InjectionStep) -> any Error {
-        if error is InjectionError || error is CancellationError {
-            return error
-        }
-        // 走査を打ち切った理由がキャンセルなら、タイムアウトではなくキャンセルとして伝える
-        if error is ScanCutoff.Reached, Task.isCancelled {
-            return CancellationError()
-        }
-        return InjectionError.timeout(step: step)
     }
 }

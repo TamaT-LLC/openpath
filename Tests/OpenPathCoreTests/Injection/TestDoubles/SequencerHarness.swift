@@ -17,6 +17,8 @@ final class SequencerHarness {
     let goToField: PanelElementFake
     let suggestions = SuggestionListFake()
     let goToFieldLocator: GoToFieldLocatorFake
+    /// ⌘⇧G でシートが出なかったときの代替が読む、フォーカス中の要素（fallsBackWhenSheetMissing のときだけ使う）。
+    let focusReader: FocusReaderFake
     let sequencer: GoToFolderPasteSequencer
 
     /// ⌘⇧G で開いた移動先シートの入力欄に、最初から入っている前回の移動先。
@@ -27,11 +29,15 @@ final class SequencerHarness {
     ///   - clipboard: 注入前にユーザーがコピーしていた内容。
     ///   - checksBeforeSubmit: Return の前に入力欄の値と候補の選択を確かめるか（`GoToSheetSubmitGate`、Issue #74）。
     ///   - waitsForFieldFocus: ⌘A / ⌘V の前に入力欄がフォーカスを持つまで待つか（`GoToFieldFocusWait`、Issue #74）。
+    ///   - fallsBackWhenSheetMissing: 注入先のプロセスへ送った ⌘⇧G でシートが出なければ代替を試すか（`GoToSheetFallback`）。
+    ///   - readsFocusForFallback: 代替で、フォーカス中の要素を読んで / を使うか。false なら ⌘⇧G だけを送り直す。
     init(
         sheetAppearsAt: Duration? = .milliseconds(150),
         clipboard: PasteboardSnapshot = .userClipboard,
         checksBeforeSubmit: Bool = false,
-        waitsForFieldFocus: Bool = false
+        waitsForFieldFocus: Bool = false,
+        fallsBackWhenSheetMissing: Bool = false,
+        readsFocusForFallback: Bool = true
     ) {
         let log = InjectionEventLog(clock: clock)
         let pasteboard = FakePasteboard(contents: clipboard)
@@ -48,6 +54,7 @@ final class SequencerHarness {
         goToFieldLocator.logsLookups = false
         goToFieldLocator.field = goToField
         goToFieldLocator.suggestionList = suggestions
+        focusReader = FocusReaderFake(clock: clock)
         if checksBeforeSubmit || waitsForFieldFocus {
             // ⌘V で、そのときのペーストボードの文字列が入力欄に入る（OS の貼り付けを再現する）。
             // キー入力はフォーカスを持つ要素に届くため、入力欄がフォーカスを持っていなければ入らない
@@ -68,6 +75,9 @@ final class SequencerHarness {
                     normalizer: InjectionPathNormalizer(homeDirectory: "/Users/me"),
                     clock: clock
                 )
+                : nil,
+            sheetFallback: fallsBackWhenSheetMissing
+                ? GoToSheetFallback(focusReader: readsFocusForFallback ? focusReader : nil)
                 : nil,
             hooks: hooks.hooks,
             timing: .standard,

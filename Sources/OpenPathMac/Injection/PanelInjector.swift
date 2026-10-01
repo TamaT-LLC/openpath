@@ -9,6 +9,7 @@ import OpenPathCore
 /// ここでは NSPasteboard / CGEvent / AX / NSWorkspace のアダプタを組み立てて渡すだけにする。
 /// - パスの正規化（DSN-001 §4）
 /// - 主方式（⌘⇧G + ペースト、§3.1）と、シートが出ない・貼り付けられない場合の副方式（AX 直接セット、§3.2）
+/// - キーは注入先のプロセスへ直接送り（`KeyboardEventPoster`）、シートが出なければ / かシステム経由の ⌘⇧G で送り直す（`GoToSheetFallback`）
 /// - キー入力（⌘A / ⌘V / Return）の前の、移動先シートの入力欄のフォーカスの待ち合わせ（`GoToFieldFocusWait`、Issue #74）
 /// - 確定（Return・「移動」）の前の、移動先シートの入力欄と候補の選択の確認（`GoToSheetSubmitGate`、Issue #74）
 /// - auto_confirm / Cmd+Enter の「開く」の押下（§3.1 ステップ 8）
@@ -38,7 +39,8 @@ public final class PanelInjector: PathInjecting {
         // シートの判定と要素探しは、注入の最初に記録した注入先に対して行う（途中でフォーカスが移っても別のアプリ・ウィンドウを走査しない）
         let targetProcessID: InjectionTargetProcessID = { [targetGuard] in targetGuard.targetProcessID }
         let targetWindow: InjectionTargetWindow = { [targetGuard] in targetGuard.targetWindow }
-        let keyboard = KeyboardEventPoster()
+        // キーは注入先のプロセスへ直接送り、他アプリのグローバルホットキー（⌘⇧G）に横取りされないようにする
+        let keyboard = KeyboardEventPoster(targetProcessID: targetProcessID)
         let goToFieldLocator = GoToFieldLocator(targetWindow: targetWindow)
         let submitGate = GoToSheetSubmitGate(locator: goToFieldLocator, clock: clock)
         let fieldFocus = GoToFieldFocusWait(locator: goToFieldLocator, clock: clock)
@@ -56,6 +58,7 @@ public final class PanelInjector: PathInjecting {
                 targetGuard: targetGuard,
                 fieldFocus: fieldFocus,
                 submitGate: submitGate,
+                sheetFallback: GoToSheetFallback(focusReader: InjectionFocusReader(targetProcessID: targetProcessID)),
                 hooks: PathInjectionHooks(prepareForKeyEvents: prepareForKeyEvents, didSubmitGoToSheet: autoConfirm.hook),
                 clock: clock
             ),

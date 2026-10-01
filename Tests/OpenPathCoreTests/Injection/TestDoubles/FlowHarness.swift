@@ -20,10 +20,19 @@ final class FlowHarness {
     /// 主方式の確定前の確認が入力欄を探す先（副方式の探し方と区別するため、探したことをログに残さない）。
     let submitCheckLocator: GoToFieldLocatorFake
     let openButtonLocator: OpenButtonLocatorFake
+    /// ⌘⇧G でシートが出なかったときの代替が読む、フォーカス中の要素（fallsBackWhenSheetMissing のときだけ使う）。
+    let focusReader: FocusReaderFake
     let flow: PathInjectionFlow
 
-    /// - Parameter sheetAppearsAt: この経過時間以降の判定で移動先シートが出たことにする。nil なら出ない（副方式へ）。
-    init(sheetAppearsAt: Duration? = .milliseconds(150), clipboard: PasteboardSnapshot = .userClipboard) {
+    /// - Parameters:
+    ///   - sheetAppearsAt: この経過時間以降の判定で移動先シートが出たことにする。nil なら出ない（副方式へ）。
+    ///   - fallsBackWhenSheetMissing: 注入先のプロセスへ送った ⌘⇧G でシートが出なければ代替を試すか（PanelInjector は試す）。
+    ///     既存のタイムラインのテストを変えないよう、既定では試さない。
+    init(
+        sheetAppearsAt: Duration? = .milliseconds(150),
+        clipboard: PasteboardSnapshot = .userClipboard,
+        fallsBackWhenSheetMissing: Bool = false
+    ) {
         let log = InjectionEventLog(clock: clock)
         let pasteboard = FakePasteboard(contents: clipboard)
         pasteboard.onWrite = { log.record(.pasteboardWrite($0)) }
@@ -43,6 +52,7 @@ final class FlowHarness {
         submitCheckLocator.field = goToField
         openButtonLocator = OpenButtonLocatorFake(clock: clock, log: log)
         openButtonLocator.button = openButton
+        focusReader = FocusReaderFake(clock: clock)
         // ⌘V で、そのときのペーストボードの文字列が入力欄に入る（OS の貼り付けを再現する）。
         // キー入力はフォーカスを持つ要素に届くため、入力欄がフォーカスを持っていなければ入らない
         keyboard.onPost = { [goToField, pasteboard] keyStroke in
@@ -69,6 +79,7 @@ final class FlowHarness {
                 targetGuard: targetGuard,
                 fieldFocus: primaryFieldFocus,
                 submitGate: GoToSheetSubmitGate(locator: submitCheckLocator, normalizer: normalizer, clock: clock),
+                sheetFallback: fallsBackWhenSheetMissing ? GoToSheetFallback(focusReader: focusReader) : nil,
                 hooks: PathInjectionHooks(prepareForKeyEvents: prepareForKeyEvents, didSubmitGoToSheet: didSubmit),
                 clock: clock
             ),
