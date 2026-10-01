@@ -1,0 +1,36 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    ":configMigration",
+    ":enableVulnerabilityAlerts"
+  ],
+  "timezone": "Asia/Tokyo",
+  "schedule": ["* 0-5 * * 1"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "automerge": false,
+  "dependencyDashboardAutoclose": true,
+  "labels": ["dependencies"],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "automerge": false,
+    "dependencyDashboardApproval": true,
+    "minimumReleaseAge": null,
+    "addLabels": ["security"]
+  },
+  "packageRules": [
+    {
+      "description": "Group GitHub Actions updates while retaining digest pinning; a maintainer updates .github/actions-policy.json in the same pull request",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "Require Dependency Dashboard approval for major updates",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    }
+  ]
+}

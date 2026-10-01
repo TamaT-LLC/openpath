@@ -1,0 +1,114 @@
+name: Bug report
+description: 再現できる不具合を報告する
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        security vulnerability はこの Issue に書かず、[private vulnerability report](https://github.com/TamaT-LLC/openpath/security/advisories/new) から報告してください。
+        ログ、設定、スクリーンショットにはフォルダ名やファイル名が含まれることがあります。再現に不要なパスとユーザー名は `~/<project>` のように伏せてください。
+
+  - type: input
+    id: version
+    attributes:
+      label: openpath の version または commit
+      description: Release の tag、またはソースからビルドした commit SHA を記載してください。
+      placeholder: "v0.1.0、preview-v0.1.0-1、または 0123456"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: 入手方法
+      options:
+        - GitHub Releases の Stable
+        - GitHub Releases の Preview
+        - Homebrew cask
+        - ソースからビルド（scripts/build.sh）
+        - swift run
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS の version と Mac
+      description: Apple Silicon か Intel かも記載してください。
+      placeholder: macOS 15.6（Apple Silicon）
+    validations:
+      required: true
+
+  - type: input
+    id: target-app
+    attributes:
+      label: 対象のアプリと version
+      description: ファイル選択パネルを開いたアプリです。
+      placeholder: Claude Desktop 1.0、VS Code 1.105、Safari 26
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 発生した問題
+      description: 何が起きたかを簡潔に記載してください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 再現手順
+      description: パネルを開く操作から順に、最小の手順を記載してください。
+      placeholder: |
+        1. VS Code で「ファイル > フォルダーを開く…」を選ぶ
+        2. パレットに `fern` と入力して Enter を押す
+        3. ...が発生する
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する結果
+      description: 正常時に期待する動作を記載してください。
+    validations:
+      required: true
+
+  - type: input
+    id: scenario
+    attributes:
+      label: 関係する手動シナリオの ID
+      description: "[手動シナリオテスト](https://github.com/TamaT-LLC/openpath/blob/main/docs/50_test/test-openpath-manual-scenarios.md) の ID です。分からなければ空欄で構いません。"
+      placeholder: S-03、PAL-01
+
+  - type: textarea
+    id: config
+    attributes:
+      label: 既定から変えた設定
+      description: "`~/.config/openpath/config.toml` のうち、既定から変えたキーだけを記載してください。`roots` などのパスは伏せてください。"
+      render: toml
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: パスを伏せた debug ログ
+      description: |
+        openpath を終了し、`defaults write jp.tamat.openpath logLevel debug` を実行してから起動し直して再現すると、`~/Library/Logs/openpath/openpath.log` に debug ログが残ります。
+        debug ログにはパスが平文で残るため、貼り付ける前に伏せてください。確認が終わったら `defaults delete jp.tamat.openpath logLevel` で戻してください。
+      render: text
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: 確認事項
+      options:
+        - label: 既存の Issue に同じ報告がないことを確認しました。
+          required: true
+        - label: 再現に不要なパス、ユーザー名、credential を伏せました。
+          required: true
+        - label: security vulnerability の報告ではありません。
+          required: true

@@ -1,15 +1,33 @@
 ## 概要
 
-<!-- 何を、なぜ変えたか。対応する Issue があれば末尾に Closes #番号 / Refs #番号 -->
+<!-- 何を、なぜ変えたか。 -->
 
 ## 変更内容
 
 -
 
-## テスト
+## 関連 Issue
 
-- [ ] `./scripts/test.sh`（Xcode 環境では `swift test`）が通る
+<!-- `Closes #123` または `Refs #123` を記載してください。 -->
+
+## 検証結果
+
 - [ ] `swift build` が警告なく通る
+- [ ] `./scripts/test.sh`（Xcode 環境では `swift test`）が通る
+- [ ] release workflow や `scripts/` のリリース処理を変えた場合は `python3 scripts/release_ci_test.py` が通る
+- [ ] `.github/` を変えた場合は `python3 scripts/github_policy_check.py` が通る
+- [ ] 実行できなかった検証は、理由と影響範囲を本文に記載した
+
+## Privacy と security
+
+- [ ] パス、ユーザー名、debug ログ、credential を含めていない
+- [ ] 検知の対象、キー入力、クリップボード、ログに残す内容、保存するデータへの影響を確認した
+- [ ] 新しい権限、子プロセス、ネットワーク通信を加える場合は、理由を本文に記載した
+
+## 文書
+
+- [ ] 挙動の変更に合わせて README と `docs/` の設計文書を更新した
+- [ ] 利用者に見える変更を `docs/releases/unreleased.md` に追記した
 
 ## 手動シナリオ（アプリの挙動に関わる PR のみ）
 
