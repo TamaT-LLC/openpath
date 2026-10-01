@@ -279,7 +279,8 @@ struct PalettePresenterTests {
     func expiredWaitDoesNotRevealNextPanel() async {
         presenter.show(context: .sample)
         await search.waitForCalls(1)
-        await MainActorQueue.drain()
+        // 待ちのタイマーが sleep に入ってから期限を進める（入る前に取り消すと、期限後の確かめを通らないため）
+        await MainActorQueue.waitUntil { clock.pendingSleeperCount == 1 }
 
         // 前のパネルの待ちが期限に達したが、その続きが MainActor で走る前に別のパネルを出す
         clock.advance(by: PalettePresenter.initialRowsWaitLimit)

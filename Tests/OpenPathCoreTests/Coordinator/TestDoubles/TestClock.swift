@@ -34,6 +34,11 @@ final class TestClock: Clock, @unchecked Sendable {
         lock.withLock { currentInstant }
     }
 
+    /// 期限を待っている sleep の数。時刻を進める前に、待ちが登録されたことを確かめるために使う。
+    var pendingSleeperCount: Int {
+        lock.withLock { sleepers.count }
+    }
+
     var minimumResolution: Swift.Duration {
         .zero
     }
