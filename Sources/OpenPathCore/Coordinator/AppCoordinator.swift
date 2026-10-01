@@ -45,7 +45,10 @@ public final class AppCoordinator {
     /// パネルを見失ったためにパレットで見せられなかった（または見せていたパレットを閉じた）注入の失敗。Idle 中だけ持つ。
     /// PanelWatcher はアプリを切り替えると panelGone を送り、元のアプリに戻ると開いたままのパネルを再通知する（PR #46）。
     /// 切り替えている間は他のアプリの上にパレットを出さず、同じパネルの再通知でパレットにこの失敗を付けて出す（#94）。
-    /// 別のパネルのパレットを出したら忘れる。パネルの id は使い回されない（OpenPanelLocator の連番）ため期限は設けない。
+    /// パレットの表示中に 1.5 秒でタイムアウトして Idle に戻ったときも、エラーを出したパレットを残したまま持つ。
+    /// PanelWatcher は Idle に戻ると開いたままのパネルを再通知するため、パレットを出し直すときに付け直す（#101）。
+    /// 別のパネルのパレットを出したら忘れる。Idle で残ったパレットを Esc で閉じたら、見たものとして忘れる。
+    /// パネルの id は使い回されない（OpenPanelLocator の連番）ため期限は設けない。
     private var failureToReshow: PanelFailure?
 
     /// - Parameters:
@@ -91,7 +94,8 @@ public final class AppCoordinator {
             guard injectedPanel?.id != context.id else { return }
             let failure = failureToReshow?.panelID == context.id ? failureToReshow : nil
             showPalette(for: context)
-            // 切り替えている間に終えた注入の失敗を、戻ったパネルのパレットで伝える（検索語と選択は PalettePresenter が保つ）
+            // 切り替えている間に終えた注入の失敗（#94）や、タイムアウトで出したエラー（#101）を、
+            // 出し直したパレットで伝える（検索語と選択は PalettePresenter が保つ）
             if let failure {
                 showFailure(failure.message, for: context)
             }
@@ -108,7 +112,8 @@ public final class AppCoordinator {
         switch state {
         case .idle:
             injectedPanel = nil
-            // タイムアウトで Idle に戻った後もエラー表示のパレットが残り得るため、閉じておく
+            // タイムアウトで Idle に戻った後もエラー表示のパレットが残り得るため、閉じておく。
+            // 覚えたエラーは、同じパネルが戻ってきたときに出し直すため忘れない（#101）
             palette.hide()
         case .panelShown(let context, _):
             let restoreFailure = pendingRestoreFailure
@@ -173,7 +178,9 @@ public final class AppCoordinator {
     private func escape() {
         switch state {
         case .idle:
-            // タイムアウト後に残ったエラー表示のパレットを閉じられるようにする
+            // タイムアウト後に残ったエラー表示のパレットを閉じられるようにする。
+            // Esc はパレットにキーがあるときだけ届くため、出していたエラーは利用者が見たものとして忘れる
+            failureToReshow = nil
             palette.hide()
         case .panelShown(let context, isPaletteVisible: true):
             pendingRestoreFailure = nil
@@ -301,9 +308,13 @@ public final class AppCoordinator {
             palette.setLocked(false)
             showFailure(PanelFailure.message(for: error), for: context)
         case .timedOut:
+            // パネルの状態が分からないため Idle に戻し、エラーを出したパレットは残す。PanelWatcher は Idle に戻ると
+            // 開いたままのパネルを再通知し、パレットを出し直すと状態表示が消えるため、そのときに付け直せるよう覚えておく（#101）
+            let failure = PanelFailure(panelID: context.id, message: PaletteMessage.injectionTimedOut)
+            failureToReshow = failure
             state = .idle
             palette.setLocked(false)
-            palette.showError(PaletteMessage.injectionTimedOut)
+            palette.showError(failure.message)
         }
     }
 

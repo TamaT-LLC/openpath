@@ -166,8 +166,9 @@ struct AppCoordinatorCancellationTests {
         #expect(harness.palette.calls.last == .hide)
     }
 
-    @Test("タイムアウト後にパネルを再検知すると PanelShown に戻り、パレットを表示し直す")
-    func panelRedetectedAfterTimeout() async {
+    @Test("タイムアウト後にパネルを再検知すると PanelShown に戻り、パレットを表示し直してタイムアウトのエラーを付け直す")
+    func panelRedetectedAfterTimeout() async throws {
+        let expectedMessage = try #require(InjectionError.timeout(step: .overall).userMessage)
         let harness = await Self.makeInjectingHarness()
         harness.clock.advance(by: AppCoordinator.injectionTimeout)
         await harness.waitForState(.idle)
@@ -175,6 +176,7 @@ struct AppCoordinatorCancellationTests {
         harness.showPanel(.sample)
 
         #expect(harness.coordinator.state == .panelShown(.sample, isPaletteVisible: true))
-        #expect(harness.palette.calls.last == .show(.sample))
+        // 表示し直すと状態表示が消えるため、エラーを付け直す（#101）
+        #expect(harness.palette.calls.suffix(2) == [.show(.sample), .showError(expectedMessage)])
     }
 }

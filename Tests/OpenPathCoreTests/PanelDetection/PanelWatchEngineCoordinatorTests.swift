@@ -27,8 +27,9 @@ struct PanelWatchEngineCoordinatorTests {
         #expect(watcher.events == [.panelAppeared(.finderPanel)])
     }
 
-    @Test("注入タイムアウトで Idle に戻ると、開いたままのパネルを再検知してパレットを出し直す")
-    func reannouncesOpenPanelAfterInjectionTimeout() async {
+    @Test("注入タイムアウトで Idle に戻ると、開いたままのパネルを再検知してパレットを出し直し、タイムアウトのエラーを付け直す（#101）")
+    func reannouncesOpenPanelAfterInjectionTimeout() async throws {
+        let message = try #require(InjectionError.timeout(step: .overall).userMessage)
         let watcher = PanelWatchEngineHarness()
         let coordinator = CoordinatorHarness(injectorBehavior: .suspend(respondsToCancellation: true))
         watcher.connect(to: coordinator)
@@ -47,7 +48,13 @@ struct PanelWatchEngineCoordinatorTests {
             .idle,
             panelShown,
         ])
-        #expect(coordinator.palette.calls.last == .show(.finderPanel))
+        // タイムアウトで出したエラーを、再通知でパレットを出し直した後に付け直す
+        #expect(coordinator.palette.calls.suffix(4) == [
+            .setLocked(false),
+            .showError(message),
+            .show(.finderPanel),
+            .showError(message),
+        ])
         #expect(watcher.events == [.panelAppeared(.finderPanel), .panelAppeared(.finderPanel)])
     }
 
