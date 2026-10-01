@@ -12,6 +12,8 @@ struct FakeAXElement: Equatable, Sendable {
     var identifier: String?
     var value: String?
     var children: [FakeAXElement] = []
+    /// 既定ボタン（AXDefaultButton）の名前。ウィンドウ・シートの子孫のボタンを指す。
+    var defaultButtonName: String?
 
     /// 独立したダイアログとして表示された NSOpenPanel（DSN-001 §2.2）。
     static func dialog(_ children: [FakeAXElement]) -> FakeAXElement {
@@ -25,6 +27,41 @@ struct FakeAXElement: Equatable, Sendable {
 
     static func sheet(_ name: String, _ children: [FakeAXElement]) -> FakeAXElement {
         FakeAXElement(name: name, role: "AXSheet", children: children)
+    }
+
+    /// 非モーダルの NSOpenPanel（`begin(completionHandler:)`、NSDocumentController の「開く…」）。
+    /// サブロールは AXStandardWindow で、AXIdentifier が `open-panel`（Issue #83）。
+    static func nonModalPanel(_ children: [FakeAXElement]) -> FakeAXElement {
+        FakeAXElement(name: "non-modal-panel", role: "AXWindow", subrole: "AXStandardWindow", identifier: "open-panel", children: children)
+    }
+
+    /// ホストのウィンドウにシートとして付いた NSOpenPanel をフォーカス中のウィンドウとして読んだもの。
+    /// ロールは AXSheet でサブロールは無い（macOS 27 の自プロセスのパネルで確認、Issue #89）。
+    static func panelSheet(_ children: [FakeAXElement]) -> FakeAXElement {
+        FakeAXElement(name: "panel-sheet", role: "AXSheet", identifier: "OpenPanel", children: children)
+    }
+
+    /// macOS 13 以降の移動先シートを、フォーカス中のウィンドウとして読んだもの（ロールは AXSheet、サブロールは無い。Issue #95）。
+    static func goToSheetWindow() -> FakeAXElement {
+        FakeAXElement(name: "go-to-window", role: "AXSheet", identifier: "GoToWindow", children: [
+            FakeAXElement(name: "label", role: "AXStaticText"),
+            FakeAXElement(name: "close", role: "AXButton", identifier: "CloseButton"),
+            .pathTextField("path"),
+            FakeAXElement(name: "scroll", role: "AXScrollArea", children: [.suggestionTable([])]),
+        ])
+    }
+
+    /// 自身と子孫のうち、名前が name の最初の要素。
+    func descendant(named name: String) -> FakeAXElement? {
+        if self.name == name {
+            return self
+        }
+        for child in children {
+            if let found = child.descendant(named: name) {
+                return found
+            }
+        }
+        return nil
     }
 
     static func group(_ name: String, _ children: [FakeAXElement]) -> FakeAXElement {
@@ -171,13 +208,32 @@ enum FakeAXSearch {
         in root: FakeAXElement,
         counter: AXOperationCounter = AXOperationCounter(),
         cutoff: ScanCutoff = .never
-    ) throws -> FakeAXElement? {
+    ) throws -> OpenButtonMatch<FakeAXElement>? {
         try OpenButtonSearch.locate(
             in: root,
             cutoff: cutoff,
             role: { counter.record(); return $0.role },
             subrole: { counter.record(); return $0.subrole },
+            identifier: { counter.record(); return $0.identifier },
             title: { counter.record(); return $0.title },
+            defaultButton: { container in
+                counter.record()
+                return container.defaultButtonName.flatMap(container.descendant(named:))
+            },
+            children: { counter.record(); return $0.children }
+        )
+    }
+
+    static func isGoToSheet(
+        _ window: FakeAXElement,
+        counter: AXOperationCounter = AXOperationCounter(),
+        cutoff: ScanCutoff = .never
+    ) throws -> Bool {
+        try GoToSheetIdentity.isGoToSheet(
+            window,
+            cutoff: cutoff,
+            role: { counter.record(); return $0.role },
+            identifier: { counter.record(); return $0.identifier },
             children: { counter.record(); return $0.children }
         )
     }

@@ -52,7 +52,7 @@ public enum PanelLocationSearch {
 
     /// - Parameters:
     ///   - cutoff: 打ち切り条件。AX 操作（各クロージャの呼び出し）の直前に確かめる。
-    ///   - identifier: ポップアップボタンにだけ呼ぶ。
+    ///   - identifier: 起点（パネルかどうかを見るため）とポップアップボタンにだけ呼ぶ。
     ///   - value: 場所のポップアップにだけ呼ぶ。
     /// - Returns: 場所のポップアップが見つからなければ nil。
     /// - Throws: 打ち切り条件に達したら、それ以降の AX 操作をせずに `ScanCutoff.Reached`。
@@ -67,7 +67,7 @@ public enum PanelLocationSearch {
         children: (Node) -> [Node]
     ) throws -> String? {
         let elements = try PanelTreeTraversal.elements(
-            in: root, search: search, cutoff: cutoff, role: role, subrole: subrole, children: children
+            in: root, search: search, cutoff: cutoff, role: role, subrole: subrole, identifier: identifier, children: children
         )
         for element in elements where element.role == popUpButtonRole {
             try cutoff.throwIfReached()

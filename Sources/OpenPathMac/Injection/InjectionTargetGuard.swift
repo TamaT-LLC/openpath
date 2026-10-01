@@ -8,6 +8,9 @@ import OpenPathCore
 /// キー入力はその時点のキーウィンドウに届くため、アプリが最前面であることに加えて、フォーカス中のウィンドウが
 /// 記録したウィンドウ（またはそのシート）であることを確かめる。同じアプリの別のウィンドウに移っていれば送らない。
 /// 確認は、最前面アプリのプロセス ID の比較（NSWorkspace の参照）と、フォーカス中のウィンドウの読み取り（通常は AX 1 回）に留める。
+/// 注入の前から移動先シート（⌘⇧G のシート）が開いていると、フォーカス中のウィンドウは移動先シートになる（macOS 27 で確認）。
+/// その場合は、シートが付いたパネル（シートの AXParent）を注入先として記録する（Issue #95）。移動先シートを記録すると、
+/// 確定でシートが閉じた後に注入先が消えたとみなされ、auto_confirm の「開く」も探せないため。
 /// パネルがホストのウィンドウのシートとして付くアプリ（サンドボックスアプリ等）では、記録するのはホストのウィンドウのため、
 /// シート（パネル）自体が閉じたことはここでは分からない。
 @MainActor
@@ -46,9 +49,18 @@ public final class InjectionTargetGuard: InjectionTargetGuarding {
             // 自分自身へキー入力を送らないよう、注入先のパネルが無いものとして扱う
             throw InjectionError.panelGone
         }
-        let window = try await onAXQueue { () throws -> AXUIElement in
+        let (window, isParentOfGoToSheet) = try await onAXQueue { () throws -> (AXUIElement, Bool) in
             try cutoff.throwIfReached()
-            return try GoToSheetAX.focusedWindow(ofProcess: processID)
+            let focusedWindow = try GoToSheetAX.focusedWindow(ofProcess: processID)
+            // 移動先シートかを確かめられなければ（期限切れ・AX の失敗）、従来どおりフォーカス中のウィンドウを記録する。
+            // 確かめるための読み取りで、注入そのものを失敗させないため
+            if let panel = try? PanelControlAX.panel(holdingGoToSheet: focusedWindow, cutoff: cutoff) {
+                return (panel, true)
+            }
+            return (focusedWindow, false)
+        }
+        if isParentOfGoToSheet {
+            Log.debug("注入先: 移動先シートが既に開いていたため、そのシートが付いたパネルを注入先にしました")
         }
         target = Target(processID: processID, window: window)
     }

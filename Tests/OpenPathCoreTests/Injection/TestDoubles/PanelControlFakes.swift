@@ -75,6 +75,14 @@ final class PanelElementFake: PanelElementOperating {
     var acceptsFocusRequest = true
     /// フォーカスを読み取った回数。
     private(set) var focusReadCount = 0
+    /// 押せる状態か（kAXEnabled）。nil は属性が無い（分からない）。`enabledProvider` があればそちらを使う。
+    var enabledValue: Bool? = true
+    /// 設定すると、押せる状態かの読み取り（`isEnabled()`）はこれの結果を返す（遅れて押せるようになるボタンを再現する）。
+    var enabledProvider: (@MainActor () -> Bool?)?
+    /// 押せる状態かの読み取りで投げるエラー。
+    var enabledReadError: (any Error)?
+    /// 押せる状態かを読み取った回数。
+    private(set) var enabledReadCount = 0
 
     init(_ name: String, log: InjectionEventLog) {
         self.name = name
@@ -127,6 +135,14 @@ final class PanelElementFake: PanelElementOperating {
             throw focusReadError
         }
         return isFocusedNow
+    }
+
+    func isEnabled() async throws -> Bool? {
+        enabledReadCount += 1
+        if let enabledReadError {
+            throw enabledReadError
+        }
+        return enabledProvider.map { $0() } ?? enabledValue
     }
 
     func focus() async throws {
@@ -188,6 +204,8 @@ final class GoToFieldLocatorFake: GoToFieldLocating {
     var field: PanelElementFake?
     var goButton: PanelElementFake?
     var suggestionList: SuggestionListFake?
+    /// 入力欄を選んだ手掛かり。既定は macOS 13 以降の移動先シート（AXIdentifier）。
+    var evidence: GoToFieldEvidence? = .pathFieldIdentifier
     /// 探したことを共有のログに記録するか（主方式の確定前の確認に使う探し方は、副方式の探し方と区別するため記録しない）。
     var logsLookups = true
     private(set) var lookupCount = 0
@@ -215,7 +233,7 @@ final class GoToFieldLocatorFake: GoToFieldLocating {
         }
         try simulateAXScan(clock: clock, log: log, taking: lookupLatency, cutoff: cutoff)
         guard let field else { return nil }
-        return GoToFieldControls(field: field, goButton: goButton, suggestionList: suggestionList)
+        return GoToFieldControls(field: field, goButton: goButton, suggestionList: suggestionList, evidence: evidence)
     }
 }
 
@@ -225,6 +243,11 @@ final class OpenButtonLocatorFake: OpenButtonLocating {
     private let clock: VirtualClock
     private let log: InjectionEventLog
     var button: PanelElementFake?
+    /// 設定すると、探したときに見つかるボタンはこれの結果になる（遅れて現れる・作り直されるボタンを再現する）。
+    var buttonProvider: (@MainActor () -> PanelElementFake?)?
+    /// ボタンを特定したしかた。
+    var identification: OpenButtonIdentification = .title
+    private(set) var lookupCount = 0
     /// 1 回の走査にかかる時間。
     var lookupLatency: Duration = .zero
     var error: (any Error)?
@@ -236,7 +259,8 @@ final class OpenButtonLocatorFake: OpenButtonLocating {
         self.log = log
     }
 
-    func locateOpenButton(cutoff: ScanCutoff) async throws -> (any PanelElementOperating)? {
+    func locateOpenButton(cutoff: ScanCutoff) async throws -> OpenButtonLocation? {
+        lookupCount += 1
         log.record(.lookUpOpenButton)
         if let suspension {
             await suspension.suspend()
@@ -245,6 +269,7 @@ final class OpenButtonLocatorFake: OpenButtonLocating {
             throw error
         }
         try simulateAXScan(clock: clock, log: log, taking: lookupLatency, cutoff: cutoff)
-        return button
+        let found = buttonProvider.map { $0() } ?? button
+        return found.map { OpenButtonLocation(button: $0, identification: identification) }
     }
 }

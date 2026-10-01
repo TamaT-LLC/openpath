@@ -6,7 +6,7 @@ import OpenPathCore
 @MainActor
 struct OpenButtonAutoConfirmTests {
     /// kAXErrorFailure
-    private static let axFailureCode: Int32 = -25_200
+    nonisolated private static let axFailureCode: Int32 = -25_200
     /// kAXErrorCannotComplete
     nonisolated private static let axCannotCompleteCode: Int32 = -25_204
 
@@ -207,6 +207,168 @@ struct OpenButtonAutoConfirmTests {
             try await task.value
         }
         #expect(harness.log.events.contains(.scanCutOff))
+        #expect(!harness.log.events.contains(.press(element: "open")))
+    }
+
+    // MARK: - 押せる状態になるまで待つ・探し直す（Issue #89）
+
+    @Test("「開く」を探して押せる状態になるまで待つ上限は、探し始めから累積 300ms、確かめ直す間隔は 50ms")
+    func standardReadyTiming() {
+        #expect(PanelControlTiming.standard.openButtonReadyLimit == .milliseconds(300))
+        #expect(PanelControlTiming.standard.openButtonPollInterval == .milliseconds(50))
+    }
+
+    @Test("「開く」が押せない状態（AXEnabled が false）なら、押せる状態になるまで 50ms 間隔で待ってから押す（探し直さない）")
+    func waitsUntilOpenButtonIsEnabled() async throws {
+        let harness = Harness()
+        harness.openButton.enabledProvider = { [clock = harness.clock] in clock.elapsed >= .milliseconds(420) }
+
+        try await harness.confirm()
+
+        let expected: [InjectionEventLog.Entry] = [
+            .init(time: .milliseconds(300), event: .lookUpOpenButton),
+            .init(time: .milliseconds(450), event: .targetCheck),
+            .init(time: .milliseconds(450), event: .press(element: "open")),
+        ]
+        #expect(harness.log.entries == expected)
+        // 300 / 350 / 400 / 450ms
+        #expect(harness.openButton.enabledReadCount == 4)
+        #expect(harness.locator.lookupCount == 1)
+    }
+
+    @Test("押せる状態にならないまま期限（探し始めから 300ms）を迎えたら、押さずに axError(cannotComplete) を投げる")
+    func throwsWhenOpenButtonStaysDisabled() async {
+        let harness = Harness()
+        harness.openButton.enabledValue = false
+
+        await #expect(throws: InjectionError.axError(code: Self.axCannotCompleteCode)) {
+            try await harness.confirm()
+        }
+
+        #expect(!harness.log.events.contains(.press(element: "open")))
+        // 最後の確認は期限（600ms）より前の 550ms
+        #expect(harness.openButton.enabledReadCount == 6)
+        #expect(harness.clock.elapsed == .milliseconds(550))
+    }
+
+    @Test("押せる状態か分からない（属性が無い）ときは、待たずに押す（従来どおり）")
+    func pressesWhenEnabledStateIsUnknown() async throws {
+        let harness = Harness()
+        harness.openButton.enabledValue = nil
+
+        try await harness.confirm()
+
+        #expect(harness.log.entries.last == .init(time: .milliseconds(300), event: .press(element: "open")))
+    }
+
+    @Test(
+        "押せる状態を読めない（要素が消えた以外の AX の失敗）ときは、待たずに押す（従来どおり）",
+        arguments: [InjectionError.axError(code: axCannotCompleteCode), .axError(code: axFailureCode)]
+    )
+    func pressesWhenEnabledStateCannotBeRead(error: InjectionError) async throws {
+        let harness = Harness()
+        harness.openButton.enabledReadError = error
+
+        try await harness.confirm()
+
+        #expect(harness.log.entries.last == .init(time: .milliseconds(300), event: .press(element: "open")))
+    }
+
+    @Test("「開く」がすぐに見つからなくても、期限までは 50ms 間隔で探し直し、現れたら押す（移動直後の作り直し）")
+    func findsOpenButtonThatAppearsLater() async throws {
+        let harness = Harness()
+        harness.locator.buttonProvider = { [clock = harness.clock, openButton = harness.openButton] in
+            clock.elapsed >= .milliseconds(400) ? openButton : nil
+        }
+
+        try await harness.confirm()
+
+        let expected: [InjectionEventLog.Entry] = [
+            .init(time: .milliseconds(300), event: .lookUpOpenButton),
+            .init(time: .milliseconds(350), event: .lookUpOpenButton),
+            .init(time: .milliseconds(400), event: .lookUpOpenButton),
+            .init(time: .milliseconds(400), event: .targetCheck),
+            .init(time: .milliseconds(400), event: .press(element: "open")),
+        ]
+        #expect(harness.log.entries == expected)
+    }
+
+    @Test("期限まで探し直しても見つからなければ axError(failure) を投げる")
+    func throwsWhenOpenButtonNeverAppears() async {
+        let harness = Harness()
+        harness.locator.button = nil
+
+        await #expect(throws: InjectionError.axError(code: Self.axFailureCode)) {
+            try await harness.confirm()
+        }
+
+        // 300 / 350 / … / 550ms
+        #expect(harness.locator.lookupCount == 6)
+        #expect(harness.clock.elapsed == .milliseconds(550))
+    }
+
+    @Test("探し直しても見つからず、最後の探索が期限で打ち切られた場合も、見つからない（axError(failure)）として投げる")
+    func reportsMissingWhenLastLookupIsCutOff() async {
+        let harness = Harness()
+        harness.locator.button = nil
+        harness.locator.lookupLatency = .milliseconds(150)
+
+        await #expect(throws: InjectionError.axError(code: Self.axFailureCode)) {
+            try await harness.confirm()
+        }
+
+        // 300→450ms（見つからない）、500ms からの 2 回目は 600ms の期限を過ぎた最初の AX 操作の前で打ち切る
+        #expect(harness.locator.lookupCount == 2)
+        #expect(harness.log.events.contains(.scanCutOff))
+        #expect(!harness.log.events.contains(.press(element: "open")))
+    }
+
+    @Test("待っている間にボタンが消えた（作り直された）ら、探し直して新しいボタンを押す")
+    func relocatesRebuiltOpenButton() async throws {
+        let harness = Harness()
+        let staleButton = PanelElementFake("stale", log: harness.log)
+        staleButton.enabledReadError = InjectionError.panelGone
+        harness.locator.buttonProvider = { [locator = harness.locator, openButton = harness.openButton] in
+            locator.lookupCount == 1 ? staleButton : openButton
+        }
+
+        try await harness.confirm()
+
+        #expect(harness.locator.lookupCount == 2)
+        #expect(harness.log.entries.last == .init(time: .milliseconds(350), event: .press(element: "open")))
+        #expect(!harness.log.events.contains(.press(element: "stale")))
+    }
+
+    @Test("探す時間も、押せる状態を待つ時間も、累積の期限（探し始めから 300ms）に含める")
+    func lookupTimeCountsTowardReadyLimit() async {
+        let harness = Harness()
+        harness.locator.lookupLatency = .milliseconds(200)
+        harness.openButton.enabledValue = false
+
+        await #expect(throws: InjectionError.axError(code: Self.axCannotCompleteCode)) {
+            try await harness.confirm()
+        }
+
+        // 探し終えた 500ms と 550ms に確かめ、600ms の期限より前に打ち切る
+        #expect(harness.openButton.enabledReadCount == 2)
+        #expect(harness.clock.elapsed == .milliseconds(550))
+        #expect(!harness.log.events.contains(.press(element: "open")))
+    }
+
+    @Test("押せる状態を待っている間にキャンセルされたら、押さずに CancellationError を投げる")
+    func cancelledWhileWaitingForEnabled() async {
+        let harness = Harness()
+        harness.openButton.enabledProvider = {
+            cancelCurrentTask()
+            return false
+        }
+        let task = Task { [autoConfirm = harness.autoConfirm] in
+            try await autoConfirm.confirm(autoConfirm: true)
+        }
+
+        await #expect(throws: CancellationError.self) {
+            try await task.value
+        }
         #expect(!harness.log.events.contains(.press(element: "open")))
     }
 }

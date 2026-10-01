@@ -150,6 +150,33 @@ struct GoToFieldSearchTests {
         #expect(try FakeAXSearch.goToField(in: panel)?.field.name == "path")
     }
 
+    @Test("注入の前から開いていた移動先シートがフォーカス中のウィンドウ（起点）でも、その入力欄を見つける（Issue #95）")
+    func findsFieldWhenRootIsGoToSheet() throws {
+        let match = try #require(try FakeAXSearch.goToField(in: .goToSheetWindow()))
+
+        #expect(match.field.name == "path")
+        #expect(match.suggestionList?.name == "suggestions")
+        #expect(match.evidence == .pathFieldIdentifier)
+    }
+
+    @Test("シート型のパネル自体が起点でも、その上の移動先シートの入力欄を見つける")
+    func findsFieldOnPanelSheetRoot() throws {
+        let panelSheet = FakeAXElement.panelSheet(Self.panelContents + [.modernGoToSheet()])
+
+        #expect(try FakeAXSearch.goToField(in: panelSheet)?.field.name == "path")
+    }
+
+    @Test("入力欄を選んだ手掛かりを返す（AXIdentifier・「移動」ボタン・placeholder）")
+    func reportsEvidence() throws {
+        let modern = FakeAXElement.dialog([.modernGoToSheet()])
+        let classic = FakeAXElement.dialog([Self.classicGoToSheet()])
+        let placeholderOnly = FakeAXElement.dialog([.sheet("go-to", [.textField("path", placeholder: "パスを入力")])])
+
+        #expect(try FakeAXSearch.goToField(in: modern)?.evidence == .pathFieldIdentifier)
+        #expect(try FakeAXSearch.goToField(in: classic)?.evidence == .goButton)
+        #expect(try FakeAXSearch.goToField(in: placeholderOnly)?.evidence == .placeholder)
+    }
+
     @Test("ファイル一覧の中へは降りない")
     func doesNotDescendIntoFileLists() throws {
         let panel = FakeAXElement.dialog([.outline("files", [Self.classicGoToSheet()])])

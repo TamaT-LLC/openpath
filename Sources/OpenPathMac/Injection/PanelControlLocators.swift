@@ -38,7 +38,8 @@ public final class GoToFieldLocator: GoToFieldLocating {
         return GoToFieldControls(
             field: AXPanelElement(match.field),
             goButton: match.goButton.map { AXPanelElement($0) },
-            suggestionList: match.suggestionList.map { AXSuggestionList($0) }
+            suggestionList: match.suggestionList.map { AXSuggestionList($0) },
+            evidence: match.evidence
         )
     }
 }
@@ -116,19 +117,24 @@ public final class OpenButtonLocator: OpenButtonLocating {
         self.targetWindow = targetWindow
     }
 
-    public func locateOpenButton(cutoff: ScanCutoff) async throws -> (any PanelElementOperating)? {
+    public func locateOpenButton(cutoff: ScanCutoff) async throws -> OpenButtonLocation? {
         let window = try PanelControlAX.require(targetWindow())
-        let button = try await onAXQueue { () throws -> AXUIElement? in
+        let match = try await onAXQueue { () throws -> OpenButtonMatch<AXUIElement>? in
             try OpenButtonSearch.locate(
                 in: window,
                 cutoff: cutoff,
                 role: { $0.role },
                 subrole: { $0.subrole },
+                identifier: { $0.attr(kAXIdentifierAttribute) },
                 title: { $0.title },
+                defaultButton: { container in
+                    let button: AXUIElement? = container.attr(kAXDefaultButtonAttribute)
+                    return button.map(GoToSheetAX.limitingMessagingTimeout)
+                },
                 children: PanelControlAX.children(of:)
             )
         }
-        return button.map { AXPanelElement($0) }
+        return match.map { OpenButtonLocation(button: AXPanelElement($0.button), identification: $0.identification) }
     }
 }
 
@@ -201,6 +207,20 @@ final class AXPanelElement: PanelElementOperating {
         }
     }
 
+    func isEnabled() async throws -> Bool? {
+        let element = element
+        return try await onAXQueue { () throws -> Bool? in
+            do {
+                let value = try element.copyAttributeValue(kAXEnabledAttribute)
+                return AXAttributeCast.cast(value, to: Bool.self)
+            } catch let error as AXElementError {
+                // 属性を持たないことは失敗ではなく「分からない」（要素が消えた invalidUIElement とは分ける）
+                guard error.code != .noValue, error.code != .attributeUnsupported else { return nil }
+                throw GoToSheetAX.injectionError(for: error.code)
+            }
+        }
+    }
+
     private func perform(_ action: String) async throws {
         let element = element
         try await onAXQueue { () throws in
@@ -233,6 +253,29 @@ enum PanelControlAX {
         // 移動先シートがウィンドウとしてフォーカスを持つ場合も、記録したウィンドウに付いたものなら注入先とみなす
         guard let parent: AXUIElement = focusedWindow.attr(kAXParentAttribute) else { return false }
         return CFEqual(parent, window)
+    }
+
+    /// 移動先シートの親として受け入れるロール（パネルのウィンドウ、またはシートとして付いたパネル）。
+    private static let goToSheetParentRoles: Set<String> = [kAXWindowRole, kAXSheetRole]
+
+    /// window が移動先シート（⌘⇧G のシート）そのものなら、それが付いたパネル（AXParent）を返す（Issue #95）。
+    /// 移動先シートでない・親を読めない・親がウィンドウやシートでなければ nil。どのウィンドウを移動先シートとみなすかは
+    /// OpenPathCore の `GoToSheetIdentity` が持つ。
+    static func panel(holdingGoToSheet window: AXUIElement, cutoff: ScanCutoff) throws -> AXUIElement? {
+        let isGoToSheet = try GoToSheetIdentity.isGoToSheet(
+            window,
+            cutoff: cutoff,
+            role: { $0.role },
+            identifier: { $0.attr(kAXIdentifierAttribute) },
+            children: children(of:)
+        )
+        guard isGoToSheet else { return nil }
+        try cutoff.throwIfReached()
+        guard let parent: AXUIElement = window.attr(kAXParentAttribute) else { return nil }
+        let panel = GoToSheetAX.limitingMessagingTimeout(parent)
+        try cutoff.throwIfReached()
+        guard let role = panel.role, goToSheetParentRoles.contains(role) else { return nil }
+        return panel
     }
 
     /// 走査で得た子要素にも、応答しないアプリで止まらないようメッセージングタイムアウトを設定する（GoToSheetDetector と同じ）。
