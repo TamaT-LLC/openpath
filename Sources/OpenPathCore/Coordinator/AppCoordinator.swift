@@ -142,7 +142,11 @@ public final class AppCoordinator {
             if let failure, failure.panelID == context.id {
                 rememberFailure(failure, cause: .panelGoneWhileShowingFailure)
             } else {
-                failureToReshow = nil
+                // 別のパネルの失敗が残っていた場合（通常は起きない）も、診断の経路を揃えて捨てたことを報告する
+                if let failure {
+                    diagnose(.failureForgotten(panelID: failure.panelID, failure: failure.kind, reason: .otherPanel))
+                }
+                forgetFailureToReshow(.otherPanel)
             }
             state = .idle
             palette.hide()
