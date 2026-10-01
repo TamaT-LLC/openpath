@@ -1,0 +1,106 @@
+{
+  "schema_version": "github-settings-desired-v1",
+  "repository": "TamaT-LLC/openpath",
+  "default_branch": "main",
+  "rulesets": [
+    {
+      "name": "protect-main",
+      "target": "branch",
+      "enforcement": "enabled",
+      "include": [
+        "refs/heads/main"
+      ],
+      "required_checks": [
+        {
+          "context": "Analyze (actions)",
+          "source_app_id": 15368,
+          "source_app_slug": "github-actions"
+        },
+        {
+          "context": "Analyze (python)",
+          "source_app_id": 15368,
+          "source_app_slug": "github-actions"
+        },
+        {
+          "context": "repository policy",
+          "source_app_id": 15368,
+          "source_app_slug": "github-actions"
+        },
+        {
+          "context": "swift build / swift test",
+          "source_app_id": 15368,
+          "source_app_slug": "github-actions"
+        }
+      ],
+      "required_approvals": 0,
+      "require_code_owner_review": false,
+      "require_conversation_resolution": true,
+      "allow_force_pushes": false,
+      "allow_deletions": false,
+      "bypass_actors": []
+    },
+    {
+      "name": "require-code-owner-review",
+      "target": "branch",
+      "enforcement": "enabled",
+      "include": [
+        "refs/heads/main"
+      ],
+      "required_checks": [],
+      "required_approvals": 1,
+      "require_code_owner_review": true,
+      "require_conversation_resolution": false,
+      "allow_force_pushes": false,
+      "allow_deletions": false,
+      "bypass_actors": [
+        {
+          "identity": "user:TakehiroT",
+          "permission": "pull_request"
+        }
+      ]
+    },
+    {
+      "name": "protect-release-tags",
+      "target": "tag",
+      "enforcement": "enabled",
+      "include": [
+        "refs/tags/preview-v*",
+        "refs/tags/v*"
+      ],
+      "required_checks": [],
+      "required_approvals": 0,
+      "require_code_owner_review": false,
+      "require_conversation_resolution": false,
+      "allow_force_pushes": false,
+      "allow_deletions": false,
+      "bypass_actors": []
+    }
+  ],
+  "environment_policies": [],
+  "surface": {
+    "apps": [
+      {
+        "identity": "app:github-actions",
+        "permission": "read"
+      }
+    ],
+    "webhook_digests": [],
+    "deploy_key_fingerprints": [],
+    "token_fingerprints": [],
+    "teams": [],
+    "environments": [],
+    "runner_groups": [
+      "github-hosted"
+    ]
+  },
+  "security": {
+    "private_vulnerability_reporting": true,
+    "security_advisories": true,
+    "secret_scanning": true,
+    "push_protection": true,
+    "dependency_graph": true,
+    "dependabot_alerts": true,
+    "dependabot_security_updates": false,
+    "code_scanning": true
+  }
+}

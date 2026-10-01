@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/TamaT-LLC/openpath/security/advisories/new
+    about: 脆弱性は公開 Issue に書かず、非公開で報告してください。
+  - name: Support policy and troubleshooting
+    url: https://github.com/TamaT-LLC/openpath/blob/main/SUPPORT.md
+    about: サポート対象の version、報告に必要な情報、README のトラブルシュートを確認してください。
