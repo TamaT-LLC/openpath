@@ -4,8 +4,8 @@
 /// - 表示: 別のパネルなら前回の検索語・候補・状態表示を消す（`PaletteViewModel.reset()`）。
 ///   同じパネルの再表示（Esc 後のホットキー、注入の成功後のホットキー、タイムアウト後の再検知）では、
 ///   続きから選び直せるよう検索語と選択を保ち、状態表示だけを消す。
-/// - 候補: 表示時・検索語の変更時・全件の再構築の完了時・選択モードの推定し直し時に、最新の要求の結果だけを反映する
-///   （`PaletteQuerySession`）。
+/// - 候補: 表示時・検索語の変更時・全件の再構築の完了時・選択モードの推定し直し時・履歴のクリアで候補を取り除いた後に、
+///   最新の要求の結果だけを反映する（`PaletteQuerySession`）。
 ///   ディレクトリに絞るかは候補を引くたびにパネルの推定と設定 include_files から決める。
 /// - キー入力: 注入のキー操作の前にパレットを表示したままキー入力をパネルへ返し、失敗を表示したらパレットに戻す。
 /// - 表示の記録: 表示するたびに（同じパネルの再表示・ホットキーでの再表示でも）`palette shown` を info でログに出す。
@@ -127,6 +127,13 @@ public final class PalettePresenter: PaletteDisplaying {
         let didFinish = buildProgress.update(isRebuilding: isRebuilding)
         viewModel.setBuildingCandidates(buildProgress.showsBuildingStatus)
         guard didFinish, presentedPanel != nil else { return }
+        requestRows(keepingSelection: true)
+    }
+
+    /// 全件の再構築の完了とは別に、候補が差し替わったときに呼ぶ（履歴のクリアで履歴の候補を取り除いた後。Issue #92）。
+    /// 表示中なら、検索語を変えずに選択を保ったまま候補を引き直す（選択していた候補が消えたら先頭を選ぶ）。
+    public func candidatesDidChange() {
+        guard presentedPanel != nil else { return }
         requestRows(keepingSelection: true)
     }
 

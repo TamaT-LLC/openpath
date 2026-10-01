@@ -283,4 +283,56 @@ struct PalettePresenterTests {
 
         #expect(search.calls.isEmpty)
     }
+
+    // MARK: - 候補の差し替え（履歴のクリア。Issue #92）
+
+    @Test("構築中に候補が差し替わったら、表示中の候補を引き直し、消えた候補を選んでいたら先頭を選ぶ")
+    func candidatesChangeDuringBuildRefreshesRows() async {
+        let rows = PaletteRowFixtures.rows("history-only", "fern")
+        presenter.candidateRebuildingDidChange(true)
+        await show(.sample, answering: rows)
+
+        presenter.candidatesDidChange()
+        await search.waitForCalls(2)
+        let refreshed = PaletteRowFixtures.rows("fern")
+        search.respond(to: 1, with: refreshed)
+        await waitForRows(refreshed)
+
+        #expect(search.calls.map(\.text) == ["", ""])
+        #expect(viewModel.selectedRow == refreshed[0])
+        // 構築中の表示は全件の構築を終えるまで残す
+        #expect(viewModel.isBuildingCandidates)
+    }
+
+    @Test("候補が差し替わっても検索語を変えず、選択していた候補が残っていれば選択を保つ")
+    func candidatesChangeKeepsQueryAndSelection() async {
+        await show(.sample, answering: [])
+        viewModel.query = "fe"
+        await search.waitForCalls(2)
+        let rows = PaletteRowFixtures.rows("history-only", "fern", "fern-docs")
+        search.respond(to: 1, with: rows)
+        await waitForRows(rows)
+        viewModel.moveSelection(by: 2)
+
+        presenter.candidatesDidChange()
+        await search.waitForCalls(3)
+        let refreshed = PaletteRowFixtures.rows("fern", "fern-docs")
+        search.respond(to: 2, with: refreshed)
+        await waitForRows(refreshed)
+
+        #expect(search.calls.map(\.text) == ["", "fe", "fe"])
+        #expect(viewModel.query == "fe")
+        #expect(viewModel.selectedRow == rows[2])
+    }
+
+    @Test("閉じている間に候補が差し替わっても候補を引かない")
+    func candidatesChangeWhileHiddenDoesNotQuery() async {
+        await show(.sample, answering: PaletteRowFixtures.rows("fern"))
+        presenter.hide()
+
+        presenter.candidatesDidChange()
+        await MainActorQueue.drain()
+
+        #expect(search.calls.count == 1)
+    }
 }

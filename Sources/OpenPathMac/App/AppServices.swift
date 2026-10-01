@@ -106,10 +106,14 @@ final class AppServices {
     }
 
     /// メニューの「履歴をクリア…」。候補の履歴ソースも空にして、クリアした場所が候補に残らないようにする。
+    /// 候補の構築中でもすぐ取り除き、表示中のパレットの候補も引き直す（Issue #92）。
     /// - Returns: 空にした履歴をファイルへ保存できたか。
     func clearHistory() -> Bool {
         let isSaved = historyStore.clear()
-        rebuilder.historyDidClear()
+        let presenter = palette.presenter
+        rebuilder.historyDidClear { [weak presenter] in
+            presenter?.candidatesDidChange()
+        }
         return isSaved
     }
 
