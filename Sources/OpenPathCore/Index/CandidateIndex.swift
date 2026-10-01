@@ -13,11 +13,28 @@ import os
 ///   その際は `@concurrent` を付けること）
 /// - frecency と最終使用日時は MainActor に隔離された HistoryStore の値を使う。クエリのたびに履歴の写しだけを
 ///   MainActor 上で受け取り（配列の参照を渡すだけ）、計算はその外で行う。
+/// - ソースごとに差し替えの世代を持つ。`invalidate(source:)` で世代を進めると、それより前に取った世代での
+///   差し替え（無効にする前に始めた収集の結果）は反映しない（Issue #92）。
 public final class CandidateIndex: Sendable {
     /// 空クエリで返す件数の上限（UX-001 §2「frecency 上位 8 件を初期表示」）
     public static let emptyQueryLimit = 8
     /// 候補がこの件数以上なら、クエリの先頭 2 文字で前置フィルタしてからマッチする（DSN-002 §5）
     public static let prefilterThreshold = 10_000
+
+    /// ソースの差し替えの世代。収集を始める前に `generation(of:)` で取り、`replace(source:with:generation:)` に渡す
+    struct Generation: Sendable, Equatable {
+        fileprivate let value: Int
+    }
+
+    /// 世代を指定した差し替えの結果
+    enum ReplaceOutcome: Sendable, Equatable {
+        /// 候補を差し替えた
+        case replaced
+        /// 前処理した候補が今の候補と同じだったため、何もしなかった
+        case unchanged
+        /// 世代を取った後にソースを無効にされていたため、反映しなかった
+        case superseded
+    }
 
     private struct State: Sendable {
         /// ソースごとの前処理済みの候補
@@ -27,6 +44,18 @@ public final class CandidateIndex: Sendable {
         var catalog = CandidateCatalog.empty
         /// `catalog` の元になった `sources` の revision
         var catalogRevision = 0
+        /// ソースごとの差し替えの世代。`invalidate(source:)` のたびに進める（無いソースは 0）
+        var generations: [CandidateSourceKind: Int] = [:]
+
+        /// `source` の今の差し替えの世代
+        func generation(of source: CandidateSourceKind) -> Generation {
+            Generation(value: generations[source] ?? 0)
+        }
+
+        /// `expected` が nil（世代を問わない差し替え）か、今の世代と同じか
+        func isCurrent(_ expected: Generation?, of source: CandidateSourceKind) -> Bool {
+            expected.map { $0 == generation(of: source) } ?? true
+        }
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -89,20 +118,78 @@ public final class CandidateIndex: Sendable {
     /// - Returns: 候補を差し替えたか。
     @discardableResult
     public func replace(source: CandidateSourceKind, with items: [SourceItem]) async -> Bool {
-        let (previous, current) = state.withLock { ($0.catalog, $0.sources[source] ?? []) }
+        await replace(source: source, with: items, expecting: nil) == .replaced
+    }
+
+    /// `source` の今の差し替えの世代。収集を始める前に取り、その結果の差し替えに渡す。
+    func generation(of source: CandidateSourceKind) -> Generation {
+        state.withLock { $0.generation(of: source) }
+    }
+
+    /// `generation` を取った後に `source` を無効にされていなければ、`replace(source:with:)` と同じく差し替える。
+    ///
+    /// 世代の照合と候補の書き込みは同じロックの中で行うため、`invalidate(source:)` と並行しても、
+    /// 無効にする前に取った世代の候補が無効にした後に残ることはない。
+    func replace(source: CandidateSourceKind, with items: [SourceItem], generation: Generation) async -> ReplaceOutcome {
+        await replace(source: source, with: items, expecting: generation)
+    }
+
+    /// `source` の候補を直ちに取り除き、世代を進める。以後、それより前に取った世代での差し替えは反映しない。
+    ///
+    /// 走査中の再構築の終わりを待たずに候補を消すためのもの（履歴のクリア。Issue #92）。候補が無くても世代は進める
+    /// （起動時の最初の差し替えより前に消した場合も、消す前に読んだ収集の結果を反映しないため）。
+    /// 世代とソースの候補は呼んだ時点で（同期的に）更新する。クエリが使う統合済みの候補は全ソースの候補数に比例した
+    /// CPU を使うため、並行実行用のスレッドで作り直す。
+    /// - Returns: 呼んだ時点のソースの候補（取り除いた後）をクエリに反映し終える Task。取り除く候補が無くても、
+    ///   先に取り除いた分などの反映が済んでいなければ、それを含めて反映するまで終わらない（続けて呼んだ場合に、
+    ///   後の呼び出しの完了を待った側が、まだ取り除かれていない候補で引き直さないようにするため）。
+    @discardableResult
+    func invalidate(source: CandidateSourceKind) -> Task<Void, Never> {
+        let pending: (sources: [CandidateSourceKind: [PreparedCandidate]], revision: Int)? = state.withLock { state in
+            state.generations[source, default: 0] += 1
+            if state.sources.removeValue(forKey: source) != nil {
+                state.revision += 1
+            }
+            // クエリが使う候補が今のソースの候補に追いついていれば、作り直す必要は無い
+            guard state.catalogRevision < state.revision else { return nil }
+            return (state.sources, state.revision)
+        }
+        guard let pending else { return Task {} }
+        // 利用者の操作（メニュー）の結果で、表示中のパレットがこの反映を待つため、走査（utility）より優先する
+        return Task.detached(priority: .userInitiated) { [self] in
+            publishCatalog(merging: pending.sources, revision: pending.revision)
+        }
+    }
+
+    /// 差し替えの本体。`expected` が nil なら世代を問わない。
+    private func replace(source: CandidateSourceKind, with items: [SourceItem], expecting expected: Generation?) async -> ReplaceOutcome {
+        let base: (previous: CandidateCatalog, current: [PreparedCandidate])? = state.withLock { state in
+            guard state.isCurrent(expected, of: source) else { return nil }
+            return (state.catalog, state.sources[source] ?? [])
+        }
+        guard let base else { return .superseded }
         // 大半は正規化済み・重複なしの同じ並びで届くため、前処理の前に比べて前処理も省く
-        if current.elementsEqual(items, by: { $0.path == $1.path && $0.isDirectory == $1.isDirectory }) {
-            return false
+        if base.current.elementsEqual(items, by: { $0.path == $1.path && $0.isDirectory == $1.isDirectory }) {
+            return .unchanged
         }
-        let prepared = preparer.prepare(items, reusing: previous)
-        if current.elementsEqual(prepared, by: { $0.path == $1.path && $0.isDirectory == $1.isDirectory }) {
-            return false
+        let prepared = preparer.prepare(items, reusing: base.previous)
+        if base.current.elementsEqual(prepared, by: { $0.path == $1.path && $0.isDirectory == $1.isDirectory }) {
+            return .unchanged
         }
-        let (sources, revision) = state.withLock { state in
+        let updated: (sources: [CandidateSourceKind: [PreparedCandidate]], revision: Int)? = state.withLock { state in
+            // 前処理の間に無効にされていたら書き込まない
+            guard state.isCurrent(expected, of: source) else { return nil }
             state.sources[source] = prepared.isEmpty ? nil : prepared
             state.revision += 1
             return (state.sources, state.revision)
         }
+        guard let updated else { return .superseded }
+        publishCatalog(merging: updated.sources, revision: updated.revision)
+        return .replaced
+    }
+
+    /// `sources` を統合し、クエリが使う候補にする。
+    private func publishCatalog(merging sources: [CandidateSourceKind: [PreparedCandidate]], revision: Int) {
         let catalog = CandidateCatalog(merging: sources)
         state.withLock { state in
             // 後から始まった差し替えが先に反映済みなら、古い統合結果で上書きしない
@@ -110,7 +197,6 @@ public final class CandidateIndex: Sendable {
             state.catalog = catalog
             state.catalogRevision = revision
         }
-        return true
     }
 
     /// `text` にマッチする候補を、総合スコア `fuzzyScore × (1 + log1p(frecency))` の降順で最大 `limit` 件返す。

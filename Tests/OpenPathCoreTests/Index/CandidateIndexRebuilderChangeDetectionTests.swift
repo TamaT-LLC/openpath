@@ -170,8 +170,8 @@ struct CandidateIndexRebuilderChangeDetectionTests {
         #expect(root.startedCount == 1)
     }
 
-    @Test("周期の再構築を取り消して走査し直すときは、取り消した収集をやり直す")
-    func cancelledCollectionIsRetried() async throws {
+    @Test("周期の再構築の途中で履歴を消しても、収集中のソースは取り消さず、その結果と記録を反映する（Issue #92）")
+    func historyClearDuringPeriodicRebuildKeepsCollection() async throws {
         let harness = RebuilderHarness()
         let root = harness.source(.root(F.firstRoot))
         root.setTracksChanges(true)
@@ -182,13 +182,18 @@ struct CandidateIndexRebuilderChangeDetectionTests {
         root.setGated(true)
         harness.scheduleClock.advance(by: F.interval)
         await root.waitUntilStarted(count: 2)
-        // 周期の再構築の途中で履歴が消されると、走査中の再構築を取り消して走査し直す
-        harness.rebuilder.historyDidClear()
-        await root.waitUntilStarted(count: 3)
+        await withCheckedContinuation { continuation in
+            harness.rebuilder.historyDidClear { continuation.resume() }
+        }
         root.release(items: [F.directory("/rebuild/first/new")])
+        await harness.scheduleClock.waitUntilSleeping(count: 1)
         await harness.waitUntilIdle()
+        // 収集の記録が残っていれば、次の周期では変更が無いため収集しない
+        root.setGated(false)
+        await Self.passPeriod(harness)
 
-        #expect(root.cancelledCount == 1)
+        #expect(root.cancelledCount == 0)
+        #expect(root.startedCount == 2)
         #expect(try await harness.indexedPaths() == ["/rebuild/first/new"])
     }
 }

@@ -31,7 +31,8 @@ struct CandidateRebuildOutcome: Sendable {
     var identical: Set<CandidateSourceKind> = []
     /// 前回の収集から変わっていないと確かめられたため、収集しなかったソース（周期の再構築のみ）
     var unchanged: Set<CandidateSourceKind> = []
-    /// キャンセルされたため差し替えなかったソース
+    /// キャンセルされたため差し替えなかったソース。収集の間に候補を取り除かれた（`CandidateIndex.invalidate(source:)`。
+    /// 履歴のクリア、Issue #92）ため差し替えなかったソースも含む（どちらもインデックスの候補が収集の結果と対応しない）
     var cancelled: Set<CandidateSourceKind> = []
     /// キャンセル以外のエラー（CandidateSource の契約外）で差し替えなかったソースと、エラーの型名
     var failed: [CandidateSourceKind: String] = [:]
@@ -56,6 +57,8 @@ enum CandidateRebuildCycle {
     /// - 前回の収集の記録を渡されたソースは、先に変更の有無を確かめ、変わっていなければ走査も差し替えもしない（Issue #78）。
     /// - キャンセルされたソースは差し替えない。途中までの結果で既存の候補を減らさないため。
     ///   取り除く処理（空での差し替え）はキャンセルされても行う。消えたルートの候補を残さないため。
+    /// - 収集を始めた後にソースを無効にされた（履歴のクリア。Issue #92）ソースも差し替えない。
+    ///   無効にする前の中身（消す前の履歴）を読んだ結果で、取り除いた候補を戻さないため。
     /// - 同じ kind を含む `refreshes` を渡さないこと（同じソースの差し替えが並行すると後勝ちになる）。
     static func run(
         refreshes: [CandidateSourceRefresh],
@@ -101,6 +104,8 @@ enum CandidateRebuildCycle {
 
     private static func refresh(_ refresh: CandidateSourceRefresh, in index: CandidateIndex) async -> SourceResult {
         let source = refresh.source
+        // ソースの中身を読む前に取る。読んだ後に無効にされたら、その結果を差し替えに使わない
+        let generation = index.generation(of: source.kind)
         let tracking = source as? any ChangeTrackingCandidateSource
         if let marker = refresh.marker, let tracking, await !tracking.hasChanged(sinceAnyMarker: marker) {
             return .unchanged(source.kind)
@@ -122,7 +127,13 @@ enum CandidateRebuildCycle {
             }
             return .failed(source.kind, errorType: String(describing: type(of: error)))
         }
-        let didReplace = await index.replace(source: source.kind, with: snapshot.items)
-        return .replaced(source.kind, snapshot.warnings, marker: marker, didReplace: didReplace)
+        switch await index.replace(source: source.kind, with: snapshot.items, generation: generation) {
+        case .replaced:
+            return .replaced(source.kind, snapshot.warnings, marker: marker, didReplace: true)
+        case .unchanged:
+            return .replaced(source.kind, snapshot.warnings, marker: marker, didReplace: false)
+        case .superseded:
+            return .cancelled(source.kind)
+        }
     }
 }
