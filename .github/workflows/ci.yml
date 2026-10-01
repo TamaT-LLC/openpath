@@ -19,6 +19,23 @@ defaults:
     shell: bash
 
 jobs:
+  # Actions の SHA 固定と、.github/settings-desired-v1.json の必須チェックが CI の job 名と
+  # 一致することを確かめる（CONTRIBUTING.md「GitHub Actions を変える場合」）
+  repository-policy:
+    name: repository policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Test repository policy checks
+        run: python3 scripts/github_policy_test.py
+
+      - name: Verify Actions pins and desired settings
+        run: python3 scripts/github_policy_check.py
+
   build-and-test:
     name: swift build / swift test
     runs-on: macos-15
@@ -28,7 +45,9 @@ jobs:
       # runner の既定 Xcode が変わっても結果が揺れないよう、バージョンを明示する。
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Show toolchain
         id: toolchain
@@ -39,7 +58,7 @@ jobs:
           echo "xcode-version=${xcode_version}" >> "$GITHUB_OUTPUT"
 
       - name: Cache .build
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .build
           # SwiftPM は Info.plist の変更を追跡しない（Package.swift のコメント参照）ため、
