@@ -247,6 +247,21 @@ struct PalettePresenterTests {
         #expect(window.calls == [.show(near: PanelContext.another.frame, rowCount: 0)])
     }
 
+    @Test("待ちの上限に達した直後に別のパネルを出したら、前のパネルの待ちで新しいパネルを出さない")
+    func expiredWaitDoesNotRevealNextPanel() async {
+        presenter.show(context: .sample)
+        await search.waitForCalls(1)
+        await MainActorQueue.drain()
+
+        // 前のパネルの待ちが期限に達したが、その続きが MainActor で走る前に別のパネルを出す
+        clock.advance(by: PalettePresenter.initialRowsWaitLimit)
+        presenter.show(context: .another)
+        await search.waitForCalls(2)
+        await MainActorQueue.drain()
+
+        #expect(window.calls.isEmpty)
+    }
+
     @Test("最初の候補を待っている間にパネルが動いたら、置き直さずに新しい位置で出す")
     func movedPanelWhileWaitingShowsAtNewFrame() async {
         let rows = PaletteRowFixtures.rows("fern")

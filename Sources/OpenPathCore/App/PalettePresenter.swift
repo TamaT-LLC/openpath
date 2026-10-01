@@ -228,6 +228,9 @@ public final class PalettePresenter: PaletteDisplaying {
             } catch {
                 return
             }
+            // 期限に達してから続きが走るまでの間に取り消された（別のパネルを出した・閉じた）待ちでは、何もしない。
+            // 取り消しも続きも MainActor で行うため、ここで取り消しを確かめれば次のパネルの待ちと取り違えない
+            guard !Task.isCancelled else { return }
             onDeadline()
         }
     }
