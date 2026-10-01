@@ -23,6 +23,8 @@ maintainer は、利用者への影響、正しさ、security、互換性、保�
 `@TakehiroT` には、緊急時に code owner の review だけを省略できる Pull Request 限定の bypass を割り当てます。
 この bypass は、必須 CI、`main` の履歴保護、version tag の保護を省略しません。
 これらの設定の正本は [.github/settings-desired-v1.json](./.github/settings-desired-v1.json) です。
+実際の設定との差分は、管理者の権限で `python3 scripts/github_settings_drift.py` を実行すると一覧できます。
+このスクリプトは GitHub API の読み取りだけを行い、設定を変更しません。
 
 Issue はロードマップの参考にしますが、実装の約束にはなりません。
 maintainer は、範囲、リスク、互換性、余力をもとに作業の優先度を決め、見送ることもあります。
