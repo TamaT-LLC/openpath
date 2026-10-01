@@ -85,7 +85,7 @@ struct PalettePresenterTests {
     }
 
     @Test("別のパネルでは前回の検索語・候補・状態表示を消し、そのパネルの最初の候補で表示する")
-    func newPanelResetsPalette() async {
+    func newPanelResetsPalette() async throws {
         let rows = PaletteRowFixtures.rows("openpath")
         await show(.sample, answering: PaletteRowFixtures.rows("fern"))
         viewModel.query = "fe"
@@ -98,8 +98,10 @@ struct PalettePresenterTests {
         #expect(viewModel.emptyMessage == nil)
         #expect(viewModel.status == nil)
         await search.waitForCalls(3)
-        #expect(search.calls.last?.text == "")
-        search.respond(to: 2, with: rows)
+        // 検索語の変更による検索（取り消し済み）と別のパネルの最初の検索は、どちらが先に届くか決まらないため内容で探す
+        let initialCall = try #require(search.calls.lastIndex { $0.text.isEmpty })
+        #expect(initialCall > 0)
+        search.respond(to: initialCall, with: rows)
         await waitForShow(count: 2)
         #expect(window.calls.last == .show(near: PanelContext.another.frame, rowCount: rows.count))
     }
