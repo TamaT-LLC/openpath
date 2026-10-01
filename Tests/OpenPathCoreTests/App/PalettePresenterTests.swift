@@ -477,6 +477,40 @@ struct PalettePresenterTests {
         #expect(!window.calls.contains(.reclaimKey))
     }
 
+    @Test("エラーを出したまま同じパネルで出し直してエラーを付け直しても、検索語と選択を保ち、キー入力をパレットに戻す（#101）")
+    func reshowingVisiblePaletteWithErrorKeepsQueryAndSelection() async throws {
+        let message = try #require(InjectionError.timeout(step: .overall).userMessage)
+        let rows = PaletteRowFixtures.rows("fern", "fern-docs")
+        await show(.sample, answering: PaletteRowFixtures.rows("fern"))
+        viewModel.query = "fe"
+        await search.waitForCalls(2)
+        search.respond(to: 1, with: rows)
+        await waitForRows(rows)
+        viewModel.moveSelection(by: 1)
+        // 注入がタイムアウトすると、AppCoordinator はパレットを閉じずにエラーを出す
+        presenter.setLocked(true)
+        presenter.showStatus(PaletteMessage.injecting)
+        presenter.releaseKeyForInjection()
+        presenter.setLocked(false)
+        presenter.showError(message)
+
+        // PanelWatcher の再通知で、閉じないまま同じパネルのパレットを出し直し、エラーを付け直す
+        presenter.show(context: .sample)
+        presenter.showError(message)
+
+        #expect(window.calls.suffix(2) == [.show(near: PanelContext.sample.frame, rowCount: rows.count), .reclaimKey])
+        #expect(viewModel.query == "fe")
+        #expect(viewModel.status == .error(message))
+        #expect(!viewModel.isLocked)
+        await search.waitForCalls(3)
+        let refreshed = PaletteRowFixtures.rows("openpath", "fern", "fern-docs")
+        search.respond(to: 2, with: refreshed)
+        await waitForRows(refreshed)
+        #expect(search.calls.last?.text == "fe")
+        #expect(viewModel.selectedRow == rows[1])
+        #expect(viewModel.status == .error(message))
+    }
+
     // MARK: - 候補の再構築
 
     @Test("最初の構築中はフッターに構築中を出し、終えたら表示中の候補を選択を保って引き直す")
