@@ -27,7 +27,8 @@ public final class PaletteKeyController {
     private let viewModel: PaletteViewModel
     private var monitor: Any?
     private var resignKeyObserver: NSObjectProtocol?
-    /// キーを離すまで預かる確定・閉じる
+    /// キーを離すまで預かる確定・閉じる。預けた・離して伝えた・取り消したことは、押していた時間と捨てたキーの数とともに
+    /// debug ログに出る（`palette key hold started` / `palette key hold ended`。実機 QA の PAL-08・S-08 の判定用）
     private var eventKeyHold = PaletteEventKeyHold(clock: ContinuousClock())
 
     /// - Parameters:
