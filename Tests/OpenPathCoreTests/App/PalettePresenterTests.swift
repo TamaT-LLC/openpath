@@ -215,6 +215,32 @@ struct PalettePresenterTests {
         #expect(window.calls == [.hide])
     }
 
+    @Test("表示中のパレットから別のパネルに切り替えたら、最初の候補を待つ間は前のパレットを閉じておく")
+    func switchingFromShownPanelHidesWhileWaiting() async {
+        let rows = PaletteRowFixtures.rows("openpath")
+        await show(.sample, answering: PaletteRowFixtures.rows("fern"))
+
+        presenter.show(context: .another)
+        await search.waitForCalls(2)
+
+        // 候補を消したパレットを前のパネルの位置に残さない
+        #expect(window.calls.last == .hide)
+        search.respond(to: 1, with: rows)
+        await waitForShow(count: 2)
+        #expect(window.calls.suffix(2) == [.hide, .show(near: PanelContext.another.frame, rowCount: rows.count)])
+    }
+
+    @Test("閉じた後に別のパネルを出すときは、閉じ直さずに最初の候補を待つ")
+    func switchingAfterHideDoesNotHideAgain() async {
+        await show(.sample, answering: PaletteRowFixtures.rows("fern"))
+        presenter.hide()
+
+        presenter.show(context: .another)
+        await search.waitForCalls(2)
+
+        #expect(window.calls == [.show(near: PanelContext.sample.frame, rowCount: 1), .hide])
+    }
+
     @Test("最初の候補を待っている間に別のパネルを出したら、そのパネルの候補で出す")
     func anotherPanelWhileWaitingShowsLatestPanel() async {
         let rows = PaletteRowFixtures.rows("openpath")

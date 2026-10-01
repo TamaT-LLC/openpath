@@ -39,6 +39,8 @@ public final class PalettePresenter: PaletteDisplaying {
     private var buildProgress = CandidateBuildProgress()
     /// 最初の候補を待っている間の、待ちの上限のタイマー。ウィンドウを出していない間だけ持つ
     private var pendingReveal: Task<Void, Never>?
+    /// ウィンドウを出しているか。別のパネルの候補を待つ前に、前のパネルのパレットを閉じるかの判定に使う
+    private var isWindowShown = false
 
     /// - Parameters:
     ///   - viewModel: パレットのビューの状態。検索語の変更の通知（`onQueryChange`）はこの型が受け持つ。
@@ -84,6 +86,8 @@ public final class PalettePresenter: PaletteDisplaying {
         requestRows(keepingSelection: isSamePanel)
         // 候補を受け取り済みなら（同じパネルの再表示）、その候補のまますぐ出す
         guard viewModel.hasReceivedRows else {
+            // 前のパネルのパレットが出たままなら、候補を消したまま前の位置に残さないよう閉じておく
+            hideWindow()
             scheduleRevealAfterWaitLimit()
             return
         }
@@ -106,6 +110,7 @@ public final class PalettePresenter: PaletteDisplaying {
         cancelPendingReveal()
         presentedPanel = nil
         querySession.cancel()
+        isWindowShown = false
         window.hide()
     }
 
@@ -195,8 +200,15 @@ public final class PalettePresenter: PaletteDisplaying {
     private func revealWindow() {
         cancelPendingReveal()
         guard let presentedPanel else { return }
+        isWindowShown = true
         window.show(near: presentedPanel.frame)
         didShow(presentedPanel)
+    }
+
+    private func hideWindow() {
+        guard isWindowShown else { return }
+        isWindowShown = false
+        window.hide()
     }
 
     private func scheduleRevealAfterWaitLimit() {
