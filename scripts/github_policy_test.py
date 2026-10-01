@@ -6,6 +6,7 @@ import json
 import pathlib
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SCRIPTS = pathlib.Path(__file__).resolve().parent
 SHA_A = 'a' * 40
@@ -291,6 +292,13 @@ class SettingsManifestTests(RepositoryFixture):
         self.write_workflow('ci.yml', CI.replace('  pull_request:\n', '  pull_request:\n    paths:\n      - Sources/**\n'))
         self.assert_rejected("'swift build / swift test'")
 
+    def test_required_check_jobs_cannot_be_conditional(self):
+        # A job skipped by its `if:` reports success, so it would satisfy the required check.
+        self.write_workflow('ci.yml', CI.replace('    runs-on: macos-15\n', '    if: false\n    runs-on: macos-15\n'))
+        self.assert_rejected("'swift build / swift test'")
+        self.write_workflow('ci.yml', CI.replace('    runs-on: ubuntu-24.04\n', "    if: github.actor != 'x'\n    runs-on: ubuntu-24.04\n"))
+        self.assert_rejected("'policy'")
+
     def test_tag_ruleset_cannot_require_reviews_or_checks(self):
         settings = copy.deepcopy(SETTINGS)
         settings['rulesets'][2]['required_approvals'] = 1
@@ -420,6 +428,23 @@ class DriftTests(unittest.TestCase):
         responses = matching_live_state()
         responses['repos/TamaT-LLC/openpath/vulnerability-alerts'] = drift.ApiError('vulnerability-alerts', 404, 'Not Found')
         self.assertIn('security/dependabot_alerts: expected true, actual false', self.report(responses))
+
+    def test_gh_fetch_turns_empty_or_invalid_bodies_into_api_errors(self):
+        def completed(stdout):
+            return drift.subprocess.CompletedProcess(['gh'], 0, stdout=stdout, stderr='')
+
+        cases = {
+            ('repos/o/r/vulnerability-alerts', ''): None,
+            ('repos/o/r/hooks?per_page=100', '[]\n'): [],
+            ('repos/o/r', '{"default_branch": "main"}'): {'default_branch': 'main'},
+        }
+        for (path, stdout), expected in cases.items():
+            with self.subTest(path), patch.object(drift.subprocess, 'run', return_value=completed(stdout)):
+                self.assertEqual(drift.gh_fetch(path), expected)
+        for path, stdout in {'repos/o/r': '', 'repos/o/r/rulesets?per_page=100': '<html>'}.items():
+            with self.subTest(path), patch.object(drift.subprocess, 'run', return_value=completed(stdout)):
+                with self.assertRaises(drift.ApiError):
+                    drift.gh_fetch(path)
 
     def test_permission_failure_stops_the_report(self):
         responses = matching_live_state()

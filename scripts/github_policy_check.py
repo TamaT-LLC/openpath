@@ -13,8 +13,11 @@ workflow policy of TamaT-LLC/depgraph-cli (`github-actions-policy-v1`):
   persisted credentials;
 - .github/settings-desired-v1.json is valid (see github_settings_manifest.py),
   every required check comes from a pull request job without path filters or
-  from CodeQL default setup, and every deployment environment used by a
-  workflow is declared.
+  a job-level `if:` (a skipped job reports success), or from CodeQL default
+  setup, and every deployment environment used by a workflow is declared.
+
+This check cannot stop a pull request from skipping the `repository policy`
+job itself; code owner review of .github/ changes covers that case.
 
 `github_settings_drift.py` compares the manifest with the live settings.
 """
@@ -63,6 +66,10 @@ class Workflow:
         if not self.is_pull_request or set(self.triggers['pull_request']) & set(PATH_FILTERS):
             return set()
         return {job['check'] for job in self.jobs.values()}
+
+    def conditional_check_names(self):
+        """Check names of jobs with a job-level `if:`; a skipped job reports success."""
+        return {job['check'] for job in self.jobs.values() if job['conditional']}
 
     def environments(self):
         return {job['environment'] for job in self.jobs.values() if job['environment']}
@@ -113,7 +120,7 @@ def _block_keys(lines, key):
 
 
 def _jobs(lines):
-    """Map each job id to its check name (`name:` or the id) and deployment environment."""
+    """Map each job id to its check name (`name:` or the id), job-level `if:`, and environment."""
     jobs = {}
     current = None
     in_environment = False
@@ -124,11 +131,13 @@ def _jobs(lines):
         indent = _indent(line)
         key, _, value = code.strip().partition(':')
         if indent == 2:
-            current = jobs.setdefault(key, {'check': key, 'environment': None})
+            current = jobs.setdefault(key, {'check': key, 'environment': None, 'conditional': False})
             in_environment = False
         elif current is not None and indent == 4:
             in_environment = key == 'environment' and not _scalar(value)
-            if key == 'name':
+            if key == 'if':
+                current['conditional'] = True
+            elif key == 'name':
                 current['check'] = _scalar(value)
             elif key == 'environment' and _scalar(value):
                 current['environment'] = _scalar(value)
@@ -276,6 +285,7 @@ def verify_settings(root, workflows):
     if data is None:
         return errors
     checks = set().union(*(w.required_check_names() for w in workflows))
+    conditional = set().union(*(w.conditional_check_names() for w in workflows if w.is_pull_request))
     code_scanning = data['security']['code_scanning']
     for ruleset in data['rulesets']:
         for check in ruleset['required_checks']:
@@ -287,6 +297,9 @@ def verify_settings(root, workflows):
                 errors.append(f"{manifest.SETTINGS_FILE}: required check '{context}' in ruleset "
                               f"'{ruleset['name']}' is not a pull request job without path filters "
                               'or a CodeQL default setup check')
+            elif context in conditional:
+                errors.append(f"{manifest.SETTINGS_FILE}: required check '{context}' comes from a job with "
+                              'a job-level if:, and a skipped job satisfies the requirement')
     declared = set(data['surface']['environments'])
     for environment in sorted(set().union(*(w.environments() for w in workflows)) - declared):
         errors.append(f"{manifest.SETTINGS_FILE}: workflow environment '{environment}' "

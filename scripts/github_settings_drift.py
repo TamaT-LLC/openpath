@@ -50,6 +50,7 @@ ALLOWED_RULES = {
 HISTORY_RULE = {'branch': 'non_fast_forward', 'tag': 'update'}
 NOT_VERIFIED = ('surface/apps', 'surface/token_fingerprints', 'surface/runner_groups')
 HTTP_STATUS = re.compile(r'HTTP (\d{3})')
+EMPTY_BODY_PATH_SUFFIX = '/vulnerability-alerts'
 NOT_FOUND = 404
 
 
@@ -61,13 +62,24 @@ class ApiError(Exception):
 
 
 def gh_fetch(path):
-    """GET one REST path with the GitHub CLI; an empty body (204) returns None."""
+    """GET one REST path with the GitHub CLI.
+
+    Only the vulnerability-alerts endpoint answers with an empty body (204) and
+    returns None; an empty or non-JSON body from any other path is an ApiError.
+    """
     result = subprocess.run(['gh', 'api', '--method', 'GET', path],
                             capture_output=True, text=True, check=False)
     if result.returncode != 0:
         status = HTTP_STATUS.search(result.stderr)
         raise ApiError(path, int(status.group(1)) if status else 0, result.stderr.strip())
-    return json.loads(result.stdout) if result.stdout.strip() else None
+    if not result.stdout.strip():
+        if path.endswith(EMPTY_BODY_PATH_SUFFIX):
+            return None
+        raise ApiError(path, 0, 'empty response')
+    try:
+        return json.loads(result.stdout)
+    except ValueError as error:
+        raise ApiError(path, 0, f'invalid JSON: {error}') from error
 
 
 def _show(value):
