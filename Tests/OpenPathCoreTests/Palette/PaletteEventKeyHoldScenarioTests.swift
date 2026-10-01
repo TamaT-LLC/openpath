@@ -2,10 +2,10 @@ import Testing
 
 import OpenPathCore
 
-/// キー処理（PaletteKeyController）と同じ順に、PaletteConfirmKeyHold・PaletteViewModel を通した場合の振る舞い。
+/// キー処理（PaletteKeyController）と同じ順に、PaletteEventKeyHold・PaletteViewModel を通した場合の振る舞い。
 @MainActor
-@Suite("PaletteConfirmKeyHold: Enter の長押し（Issue #90）")
-struct PaletteConfirmKeyHoldScenarioTests {
+@Suite("PaletteEventKeyHold: Enter の長押し（Issue #90）")
+struct PaletteEventKeyHoldScenarioTests {
     /// Issue #90 の再現手順: keyDown の 0.5 秒後から、50ms 間隔で 20 回のリピート、最後に keyUp
     private static let initialRepeatDelay: Duration = .milliseconds(500)
     private static let repeatInterval: Duration = .milliseconds(50)
@@ -64,7 +64,7 @@ struct PaletteConfirmKeyHoldScenarioTests {
     @Test("上限を超えて押し続けたら確定せず、その後のリピートもパレットで消費する")
     func holdingPastLimitConfirmsNothing() {
         keys.keyDown(KeyStroke.returnKey.input())
-        keys.clock.advance(by: PaletteConfirmKeyHold.maximumHold)
+        keys.clock.advance(by: PaletteEventKeyHold.maximumHold)
         keys.keyDown(KeyStroke.returnKey.input(isRepeat: true))
         keys.keyDown(KeyStroke.returnKey.input(isRepeat: true))
         keys.keyUp(.returnKey)
@@ -78,7 +78,7 @@ struct PaletteConfirmKeyHoldScenarioTests {
         keys.keyDown(KeyStroke.returnKey.input())
         keys.clock.advance(by: Self.initialRepeatDelay)
         var elapsed = Self.initialRepeatDelay
-        while elapsed < PaletteConfirmKeyHold.maximumHold + .milliseconds(500) {
+        while elapsed < PaletteEventKeyHold.maximumHold + .milliseconds(500) {
             keys.keyDown(KeyStroke.returnKey.input(isRepeat: true))
             keys.clock.advance(by: Self.repeatInterval)
             elapsed += Self.repeatInterval
@@ -135,14 +135,14 @@ private final class PaletteKeySequence {
 
     let clock = TestClock()
     let viewModel = PaletteViewModel(homeDirectory: "/Users/example")
-    private(set) var hold: PaletteConfirmKeyHold
+    private(set) var hold: PaletteEventKeyHold
     /// 外（AppCoordinator）へ伝えたイベント。伝えると注入が始まり、パレットはキーを手放す
     private(set) var sentEvents: [PaletteEvent] = []
     /// パレットで消費せずに渡したキー。パレットがキーを手放す前は検索フィールドへ、手放した後は背後のパネルへ届く
     private(set) var passedKeys: [PaletteKeyInput] = []
 
     init() {
-        hold = PaletteConfirmKeyHold(clock: clock)
+        hold = PaletteEventKeyHold(clock: clock)
         viewModel.replaceRows([PaletteRow(name: "Library", path: Self.path, lastUsed: nil)])
     }
 
@@ -163,7 +163,7 @@ private final class PaletteKeySequence {
 
     /// PaletteKeyController の keyUp の処理と同じ順に通す。
     func keyUp(_ key: KeyStroke) {
-        if case .confirm(let event) = hold.keyUp(keyCode: key.keyCode) {
+        if case .send(let event) = hold.keyUp(keyCode: key.keyCode) {
             sentEvents.append(event)
         }
     }

@@ -20,7 +20,7 @@
 ///
 /// 時刻は注入した Clock で測る。上限はタイマーを使わず、次のキー入力（`resolve` / `keyUp`）や `isHolding` を
 /// 読んだ時点で判定する。預かっている状態はキー入力の扱いにしか影響しないため、それで足りる。
-public struct PaletteConfirmKeyHold: Sendable {
+public struct PaletteEventKeyHold: Sendable {
     /// 確定のキーを押してから離すまでを待つ上限。
     /// Issue #90 の再現手順（keyDown → 0.5 秒後から 50ms 間隔で 20 回のリピート → keyUp。約 1.5 秒）や、
     /// 実機 QA の物理キーの約 2 秒の長押しでも、離したときに確定できる長さにする。
@@ -86,10 +86,10 @@ public struct PaletteConfirmKeyHold: Sendable {
     }
 
     /// keyUp を受けたときに呼ぶ。
-    public mutating func keyUp(keyCode: UInt16) -> PaletteConfirmKeyRelease {
+    public mutating func keyUp(keyCode: UInt16) -> PaletteEventKeyRelease {
         guard let hold, hold.keyCode == keyCode else { return .unrelated }
         self.hold = nil
-        return isExpired(hold) ? .expired : .confirm(hold.event)
+        return isExpired(hold) ? .expired : .send(hold.event)
     }
 
     /// 預かっている確定を取り消す（パレットがキーでなくなったとき）。
@@ -125,9 +125,9 @@ public struct PaletteConfirmKeyHold: Sendable {
 }
 
 /// 確定のキーを離したときの結果。
-public enum PaletteConfirmKeyRelease: Equatable, Sendable {
+public enum PaletteEventKeyRelease: Equatable, Sendable {
     /// 預かっていた確定のキーを上限までに離した。この確定を外へ伝える
-    case confirm(PaletteEvent)
+    case send(PaletteEvent)
     /// 預かっていた確定のキーを、上限を過ぎてから離した。確定は取り消し済み
     case expired
     /// 預かっていたキーではない（または何も預かっていない）
