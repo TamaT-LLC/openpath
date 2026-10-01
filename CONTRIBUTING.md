@@ -95,7 +95,7 @@ Pull Request には、変更理由、変更内容、関連 Issue、検証結果�
 - release workflow、署名、公証、配布物を変える変更
 
 CODEOWNERS の review と必須 CI が完了し、review の会話がすべて解決するまで merge できません。
-例外として、緊急時に限り `@TakehiroT` は CODEOWNERS の review を省略して merge できます（[GOVERNANCE.md](./GOVERNANCE.md)）。
+例外として、緊急時に限り `@TakehiroT` は承認（CODEOWNERS の review を含む）を省略して merge できます（[GOVERNANCE.md](./GOVERNANCE.md)）。
 この場合も、必須 CI の成功と会話の解決は省略できません。
 Pull Request で提出した変更は、このリポジトリの [MIT License](./LICENSE) で提供されたものとして扱います。
 

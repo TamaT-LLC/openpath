@@ -20,8 +20,9 @@ maintainer は、利用者への影響、正しさ、security、互換性、保�
 
 作者は自分の変更を承認しません。
 必須 CI の成功と、review の会話の解決が merge の条件です。
-`@TakehiroT` には、緊急時に code owner の review だけを省略できる Pull Request 限定の bypass を割り当てます。
-この bypass は、必須 CI、`main` の履歴保護、version tag の保護を省略しません。
+`@TakehiroT` には、緊急時に承認（code owner の review を含む 1 件の承認）を省略して merge できる、Pull Request 限定の bypass を割り当てます。
+この bypass は、必須 CI、会話の解決、`main` の履歴保護、version tag の保護を省略しません。
+bypass を使った merge は、理由を Pull Request に記録します。
 これらの設定の正本は [.github/settings-desired-v1.json](./.github/settings-desired-v1.json) です。
 実際の設定との差分は、管理者の権限で `python3 scripts/github_settings_drift.py` を実行すると一覧できます。
 このスクリプトは GitHub API の読み取りだけを行い、設定を変更しません。
