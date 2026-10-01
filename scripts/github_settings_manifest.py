@@ -29,6 +29,10 @@ CHECK_CONTEXT = re.compile(r'[^\x00-\x1f\x7f]{1,128}\Z')
 DIGEST = re.compile(r'[0-9a-f]{64}\Z')
 BYPASS_IDENTITY = re.compile(r'(?:user|app|team|role):[A-Za-z0-9._-]{1,128}\Z')
 BYPASS_MODES = ('always', 'pull_request')
+# CodeQL default setup reports one `Analyze (<language>)` check per analyzed language.
+CODEQL_CHECK = re.compile(r'Analyze \((?P<language>[a-z-]+)\)\Z')
+CODEQL_LANGUAGES = ('actions', 'c-cpp', 'csharp', 'go', 'java-kotlin', 'javascript-typescript',
+                    'python', 'ruby', 'rust', 'swift')
 MAX_ITEMS = 64
 MAX_INVENTORY = 256
 MAX_ENVIRONMENTS = 128
@@ -209,6 +213,25 @@ def validate(data):
         for key in SECURITY_KEYS:
             check.boolean(data['security'][key], 'security/' + key)
     return check.errors
+
+
+def codeql_language(context):
+    """Return the CodeQL language of an `Analyze (<language>)` check name, or None."""
+    match = CODEQL_CHECK.match(context)
+    if match is None or match.group('language') not in CODEQL_LANGUAGES:
+        return None
+    return match.group('language')
+
+
+def required_codeql_languages(data):
+    """Return the CodeQL languages whose default setup checks a valid manifest requires."""
+    languages = set()
+    for ruleset in data['rulesets']:
+        for check in ruleset['required_checks']:
+            language = codeql_language(check['context'])
+            if language is not None:
+                languages.add(language)
+    return sorted(languages)
 
 
 def load(root):

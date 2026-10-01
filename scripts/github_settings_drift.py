@@ -21,7 +21,9 @@ from it, as in the live rulesets of depgraph-cli and repo-knowledge-mcp:
   allow_deletions = false means one has a deletion rule; as in depgraph-cli,
   require-code-owner-review relies on protect-main for this protection;
 - a branch ruleset with approvals, code owner review, or conversation
-  resolution has a pull_request rule.
+  resolution has a pull_request rule;
+- every required `Analyze (<language>)` check needs CodeQL default setup to
+  analyze that language.
 
 security_advisories and dependency_graph are always on for public repositories,
 so they are read from the visibility. Apps, token fingerprints, and runner groups
@@ -246,6 +248,8 @@ def _security_drift(desired, fetch, base, repository):
             raise
         dependabot_alerts = False
     public = repository.get('visibility') == 'public'
+    default_setup = fetch(f'{base}/code-scanning/default-setup')
+    configured = default_setup.get('state') == 'configured'
     actual = {
         'private_vulnerability_reporting': bool(fetch(f'{base}/private-vulnerability-reporting').get('enabled')),
         'security_advisories': public,
@@ -254,11 +258,17 @@ def _security_drift(desired, fetch, base, repository):
         'dependency_graph': public,
         'dependabot_alerts': dependabot_alerts,
         'dependabot_security_updates': enabled('dependabot_security_updates'),
-        'code_scanning': fetch(f'{base}/code-scanning/default-setup').get('state') == 'configured',
+        'code_scanning': configured,
     }
     drift = []
     for key in manifest.SECURITY_KEYS:
         _compare(drift, f'security/{key}', desired['security'][key], actual[key])
+    # A required `Analyze (<language>)` check appears only when default setup analyzes that language.
+    required = manifest.required_codeql_languages(desired)
+    languages = sorted(default_setup.get('languages') or [])
+    if configured and not set(required) <= set(languages):
+        drift.append(f'security/code_scanning/languages: expected to include {_show(required)}, '
+                     f'actual {_show(languages)}')
     return drift
 
 

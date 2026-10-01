@@ -41,7 +41,6 @@ USES_LINE = re.compile(r'(?P<indent> *)(?P<dash>- +)?uses: *(?P<spec>\S+) *(?:# 
 USES_KEY = re.compile(r'''(?<![A-Za-z0-9_])["']?uses["']? *:''')
 YAML_ESCAPE = re.compile(r'\\(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})')
 PERSIST_FALSE = re.compile(r' *persist-credentials: *false *(?:#.*)?\Z')
-CODEQL_CHECK = re.compile(r'Analyze \([a-z0-9-]+\)\Z')
 PATH_FILTERS = ('paths', 'paths-ignore')
 READ_ONLY_PERMISSIONS = ([], ['contents: read'])
 
@@ -284,7 +283,7 @@ def verify_settings(root, workflows):
             source = (check['source_app_id'], check['source_app_slug'])
             if source != (manifest.GITHUB_ACTIONS_APP_ID, manifest.GITHUB_ACTIONS_APP_SLUG):
                 errors.append(f"{manifest.SETTINGS_FILE}: required check '{context}' must come from github-actions")
-            elif context not in checks and not (code_scanning and CODEQL_CHECK.match(context)):
+            elif context not in checks and not (code_scanning and manifest.codeql_language(context)):
                 errors.append(f"{manifest.SETTINGS_FILE}: required check '{context}' in ruleset "
                               f"'{ruleset['name']}' is not a pull request job without path filters "
                               'or a CodeQL default setup check')

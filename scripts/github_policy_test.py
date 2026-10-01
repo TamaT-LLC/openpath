@@ -279,6 +279,12 @@ class SettingsManifestTests(RepositoryFixture):
         self.write_settings(settings)
         self.assert_rejected("'Analyze (actions)'")
 
+    def test_codeql_checks_must_name_a_codeql_language(self):
+        settings = copy.deepcopy(SETTINGS)
+        settings['rulesets'][0]['required_checks'][0]['context'] = 'Analyze (pyhton)'
+        self.write_settings(settings)
+        self.assert_rejected("'Analyze (pyhton)'")
+
     def test_path_filtered_pull_request_cannot_provide_required_checks(self):
         self.write_workflow('ci.yml', CI.replace('  pull_request:\n', '  pull_request:\n    paths:\n      - Sources/**\n'))
         self.assert_rejected("'swift build / swift test'")
@@ -334,7 +340,7 @@ def matching_live_state():
         'repos/TamaT-LLC/openpath/teams?per_page=100': [],
         'repos/TamaT-LLC/openpath/private-vulnerability-reporting': {'enabled': True},
         'repos/TamaT-LLC/openpath/vulnerability-alerts': None,
-        'repos/TamaT-LLC/openpath/code-scanning/default-setup': {'state': 'configured'},
+        'repos/TamaT-LLC/openpath/code-scanning/default-setup': {'state': 'configured', 'languages': ['actions', 'python']},
         'user/33048137': {'login': 'TakehiroT'},
     }
     for ruleset in rulesets:
@@ -401,6 +407,12 @@ class DriftTests(unittest.TestCase):
         self.assertIn('app:renovate', report)
         self.assertIn('protect-release-tags/rules: unexpected creation', report)
         self.assertIn('rulesets/branch/legacy: unexpected', report)
+
+    def test_codeql_default_setup_must_analyze_every_required_language(self):
+        responses = matching_live_state()
+        responses['repos/TamaT-LLC/openpath/code-scanning/default-setup'] = {'state': 'configured', 'languages': ['python']}
+        self.assertIn('security/code_scanning/languages: expected to include ["actions"], actual ["python"]',
+                      self.report(responses))
 
     def test_disabled_dependabot_alerts_are_reported(self):
         responses = matching_live_state()
