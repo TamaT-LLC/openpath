@@ -23,7 +23,8 @@ public protocol PasteboardAccessing: AnyObject {
     func replaceContents(with snapshot: PasteboardSnapshot) -> Bool
 }
 
-/// 主方式で送るキー操作（DSN-001 §3.1）。仮想キーコードへの対応は OpenPathMac 側が持つ。
+/// 主方式で送るキー操作（DSN-001 §3.1）。どのキーで送るか（`spec`）は `InjectionKeyLayout.swift`、
+/// 入力ソースのキー配列に合わせた仮想キーコードへの対応は `InjectionKeyCodeResolver` と OpenPathMac 側が持つ。
 public enum InjectionKeyStroke: Equatable, Hashable, Sendable, CaseIterable {
     /// ⌘⇧G: 移動先シートを開く
     case goToFolder
@@ -33,13 +34,46 @@ public enum InjectionKeyStroke: Equatable, Hashable, Sendable, CaseIterable {
     case paste
     /// Return: シートを確定してパネルを移動させる
     case returnKey
+    /// /: ファイル一覧にフォーカスがあるときに移動先シートを開く（⌘⇧G でシートが出なかったときの代替）。
+    /// 入力欄にフォーカスがあると文字として入ってしまうため、ファイル一覧にフォーカスがあるときだけ送る。
+    case slash
 }
 
-/// キー操作の送出（CGEvent の抽象）。キー入力はその時点のキーウィンドウに届く。
+/// キーイベントを送る経路。
+public enum InjectionKeyRoute: String, Equatable, Sendable {
+    /// 注入先のプロセスへ直接送る（`CGEvent.postToPid`）。他アプリのグローバルホットキー（Raycast の ⌘⇧G 等）や
+    /// イベントタップを経由しないため、横取りされない。アプリが前面でなくても届くため、送る前の注入先の確認は欠かせない。
+    case targetProcess
+    /// 物理キーボードと同じ経路でシステムへ送る（`CGEvent.post(tap: .cghidEventTap)`）。
+    /// 最前面アプリのキーウィンドウに届くが、他アプリのグローバルホットキーに先に評価され、横取りされることがある。
+    case systemWide
+}
+
+/// 送る準備ができたキー操作（送り先とキーイベントが決まっている）。
+/// 送る直前の注入先の確認と送出の間に待ちを挟まないよう、`post()` は同期的に送るだけにする。
+@MainActor
+public struct PreparedKeyStroke {
+    private let send: @MainActor () -> Void
+
+    public init(send: @escaping @MainActor () -> Void) {
+        self.send = send
+    }
+
+    /// 送る。
+    public func post() {
+        send()
+    }
+}
+
+/// キー操作の送出（CGEvent の抽象）。
+///
+/// 送り先を決める AX の読み取りなど待ちを伴う処理は `prepare` で済ませ、呼び出し側は注入先の確認の直後に `post()` で送る。
+/// 送り先を決めている間にフォーカスが移ったりキャンセルされたりしても、送る前の確認で止められるようにするため。
 @MainActor
 public protocol KeyStrokePosting {
-    /// - Throws: キーイベントを作れず送れなかった場合。
-    func post(_ keyStroke: InjectionKeyStroke) throws
+    /// - Parameter route: 送る経路。`.targetProcess` では、注入先のアプリ（パネルを別プロセスが描く場合はフォーカス中の要素のプロセス）へ送る。
+    /// - Throws: キーイベントを作れない・送り先を決められない場合。
+    func prepare(_ keyStroke: InjectionKeyStroke, via route: InjectionKeyRoute) async throws -> PreparedKeyStroke
 }
 
 /// ⌘⇧G で開く移動先シートの出現判定（AX の抽象）。
