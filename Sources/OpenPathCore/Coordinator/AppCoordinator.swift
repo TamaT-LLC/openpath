@@ -1,5 +1,8 @@
 /// パネル検知からパス注入までを司る状態機械（ARCH-001 §5）。
 /// PanelWatcher / PaletteWindow / ホットキーから UI スレッドで呼ばれるため MainActor に隔離する。
+///
+/// 注入の開始と、注入の失敗を覚える・出し直す・忘れることを `diagnose` で報告する
+/// （`CoordinatorDiagnostic`。既定では debug ログに出す。実機 QA の INJ-01 の判定用）。
 @MainActor
 public final class AppCoordinator {
     /// 注入の全体タイムアウト。超えたらパネルの状態が不明とみなして Idle に戻す。
@@ -26,6 +29,7 @@ public final class AppCoordinator {
     private let history: any HistoryRecording
     private let isAutoConfirmEnabled: @MainActor () -> Bool
     private let clock: any Clock<Duration>
+    private let diagnose: @MainActor (CoordinatorDiagnostic) -> Void
     private var activeInjection: ActiveInjection?
     private var nextInjectionID = 0
     /// 注入に成功し、まだ開いているはずのパネル。Idle 中だけ持つ。
@@ -54,18 +58,21 @@ public final class AppCoordinator {
     /// - Parameters:
     ///   - isAutoConfirmEnabled: 設定 auto_confirm。設定ファイルの変更を反映するため confirm のたびに読む。
     ///   - clock: 注入タイムアウトの計測に使う。テストでは手動で進める Clock を渡す。
+    ///   - diagnose: 注入の開始と、注入の失敗の記憶の報告先。既定では debug ログに出す。
     public init(
         palette: any PaletteDisplaying,
         injector: any PathInjecting,
         history: any HistoryRecording,
         isAutoConfirmEnabled: @escaping @MainActor () -> Bool,
-        clock: any Clock<Duration> = ContinuousClock()
+        clock: any Clock<Duration> = ContinuousClock(),
+        diagnose: @escaping @MainActor (CoordinatorDiagnostic) -> Void = CoordinatorDiagnostic.log
     ) {
         self.palette = palette
         self.injector = injector
         self.history = history
         self.isAutoConfirmEnabled = isAutoConfirmEnabled
         self.clock = clock
+        self.diagnose = diagnose
     }
 
     public func handle(_ event: CoordinatorEvent) {
@@ -92,17 +99,18 @@ public final class AppCoordinator {
         case .idle:
             // 注入に成功したパネルの再通知では、パネル側での確定（Enter）を妨げないようパレットを出さない
             guard injectedPanel?.id != context.id else { return }
-            let failure = failureToReshow?.panelID == context.id ? failureToReshow : nil
-            showPalette(for: context)
+            let failure = takeFailureToReshow(for: context.id)
+            showPalette(for: context, forgetting: .otherPanel)
             // 切り替えている間に終えた注入の失敗（#94）や、タイムアウトで出したエラー（#101）を、
             // 出し直したパレットで伝える（検索語と選択は PalettePresenter が保つ）
             if let failure {
-                showFailure(failure.message, for: context)
+                showFailure(failure)
+                diagnose(.failureReshown(panelID: failure.panelID, failure: failure.kind))
             }
         case .panelShown(let current, _):
             // 同じパネルの再検知で、Esc で閉じたパレットを勝手に出し直さない
             guard current.id != context.id else { return }
-            showPalette(for: context)
+            showPalette(for: context, forgetting: .otherPanel)
         case .injecting:
             return
         }
@@ -121,6 +129,9 @@ public final class AppCoordinator {
             pendingRestoreFailure = nil
             displayedFailure = nil
             if let restoreFailure, restoreFailure.panelID == context.id {
+                if let failure {
+                    diagnose(.failureForgotten(panelID: failure.panelID, failure: failure.kind, reason: .panelClosed))
+                }
                 state = .idle
                 palette.hide()
                 history.record(path: restoreFailure.path)
@@ -128,7 +139,15 @@ public final class AppCoordinator {
                 return
             }
             // 失敗を出していたパネルを見失った（アプリの切り替え等）。戻ってきたら出し直す
-            failureToReshow = failure?.panelID == context.id ? failure : nil
+            if let failure, failure.panelID == context.id {
+                rememberFailure(failure, cause: .panelGoneWhileShowingFailure)
+            } else {
+                // 別のパネルの失敗が残っていた場合（通常は起きない）も、診断の経路を揃えて捨てたことを報告する
+                if let failure {
+                    diagnose(.failureForgotten(panelID: failure.panelID, failure: failure.kind, reason: .otherPanel))
+                }
+                forgetFailureToReshow(.otherPanel)
+            }
             state = .idle
             palette.hide()
         case .injecting(let context, _):
@@ -136,7 +155,10 @@ public final class AppCoordinator {
                 cancelActiveInjection()
                 // 注入の途中でパネルを見失った（アプリの切り替え等）ため打ち切った。パネルが最前面でなくなったときと同じく、
                 // 戻ってきたパネルの再通知で、移動できなかったことを伝える
-                failureToReshow = PanelFailure(panelID: context.id, error: .targetNotFrontmost)
+                rememberFailure(
+                    PanelFailure(panelID: context.id, error: InjectionError.targetNotFrontmost),
+                    cause: .panelGoneWhileInjecting
+                )
                 state = .idle
                 palette.setLocked(false)
                 palette.hide()
@@ -180,11 +202,11 @@ public final class AppCoordinator {
         case .idle:
             // タイムアウト後に残ったエラー表示のパレットを閉じられるようにする。
             // Esc はパレットにキーがあるときだけ届くため、出していたエラーは利用者が見たものとして忘れる
-            failureToReshow = nil
+            forgetFailureToReshow(.escape)
             palette.hide()
         case .panelShown(let context, isPaletteVisible: true):
             pendingRestoreFailure = nil
-            displayedFailure = nil
+            forgetDisplayedFailure(.escape)
             state = .panelShown(context, isPaletteVisible: false)
             palette.hide()
         case .panelShown(_, isPaletteVisible: false), .injecting:
@@ -197,34 +219,65 @@ public final class AppCoordinator {
         case .idle:
             // タイムアウト後などは、開いたままのパネルの再通知でパレットを出し直す（PanelWatcher 側の責務）
             guard let injectedPanel else { return }
-            showPalette(for: injectedPanel)
+            showPalette(for: injectedPanel, forgetting: .hotkey)
         case .panelShown(let context, isPaletteVisible: false):
-            showPalette(for: context)
+            showPalette(for: context, forgetting: .hotkey)
         case .panelShown(_, isPaletteVisible: true), .injecting:
             return
         }
     }
 
-    private func showPalette(for context: PanelContext) {
+    /// - Parameter reason: 覚えていた失敗が残っていた場合に、忘れた理由として報告するもの。
+    private func showPalette(for context: PanelContext, forgetting reason: CoordinatorDiagnostic.ForgetReason) {
         injectedPanel = nil
         pendingRestoreFailure = nil
-        displayedFailure = nil
-        failureToReshow = nil
+        forgetDisplayedFailure(reason)
+        forgetFailureToReshow(reason)
         state = .panelShown(context, isPaletteVisible: true)
         palette.show(context: context)
     }
 
     /// 表示中のパレットに注入の失敗を赤字で出し、パネルを見失ったときに出し直せるよう覚えておく。
-    private func showFailure(_ message: String, for context: PanelContext) {
-        displayedFailure = PanelFailure(panelID: context.id, message: message)
-        palette.showError(message)
+    private func showFailure(_ failure: PanelFailure) {
+        displayedFailure = failure
+        palette.showError(failure.message)
+    }
+
+    // MARK: - 失敗の記憶（診断の報告を伴う）
+
+    /// 同じパネルの再通知で出し直す失敗として覚える。
+    private func rememberFailure(_ failure: PanelFailure, cause: CoordinatorDiagnostic.RememberCause) {
+        failureToReshow = failure
+        diagnose(.failureRemembered(panelID: failure.panelID, failure: failure.kind, cause: cause))
+    }
+
+    /// `panelID` のパネルの出し直す失敗を取り出す（出し直すため、忘れたとは報告しない）。別のパネルの失敗は残す。
+    private func takeFailureToReshow(for panelID: PanelContext.ID) -> PanelFailure? {
+        guard let failure = failureToReshow, failure.panelID == panelID else { return nil }
+        failureToReshow = nil
+        return failure
+    }
+
+    private func forgetFailureToReshow(_ reason: CoordinatorDiagnostic.ForgetReason) {
+        guard let failure = failureToReshow else { return }
+        failureToReshow = nil
+        diagnose(.failureForgotten(panelID: failure.panelID, failure: failure.kind, reason: reason))
+    }
+
+    private func forgetDisplayedFailure(_ reason: CoordinatorDiagnostic.ForgetReason) {
+        guard let failure = displayedFailure else { return }
+        displayedFailure = nil
+        diagnose(.failureForgotten(panelID: failure.panelID, failure: failure.kind, reason: reason))
     }
 
     // MARK: - 注入
 
     private func startInjection(context: PanelContext, path: String, autoConfirm: Bool) {
+        // 失敗を表示しているパレットからの確定は、再試行
+        let isRetry = displayedFailure != nil
         pendingRestoreFailure = nil
-        displayedFailure = nil
+        forgetDisplayedFailure(.retry)
+        diagnose(.injectionStarted(panelID: context.id, isAutoConfirm: autoConfirm, isRetry: isRetry))
         let injectionID = nextInjectionID
         nextInjectionID += 1
         activeInjection = ActiveInjection(
@@ -306,12 +359,12 @@ public final class AppCoordinator {
                 pendingRestoreFailure = PendingRestoreFailure(panelID: context.id, path: path)
             }
             palette.setLocked(false)
-            showFailure(PanelFailure.message(for: error), for: context)
+            showFailure(PanelFailure(panelID: context.id, error: error))
         case .timedOut:
             // パネルの状態が分からないため Idle に戻し、エラーを出したパレットは残す。PanelWatcher は Idle に戻ると
             // 開いたままのパネルを再通知し、パレットを出し直すと状態表示が消えるため、そのときに付け直せるよう覚えておく（#101）
-            let failure = PanelFailure(panelID: context.id, message: PaletteMessage.injectionTimedOut)
-            failureToReshow = failure
+            let failure = PanelFailure.timedOut(panelID: context.id)
+            rememberFailure(failure, cause: .timedOut)
             state = .idle
             palette.setLocked(false)
             palette.showError(failure.message)
@@ -338,10 +391,10 @@ public final class AppCoordinator {
         case .failed(let error):
             // 「開く」まで進まなかった（targetNotFrontmost 等）。パネルが消えたのはアプリの切り替えによるもので、
             // 開いたまま戻ってくることがあるため、同じパネルの再通知で失敗を伝える
-            failureToReshow = PanelFailure(panelID: context.id, message: PanelFailure.message(for: error))
+            rememberFailure(PanelFailure(panelID: context.id, error: error), cause: .finishedAfterPanelGone)
             finishAsIdle()
         case .timedOut:
-            failureToReshow = PanelFailure(panelID: context.id, message: PaletteMessage.injectionTimedOut)
+            rememberFailure(PanelFailure.timedOut(panelID: context.id), cause: .finishedAfterPanelGone)
             finishAsIdle()
         }
     }
@@ -367,18 +420,22 @@ private struct PendingRestoreFailure {
 private struct PanelFailure {
     let panelID: PanelContext.ID
     let message: String
+    /// 診断の報告に使う失敗の種類
+    let kind: CoordinatorDiagnostic.FailureKind
 
-    init(panelID: PanelContext.ID, message: String) {
+    init(panelID: PanelContext.ID, error: any Error) {
         self.panelID = panelID
-        self.message = message
+        message = Self.message(for: error)
+        kind = CoordinatorDiagnostic.FailureKind(error)
     }
 
-    init(panelID: PanelContext.ID, error: InjectionError) {
-        self.init(panelID: panelID, message: Self.message(for: error))
+    /// AppCoordinator の全体タイムアウト（文言は `PaletteMessage.injectionTimedOut`）。
+    static func timedOut(panelID: PanelContext.ID) -> PanelFailure {
+        PanelFailure(panelID: panelID, error: InjectionError.timeout(step: .overall))
     }
 
     /// パレットのフッターに出す文言。InjectionError 以外や文言の無いエラーは汎用の文言にする。
-    static func message(for error: any Error) -> String {
+    private static func message(for error: any Error) -> String {
         (error as? InjectionError)?.userMessage ?? PaletteMessage.injectionFailed
     }
 }

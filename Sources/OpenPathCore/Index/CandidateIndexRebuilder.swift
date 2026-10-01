@@ -47,6 +47,7 @@ public final class CandidateIndexRebuilder {
     private let interval: Duration
     /// `clock` という名前は Foundation 経由で見える Darwin の `clock()` と紛らわしいため避ける
     private let scheduleClock: any Clock<Duration>
+    private let diagnose: @MainActor @Sendable (HistoryClearDiagnostic) -> Void
     @ObservationIgnored private var config: Config
     @ObservationIgnored private var lifecycle = Lifecycle.idle
     @ObservationIgnored private var activeCycle: ActiveCycle?
@@ -69,18 +70,21 @@ public final class CandidateIndexRebuilder {
     ///   - sourceProvider: 設定から候補ソースを組み立てる。本番では `StandardCandidateSources` を渡す。
     ///   - interval: 周期の再構築の間隔。
     ///   - clock: 周期の計測に使う。テストでは手動で進める Clock を渡す。
+    ///   - diagnose: 履歴のクリアで履歴の候補を取り除いたことの報告先。既定では debug ログに出す。
     public init(
         index: CandidateIndex,
         config: Config,
         sourceProvider: any CandidateSourceProviding,
         interval: Duration = defaultInterval,
-        clock: any Clock<Duration> = ContinuousClock()
+        clock: any Clock<Duration> = ContinuousClock(),
+        diagnose: @escaping @MainActor @Sendable (HistoryClearDiagnostic) -> Void = HistoryClearDiagnostic.log
     ) {
         self.index = index
         self.config = config
         self.sourceProvider = sourceProvider
         self.interval = interval
         scheduleClock = clock
+        self.diagnose = diagnose
     }
 
     // MARK: - 契機
@@ -112,13 +116,23 @@ public final class CandidateIndexRebuilder {
     /// 走査中の履歴の収集は消す前の履歴を読んでいることがあるが、その結果は取り除いた後には反映しない
     /// （`CandidateIndex.invalidate(source:)`）。ほかのソースは履歴に依らないため、走査中の再構築は取り消さずに続け、
     /// 構築を長引かせない。消した後の履歴は空なので、履歴を収集し直す必要もない。
+    /// 取り除いた候補をクエリに反映したら、取り除いた数・かかった時間・全件の再構築の途中だったかを `diagnose` で
+    /// 報告してから `didRemove` を呼ぶ（実機 QA の MENU-04・MENU-05 の判定用）。
     /// - Parameter didRemove: 取り除いた候補をクエリに反映した後に呼ぶ。表示中のパレットの候補を引き直すのに使う
     ///   （パレットは検索語の変更と全件の再構築の完了でしか候補を引き直さないため）。
     public func historyDidClear(didRemove: @escaping @MainActor @Sendable () -> Void = {}) {
         Log.debug("履歴の削除に合わせて履歴の候補を取り除きます")
-        let removal = index.invalidate(source: .history)
+        let startedAt = ContinuousClock.now
+        let wasRebuilding = isRebuilding
+        let removal = index.invalidateCountingRemoved(source: .history)
+        let diagnose = diagnose
         Task {
-            await removal.value
+            await removal.publication.value
+            diagnose(HistoryClearDiagnostic(
+                removedCount: removal.removedCount,
+                elapsed: startedAt.duration(to: .now),
+                wasRebuilding: wasRebuilding
+            ))
             didRemove()
         }
     }
