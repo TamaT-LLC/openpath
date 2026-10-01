@@ -24,6 +24,8 @@ struct PalettePresenterShownTests {
 
     private let window = PaletteWindowSpy()
     private let recorder = ShownRecorder()
+    private let search = ScriptedPaletteSearch()
+    private let clock = TestClock()
     private let presenter: PalettePresenter
 
     init() {
@@ -33,30 +35,79 @@ struct PalettePresenterShownTests {
             viewModel: PaletteViewModel(homeDirectory: "/Users/example"),
             window: window,
             includeFiles: { false },
-            // 表示の知らせは候補の結果を待たないため、検索はすぐに空で返して保留中の検索を残さない
-            search: { _, _, _ in [] },
+            search: search.search,
+            clock: clock,
             didShow: { context in
                 recorder.record(Notification(panelID: context.id, lastWindowCall: window.calls.last))
             }
         )
     }
 
-    @Test("ウィンドウを出した直後に、表示したパネルを知らせる")
-    func notifiesAfterShowingWindow() {
+    /// パレットを出し、最初の候補の検索に `rows` で答えて、知らせが届くまで待つ。
+    private func show(_ context: PanelContext, answering rows: [PaletteRow]) async {
+        let callIndex = search.calls.count
+        let notificationCount = recorder.notifications.count
+        presenter.show(context: context)
+        await search.waitForCalls(callIndex + 1)
+        search.respond(to: callIndex, with: rows)
+        await MainActorQueue.waitUntil { recorder.notifications.count > notificationCount }
+    }
+
+    @Test("新しいパネルでは、最初の候補を反映してウィンドウを出した直後に知らせる（検知レイテンシの終点）")
+    func notifiesAfterShowingWindowWithInitialRows() async {
+        let rows = PaletteRowFixtures.rows("fern", "fern-docs")
         presenter.show(context: .sample)
+        await search.waitForCalls(1)
+        await MainActorQueue.drain()
+        // 候補を待っている間はウィンドウを出していないため知らせない
+        #expect(recorder.notifications.isEmpty)
+
+        search.respond(to: 0, with: rows)
+        await MainActorQueue.waitUntil { !recorder.notifications.isEmpty }
+
+        #expect(recorder.notifications == [
+            Notification(
+                panelID: PanelContext.sample.id,
+                lastWindowCall: .show(near: PanelContext.sample.frame, rowCount: rows.count)
+            ),
+        ])
+    }
+
+    @Test("最初の候補を待ちきれずにウィンドウを出したときも、出した直後に知らせる")
+    func notifiesWhenShownAfterWaitLimit() async {
+        presenter.show(context: .sample)
+        await search.waitForCalls(1)
+
+        clock.advance(by: PalettePresenter.initialRowsWaitLimit)
+        await MainActorQueue.waitUntil { !recorder.notifications.isEmpty }
 
         #expect(recorder.notifications == [
             Notification(panelID: PanelContext.sample.id, lastWindowCall: .show(near: PanelContext.sample.frame, rowCount: 0)),
         ])
     }
 
+    @Test("最初の候補を待っている間に閉じたら、ウィンドウを出さないため知らせない")
+    func doesNotNotifyWhenHiddenWhileWaiting() async {
+        presenter.show(context: .sample)
+        await search.waitForCalls(1)
+
+        presenter.hide()
+        search.respond(to: 0, with: PaletteRowFixtures.rows("fern"))
+        clock.advance(by: PalettePresenter.initialRowsWaitLimit)
+        await MainActorQueue.drain()
+
+        #expect(recorder.notifications.isEmpty)
+    }
+
     @Test("表示のたびに 1 回知らせる（同じパネルの再表示・別のパネルでも）")
-    func notifiesEveryShow() {
-        presenter.show(context: .sample)
+    func notifiesEveryShow() async {
+        await show(.sample, answering: PaletteRowFixtures.rows("fern"))
         presenter.hide()
+        // 同じパネルの再表示は候補を待たずにすぐ出す（引き直しの検索が届いてから閉じ、次の表示の検索と取り違えない）
         presenter.show(context: .sample)
+        await search.waitForCalls(2)
         presenter.hide()
-        presenter.show(context: .another)
+        await show(.another, answering: PaletteRowFixtures.rows("openpath"))
 
         #expect(recorder.notifications.map(\.panelID) == [
             PanelContext.sample.id, PanelContext.sample.id, PanelContext.another.id,
@@ -64,8 +115,8 @@ struct PalettePresenterShownTests {
     }
 
     @Test("位置の合わせ直し・閉じる・キー入力の受け渡しでは知らせない")
-    func doesNotNotifyOtherOperations() {
-        presenter.show(context: .sample)
+    func doesNotNotifyOtherOperations() async {
+        await show(.sample, answering: PaletteRowFixtures.rows("fern"))
         let moved = PanelContext(id: PanelContext.sample.id, isDirectoriesOnly: false, frame: PanelContext.another.frame)
 
         presenter.update(context: moved)

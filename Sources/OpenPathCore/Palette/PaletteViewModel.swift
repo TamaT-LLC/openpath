@@ -20,6 +20,9 @@ public final class PaletteViewModel {
     /// 値が変わったときだけ呼ぶため、初回表示の候補は配線側で別途引くこと
     @ObservationIgnored public var onQueryChange: ((String) -> Void)?
     public private(set) var rows: [PaletteRow] = []
+    /// 候補（検索の結果）を受け取ったか。`reset()` から最初の `replaceRows(_:keepingSelection:)` までは false。
+    /// 結果が届く前の空の `rows` を「一致する候補がありません」と区別するために使う（#91）
+    public private(set) var hasReceivedRows = false
     /// 選択中の候補の添字。候補が 0 件のときだけ nil
     public private(set) var selectedIndex: Int?
     /// 注入中は選択を変えない（DSN-001 §5）。キー入力の破棄はキー処理側で行う
@@ -38,9 +41,10 @@ public final class PaletteViewModel {
         selectedIndex.map { rows[$0] }
     }
 
-    /// 候補が 0 件のときにリストへ出す案内。候補があれば nil
+    /// 候補を受け取って 0 件だったときにリストへ出す案内。候補があるとき・まだ候補を受け取っていないときは nil
+    /// （パレットの初出で結果が届く前に「一致する候補がありません」を出さない、#91）
     public var emptyMessage: String? {
-        rows.isEmpty ? PaletteText.noMatches : nil
+        hasReceivedRows && rows.isEmpty ? PaletteText.noMatches : nil
     }
 
     /// フッターの表示。エラー・状態表示 > 構築中 > キーヒントの順に優先する。
@@ -64,6 +68,7 @@ public final class PaletteViewModel {
     public func replaceRows(_ newRows: [PaletteRow], keepingSelection: Bool = false) {
         let previousID = keepingSelection ? selectedRow?.id : nil
         rows = newRows
+        hasReceivedRows = true
         if let previousID, let index = newRows.firstIndex(where: { $0.id == previousID }) {
             selectedIndex = index
         } else {
@@ -109,6 +114,7 @@ public final class PaletteViewModel {
     /// 候補ソースの構築状況はパネルに依らないため保つ。
     public func reset() {
         rows = []
+        hasReceivedRows = false
         selectedIndex = nil
         isLocked = false
         status = nil

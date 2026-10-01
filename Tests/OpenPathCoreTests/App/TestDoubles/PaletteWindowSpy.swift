@@ -17,6 +17,11 @@ final class PaletteWindowSpy: PaletteWindowControlling {
     private(set) var calls: [Call] = []
     var rowCount = 0
 
+    /// 表示した回数
+    var shownCount: Int {
+        calls.count { if case .show = $0 { true } else { false } }
+    }
+
     func show(near panelFrame: CGRect) {
         calls.append(.show(near: panelFrame, rowCount: rowCount))
     }

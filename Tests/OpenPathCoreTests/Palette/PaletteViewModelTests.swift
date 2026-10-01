@@ -80,12 +80,17 @@ struct PaletteViewModelTests {
         #expect(viewModel.selectedIndex == 0)
     }
 
-    @Test("候補があれば 0 件の案内は出さない")
-    func emptyMessageIsShownOnlyWithoutRows() {
+    @Test("0 件の案内は、候補を受け取って 0 件だったときだけ出す（受け取る前・候補があるときは出さない）")
+    func emptyMessageIsShownOnlyForReceivedEmptyRows() {
+        // 結果が届く前に「一致する候補がありません」を出さない（#91）
+        #expect(viewModel.hasReceivedRows == false)
+        #expect(viewModel.emptyMessage == nil)
+
+        viewModel.replaceRows([])
+        #expect(viewModel.hasReceivedRows)
         #expect(viewModel.emptyMessage == PaletteText.noMatches)
 
         viewModel.replaceRows(Self.makeRows("fern"))
-
         #expect(viewModel.emptyMessage == nil)
     }
 
@@ -176,7 +181,7 @@ struct PaletteViewModelTests {
 
     // MARK: - リセット
 
-    @Test("リセットで検索語・候補・選択・状態表示・ロックを初期状態に戻し、構築中の状態は保つ")
+    @Test("リセットで検索語・候補（受け取ったかを含む）・選択・状態表示・ロックを初期状態に戻し、構築中の状態は保つ")
     func resetRestoresSessionState() {
         viewModel.query = "fern"
         viewModel.replaceRows(Self.makeRows("fern"))
@@ -188,6 +193,8 @@ struct PaletteViewModelTests {
 
         #expect(viewModel.query.isEmpty)
         #expect(viewModel.rows.isEmpty)
+        #expect(viewModel.hasReceivedRows == false)
+        #expect(viewModel.emptyMessage == nil)
         #expect(viewModel.selectedIndex == nil)
         #expect(viewModel.status == nil)
         #expect(viewModel.isLocked == false)
