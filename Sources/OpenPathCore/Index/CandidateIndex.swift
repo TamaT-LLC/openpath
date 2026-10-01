@@ -36,6 +36,14 @@ public final class CandidateIndex: Sendable {
         case superseded
     }
 
+    /// ソースを無効にした結果（`invalidateCountingRemoved(source:)`）
+    struct SourceInvalidation: Sendable {
+        /// 取り除いたソースの候補の数
+        let removedCount: Int
+        /// 呼んだ時点のソースの候補をクエリに反映し終える Task（`invalidate(source:)` の戻り値と同じ）
+        let publication: Task<Void, Never>
+    }
+
     private struct State: Sendable {
         /// ソースごとの前処理済みの候補
         var sources: [CandidateSourceKind: [PreparedCandidate]] = [:]
@@ -145,20 +153,28 @@ public final class CandidateIndex: Sendable {
     ///   後の呼び出しの完了を待った側が、まだ取り除かれていない候補で引き直さないようにするため）。
     @discardableResult
     func invalidate(source: CandidateSourceKind) -> Task<Void, Never> {
-        let pending: (sources: [CandidateSourceKind: [PreparedCandidate]], revision: Int)? = state.withLock { state in
+        invalidateCountingRemoved(source: source).publication
+    }
+
+    /// `invalidate(source:)` と同じく取り除き、取り除いた候補の数も返す（履歴のクリアの診断用）。
+    func invalidateCountingRemoved(source: CandidateSourceKind) -> SourceInvalidation {
+        typealias Pending = (sources: [CandidateSourceKind: [PreparedCandidate]], revision: Int)
+        let (removedCount, pending): (Int, Pending?) = state.withLock { state in
             state.generations[source, default: 0] += 1
-            if state.sources.removeValue(forKey: source) != nil {
+            let removed = state.sources.removeValue(forKey: source)
+            if removed != nil {
                 state.revision += 1
             }
             // クエリが使う候補が今のソースの候補に追いついていれば、作り直す必要は無い
-            guard state.catalogRevision < state.revision else { return nil }
-            return (state.sources, state.revision)
+            guard state.catalogRevision < state.revision else { return (removed?.count ?? 0, nil) }
+            return (removed?.count ?? 0, (state.sources, state.revision))
         }
-        guard let pending else { return Task {} }
+        guard let pending else { return SourceInvalidation(removedCount: removedCount, publication: Task {}) }
         // 利用者の操作（メニュー）の結果で、表示中のパレットがこの反映を待つため、走査（utility）より優先する
-        return Task.detached(priority: .userInitiated) { [self] in
+        let publication = Task.detached(priority: .userInitiated) { [self] in
             publishCatalog(merging: pending.sources, revision: pending.revision)
         }
+        return SourceInvalidation(removedCount: removedCount, publication: publication)
     }
 
     /// 差し替えの本体。`expected` が nil なら世代を問わない。
