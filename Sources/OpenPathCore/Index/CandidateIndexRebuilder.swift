@@ -11,6 +11,8 @@ import Observation
 ///   こうして同じソースの走査と差し替えを直列にする。
 /// - 再構築中に届いた契機は重ねて走らせず、終わった後に 1 回だけまとめて走査し直す。
 ///   設定の変更は走査中の結果を古くするため、走査を取り消してから新しい設定で走査し直す。
+/// - 履歴のクリアは再構築の契機にせず、履歴の候補をその場で取り除く（`historyDidClear(didRemove:)`、Issue #92）。
+///   同じソースの差し替えの順序は、CandidateIndex の世代（取り除く前に始めた収集の結果を反映しない）で保つ。
 /// - 周期の再構築は、全件の再構築を終えてから `interval` 後に行う。全件の走査中には周期の契機を積まず、
 ///   履歴だけの取り直しでは数え直さない。
 /// - 周期の再構築では、前回の収集から変わっていないと安価に確かめられたソース（ChangeTrackingCandidateSource）を
@@ -103,14 +105,22 @@ public final class CandidateIndexRebuilder {
         request(.history)
     }
 
-    /// 確定履歴を消したときに呼ぶ（メニューの「履歴をクリア」）。
-    /// 走査中の再構築は消す前の履歴を読んでいるため、取り消してから走査し直す。取り直しを走査の終わりまで待つと、
-    /// 全件の走査が長引く間、消した場所が候補に残るため。全ソースの再構築中ならそれを（周期の再構築なら周期の
-    /// 再構築として）、それ以外は履歴だけを走査し直す。
-    public func historyDidClear() {
-        Log.debug("履歴の削除に合わせて候補を取り直します")
-        let activeScope = activeCycle?.scope ?? .history
-        request(activeScope.coversAllSources ? activeScope : .history, cancellingActive: true)
+    /// 確定履歴を消したときに呼ぶ（メニューの「履歴をクリア」）。`HistoryStore.clear()` の直後に同期的に呼ぶこと。
+    ///
+    /// 履歴の候補をインデックスから直ちに取り除く（Issue #92）。再構築の途中でも、その終わり（遅いルートや ghq の
+    /// 走査）を待たない。再構築の終わりを待つと、取り消しを見ない遅いソースがある間、消した場所が候補に残るため。
+    /// 走査中の履歴の収集は消す前の履歴を読んでいることがあるが、その結果は取り除いた後には反映しない
+    /// （`CandidateIndex.invalidate(source:)`）。ほかのソースは履歴に依らないため、走査中の再構築は取り消さずに続け、
+    /// 構築を長引かせない。消した後の履歴は空なので、履歴を収集し直す必要もない。
+    /// - Parameter didRemove: 取り除いた候補をクエリに反映した後に呼ぶ。表示中のパレットの候補を引き直すのに使う
+    ///   （パレットは検索語の変更と全件の再構築の完了でしか候補を引き直さないため）。
+    public func historyDidClear(didRemove: @escaping @MainActor @Sendable () -> Void = {}) {
+        Log.debug("履歴の削除に合わせて履歴の候補を取り除きます")
+        let removal = index.invalidate(source: .history)
+        Task {
+            await removal.value
+            didRemove()
+        }
     }
 
     /// 設定の変更を反映する。`start()` の前に呼んだ場合は起動時の再構築に使う。
