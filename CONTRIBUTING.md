@@ -97,7 +97,9 @@ Pull Request には、変更理由、変更内容、関連 Issue、検証結果�
 - release workflow、署名、公証、配布物を変える変更
 
 CODEOWNERS の review と必須 CI が完了し、review の会話がすべて解決するまで merge できません。
-例外として、緊急時に限り `@TakehiroT` は承認（CODEOWNERS の review を含む）を省略して merge できます（[GOVERNANCE.md](./GOVERNANCE.md)）。
+maintainer が作成した Pull Request は、CodeRabbit が最新の head を review 済みで指摘が無く、summary の Merge Risk が Low 以下であれば、`@TakehiroT` が承認（CODEOWNERS の review を含む）を省略して squash merge することがあります。
+それ以外（Merge Risk が Moderate 以上、外部の contributor による Pull Request など）は、従来どおり code owner の review を経ます。
+緊急時にも、承認を省略して merge できます（判定条件は [GOVERNANCE.md](./GOVERNANCE.md) にまとめています）。
 この場合も、必須 CI の成功と会話の解決は省略できません。
 Pull Request で提出した変更は、このリポジトリの [MIT License](./LICENSE) で提供されたものとして扱います。
 

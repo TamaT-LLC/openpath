@@ -20,9 +20,19 @@ maintainer は、利用者への影響、正しさ、security、互換性、保�
 
 作者は自分の変更を承認しません。
 必須 CI の成功と、review の会話の解決が merge の条件です。
-`@TakehiroT` には、緊急時に承認（code owner の review を含む 1 件の承認）を省略して merge できる、Pull Request 限定の bypass を割り当てます。
+`@TakehiroT` には、承認（code owner の review を含む 1 件の承認）を省略して merge できる、Pull Request 限定の bypass を割り当てます。
+maintainer が作成した Pull Request は、次をすべて満たす場合に、この bypass で squash merge することがあります。
+
+- CodeRabbit が最新の head を review 済みである（自動で一時停止していた場合は、再開してから判定する）
+- その head に未対応の指摘（Actionable comments、Outside diff range comments）が無い
+- summary の Merge Risk が Low 以下である
+- 必須 CI が成功している
+- review の会話がすべて解決している
+
+上記を満たさない Pull Request（Merge Risk が Moderate 以上、外部の contributor による Pull Request など）は、従来どおり code owner の review を経て merge します。
+緊急時には、上記を満たさない場合でも bypass で merge できます。
 この bypass は、必須 CI、会話の解決、`main` の履歴保護、version tag の保護を省略しません。
-bypass を使った merge は、理由を Pull Request に記録します。
+bypass を使って merge した場合は、判定の根拠（review した head、指摘の件数、Merge Risk）を Pull Request のコメントに記録します。
 これらの設定の正本は [.github/settings-desired-v1.json](./.github/settings-desired-v1.json) です。
 実際の設定との差分は、管理者の権限で `python3 scripts/github_settings_drift.py` を実行すると一覧できます。
 このスクリプトは GitHub API の読み取りだけを行い、設定を変更しません。
