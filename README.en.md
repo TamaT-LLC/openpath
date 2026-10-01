@@ -45,8 +45,8 @@ and everyday use.
 - **You confirm**: by default openpath only navigates the dialog; you press
   "Open" yourself. Cmd+Return navigates and opens in one step.
 - **Non-ASCII paths**: the path is pasted through the clipboard, so Japanese
-  folder names are entered intact. The previous clipboard contents are restored
-  afterwards.
+  folder names are entered intact. See [Privacy](#privacy) for how the
+  clipboard is handled.
 
 ## How it works
 
@@ -188,7 +188,11 @@ System Settings > Privacy & Security > Files and Folders, then choose
 - openpath makes no network connections and depends on no external service.
 - It reads only the part of the frontmost app's window hierarchy needed to
   recognize a file dialog. Window contents and typed values are not stored.
-- The clipboard is used briefly to paste the path and is restored afterwards.
+- The clipboard is used briefly to paste the path, and its previous contents
+  are restored afterwards. Contents marked as concealed
+  (`org.nspasteboard.ConcealedType`, used by password managers) are not saved;
+  the clipboard is cleared after the path is entered instead. If something new
+  is copied while the path is being entered, that new content is kept.
 - Stored data: configuration (`~/.config/openpath/config.toml`), confirmed-path
   history (`~/Library/Application Support/openpath/history.json`), and logs
   (`~/Library/Logs/openpath/`). None of it leaves your Mac.
