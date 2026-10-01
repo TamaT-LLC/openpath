@@ -13,9 +13,9 @@ enum MainActorQueue {
 
     /// 条件を満たすまで MainActor を譲りながら待つ。
     /// 待つ相手が並行実行用のスレッドを経由して MainActor に戻る（候補の検索など）ため、回数では区切らない。
-    /// 満たされない場合はスイートの時間制限で失敗させる。
+    /// 満たされない場合はスイートの時間制限で失敗させる。時間制限でテストが取り消されたら待ちをやめ、テスト実行全体を止めない。
     static func waitUntil(_ condition: () -> Bool) async {
-        while !condition() {
+        while !condition(), !Task.isCancelled {
             await Task.yield()
         }
     }

@@ -51,6 +51,37 @@ struct PanelWatchEngineCoordinatorTests {
         #expect(watcher.events == [.panelAppeared(.finderPanel), .panelAppeared(.finderPanel)])
     }
 
+    @Test("注入中に別のアプリへ切り替えて戻ると、開いたままのパネルの再通知でパレットにエラーを出す（#94）")
+    func switchingAppsDuringInjectionReshowsError() async throws {
+        let message = try #require(InjectionError.targetNotFrontmost.userMessage)
+        let watcher = PanelWatchEngineHarness()
+        let coordinator = CoordinatorHarness(injectorBehavior: .suspend(respondsToCancellation: true))
+        watcher.connect(to: coordinator)
+        watcher.environment.outcome = .found([.finderPanel])
+        watcher.engine.start(frontmost: .finder)
+        await coordinator.waitForState(panelShown)
+        coordinator.coordinator.handle(.confirm(path: "/tmp/repo", openImmediately: false))
+        await coordinator.injector.waitUntilCalled()
+
+        // 切り替え先にはパネルが無い。切り替えている間はパレットを閉じたままにする
+        watcher.environment.outcome = .found([])
+        watcher.engine.applicationDidActivate(.claude)
+        await coordinator.waitForState(.idle)
+        await watcher.drainMainActor()
+        let paletteCallsWhileSwitched = coordinator.palette.calls
+
+        watcher.environment.outcome = .found([.finderPanel])
+        watcher.engine.applicationDidActivate(.finder)
+        await coordinator.waitForState(panelShown)
+
+        #expect(paletteCallsWhileSwitched.last == .hide)
+        #expect(Array(coordinator.palette.calls.dropFirst(paletteCallsWhileSwitched.count)) == [
+            .show(.finderPanel),
+            .showError(message),
+        ])
+        #expect(watcher.events == [.panelAppeared(.finderPanel), .panelGone, .panelAppeared(.finderPanel)])
+    }
+
     @Test("パネルが閉じられたら panelGone で Idle に戻り、パレットを閉じる")
     func closedPanelHidesPalette() async {
         let watcher = PanelWatchEngineHarness()

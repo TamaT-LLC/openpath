@@ -12,10 +12,14 @@ struct PalettePresenterTests {
         var value = false
     }
 
+    /// 1ms。初出の表示の待ちの上限の直前・直後を確かめるための最小の刻み
+    private static let smallestStep: Duration = .milliseconds(1)
+
     private let viewModel = PaletteViewModel(homeDirectory: "/Users/example")
     private let window = PaletteWindowSpy()
     private let search = ScriptedPaletteSearch()
     private let includeFiles = IncludeFilesStub()
+    private let clock = TestClock()
     private let presenter: PalettePresenter
 
     init() {
@@ -24,32 +28,39 @@ struct PalettePresenterTests {
             viewModel: viewModel,
             window: window,
             includeFiles: { includeFiles.value },
-            search: search.search
+            search: search.search,
+            clock: clock
         )
     }
 
-    /// パレットを出し、最初の候補の検索に `rows` で答える。
+    /// パレットを出し、最初の候補の検索に `rows` で答えて、ウィンドウが出るまで待つ。
     private func show(_ context: PanelContext, answering rows: [PaletteRow]) async {
         let callIndex = search.calls.count
+        let shownCount = window.shownCount
         presenter.show(context: context)
         await search.waitForCalls(callIndex + 1)
         search.respond(to: callIndex, with: rows)
         await waitForRows(rows)
+        await waitForShow(count: shownCount + 1)
     }
 
     private func waitForRows(_ rows: [PaletteRow]) async {
-        await MainActorQueue.waitUntil { viewModel.rows == rows }
+        await MainActorQueue.waitUntil { viewModel.hasReceivedRows && viewModel.rows == rows }
+    }
+
+    private func waitForShow(count: Int) async {
+        await MainActorQueue.waitUntil { window.shownCount >= count }
     }
 
     // MARK: - 表示
 
-    @Test("パネルの近くに表示し、空の検索語で最初の候補を引いて反映する")
+    @Test("空の検索語で最初の候補を引き、候補を反映した行数でパネルの近くに表示する")
     func showsAndQueriesInitialRows() async {
         let rows = PaletteRowFixtures.rows("fern", "fern-docs")
 
         await show(.sample, answering: rows)
 
-        #expect(window.calls == [.show(near: PanelContext.sample.frame, rowCount: 0)])
+        #expect(window.calls == [.show(near: PanelContext.sample.frame, rowCount: rows.count)])
         #expect(search.calls == [.init(text: "", directoriesOnly: true, limit: PaletteQuerySession.resultLimit)])
         #expect(viewModel.rows == rows)
         #expect(viewModel.selectedIndex == 0)
@@ -73,8 +84,9 @@ struct PalettePresenterTests {
         #expect(search.calls.map(\.directoriesOnly) == [expected])
     }
 
-    @Test("別のパネルでは前回の検索語・候補・状態表示を消す")
-    func newPanelResetsPalette() async {
+    @Test("別のパネルでは前回の検索語・候補・状態表示を消し、そのパネルの最初の候補で表示する")
+    func newPanelResetsPalette() async throws {
+        let rows = PaletteRowFixtures.rows("openpath")
         await show(.sample, answering: PaletteRowFixtures.rows("fern"))
         viewModel.query = "fe"
         presenter.showError("移動できませんでした")
@@ -83,10 +95,15 @@ struct PalettePresenterTests {
 
         #expect(viewModel.query.isEmpty)
         #expect(viewModel.rows.isEmpty)
+        #expect(viewModel.emptyMessage == nil)
         #expect(viewModel.status == nil)
-        #expect(window.calls.last == .show(near: PanelContext.another.frame, rowCount: 0))
         await search.waitForCalls(3)
-        #expect(search.calls.last?.text == "")
+        // 検索語の変更による検索（取り消し済み）と別のパネルの最初の検索は、どちらが先に届くか決まらないため内容で探す
+        let initialCall = try #require(search.calls.lastIndex { $0.text.isEmpty })
+        #expect(initialCall > 0)
+        search.respond(to: initialCall, with: rows)
+        await waitForShow(count: 2)
+        #expect(window.calls.last == .show(near: PanelContext.another.frame, rowCount: rows.count))
     }
 
     @Test("同じパネルを再表示したときは検索語と選択を保ち、状態表示を消して候補を引き直す")
@@ -112,6 +129,223 @@ struct PalettePresenterTests {
         #expect(search.calls.last?.text == "fe")
         #expect(viewModel.selectedRow == rows[1])
         #expect(window.calls.last == .show(near: PanelContext.sample.frame, rowCount: rows.count))
+    }
+
+    // MARK: - 初出の表示（#91）
+
+    @Test("初出の表示の待ちの上限は 100ms")
+    func initialRowsWaitLimitIs100Milliseconds() {
+        #expect(PalettePresenter.initialRowsWaitLimit == .milliseconds(100))
+    }
+
+    @Test("新しいパネルでは、最初の候補が届くまでウィンドウを出さず、0 件の案内も出さない")
+    func newPanelWaitsForInitialRows() async {
+        let rows = PaletteRowFixtures.rows("fern", "fern-docs")
+
+        presenter.show(context: .sample)
+        await search.waitForCalls(1)
+        await MainActorQueue.drain()
+
+        #expect(window.calls.isEmpty)
+        #expect(viewModel.emptyMessage == nil)
+
+        search.respond(to: 0, with: rows)
+        await waitForShow(count: 1)
+
+        #expect(window.calls == [.show(near: PanelContext.sample.frame, rowCount: rows.count)])
+        #expect(viewModel.rows == rows)
+    }
+
+    @Test("最初の候補が 0 件なら、0 件の案内を出せる状態でウィンドウを出す")
+    func emptyInitialRowsShowWithMessage() async {
+        await show(.sample, answering: [])
+
+        #expect(window.calls == [.show(near: PanelContext.sample.frame, rowCount: 0)])
+        #expect(viewModel.emptyMessage == PaletteText.noMatches)
+    }
+
+    @Test("最初の候補が上限までに届かなければ、候補を待たずにウィンドウを出し、0 件の案内は出さない")
+    func showsWithoutRowsAfterWaitLimit() async {
+        let rows = PaletteRowFixtures.rows("fern", "fern-docs")
+        presenter.show(context: .sample)
+        await search.waitForCalls(1)
+
+        clock.advance(by: PalettePresenter.initialRowsWaitLimit - Self.smallestStep)
+        await MainActorQueue.drain()
+        #expect(window.calls.isEmpty)
+
+        clock.advance(by: Self.smallestStep)
+        await waitForShow(count: 1)
+        #expect(window.calls == [.show(near: PanelContext.sample.frame, rowCount: 0)])
+        #expect(viewModel.emptyMessage == nil)
+
+        // 後から届いた候補は表示中のパレットに反映し、ウィンドウを出し直さない
+        search.respond(to: 0, with: rows)
+        await waitForRows(rows)
+        #expect(window.rowCount == rows.count)
+        #expect(window.shownCount == 1)
+    }
+
+    @Test("候補を引けなかった（取り消し以外のエラー）場合も、上限を過ぎたらウィンドウを出す")
+    func showsAfterWaitLimitWhenSearchFails() async {
+        struct SearchFailure: Error {}
+        presenter.show(context: .sample)
+        await search.waitForCalls(1)
+        search.fail(0, with: SearchFailure())
+        await MainActorQueue.drain()
+        #expect(window.calls.isEmpty)
+
+        clock.advance(by: PalettePresenter.initialRowsWaitLimit)
+        await waitForShow(count: 1)
+
+        #expect(window.calls == [.show(near: PanelContext.sample.frame, rowCount: 0)])
+        #expect(viewModel.emptyMessage == nil)
+    }
+
+    @Test("最初の候補を待っている間に閉じたら、候補が届いても上限を過ぎてもウィンドウを出さない")
+    func hideWhileWaitingCancelsShow() async {
+        presenter.show(context: .sample)
+        await search.waitForCalls(1)
+
+        presenter.hide()
+        search.respond(to: 0, with: PaletteRowFixtures.rows("fern"))
+        clock.advance(by: PalettePresenter.initialRowsWaitLimit)
+        await MainActorQueue.drain()
+
+        #expect(window.calls == [.hide])
+    }
+
+    @Test("表示中のパレットから別のパネルに切り替えたら、最初の候補を待つ間は前のパレットを閉じておく")
+    func switchingFromShownPanelHidesWhileWaiting() async {
+        let rows = PaletteRowFixtures.rows("openpath")
+        await show(.sample, answering: PaletteRowFixtures.rows("fern"))
+
+        presenter.show(context: .another)
+        await search.waitForCalls(2)
+
+        // 候補を消したパレットを前のパネルの位置に残さない
+        #expect(window.calls.last == .hide)
+        search.respond(to: 1, with: rows)
+        await waitForShow(count: 2)
+        #expect(window.calls.suffix(2) == [.hide, .show(near: PanelContext.another.frame, rowCount: rows.count)])
+    }
+
+    @Test("閉じた後に別のパネルを出すときは、閉じ直さずに最初の候補を待つ")
+    func switchingAfterHideDoesNotHideAgain() async {
+        await show(.sample, answering: PaletteRowFixtures.rows("fern"))
+        presenter.hide()
+
+        presenter.show(context: .another)
+        await search.waitForCalls(2)
+
+        #expect(window.calls == [.show(near: PanelContext.sample.frame, rowCount: 1), .hide])
+    }
+
+    @Test("最初の候補を待っている間に別のパネルを出したら、そのパネルの候補で出す")
+    func anotherPanelWhileWaitingShowsLatestPanel() async {
+        let rows = PaletteRowFixtures.rows("openpath")
+        presenter.show(context: .sample)
+        await search.waitForCalls(1)
+
+        presenter.show(context: .another)
+        await search.waitForCalls(2)
+        search.respond(to: 0, with: PaletteRowFixtures.rows("fern", "fern-docs"))
+        search.respond(to: 1, with: rows)
+        await waitForShow(count: 1)
+
+        #expect(window.calls == [.show(near: PanelContext.another.frame, rowCount: rows.count)])
+        #expect(viewModel.rows == rows)
+    }
+
+    @Test("最初の候補を待っている間に別のパネルを出したら、待ちの上限はそのパネルを出したときから数える")
+    func waitLimitRestartsForAnotherPanel() async {
+        let halfLimit = PalettePresenter.initialRowsWaitLimit / 2
+        presenter.show(context: .sample)
+        await search.waitForCalls(1)
+        clock.advance(by: halfLimit)
+
+        presenter.show(context: .another)
+        await search.waitForCalls(2)
+        clock.advance(by: halfLimit)
+        await MainActorQueue.drain()
+        #expect(window.calls.isEmpty)
+
+        clock.advance(by: halfLimit)
+        await waitForShow(count: 1)
+        #expect(window.calls == [.show(near: PanelContext.another.frame, rowCount: 0)])
+    }
+
+    @Test("待ちの上限に達した直後に別のパネルを出したら、前のパネルの待ちで新しいパネルを出さない")
+    func expiredWaitDoesNotRevealNextPanel() async {
+        presenter.show(context: .sample)
+        await search.waitForCalls(1)
+        // 待ちのタイマーが sleep に入ってから期限を進める（入る前に取り消すと、期限後の確かめを通らないため）
+        await MainActorQueue.waitUntil { clock.pendingSleeperCount == 1 }
+
+        // 前のパネルの待ちが期限に達したが、その続きが MainActor で走る前に別のパネルを出す
+        clock.advance(by: PalettePresenter.initialRowsWaitLimit)
+        presenter.show(context: .another)
+        await search.waitForCalls(2)
+        await MainActorQueue.drain()
+
+        #expect(window.calls.isEmpty)
+    }
+
+    @Test("最初の候補を待っている間に候補が差し替わったら（履歴のクリア）、引き直した候補で出す")
+    func candidatesChangeWhileWaitingShowsRefreshedRows() async {
+        let refreshed = PaletteRowFixtures.rows("fern")
+        presenter.show(context: .sample)
+        await search.waitForCalls(1)
+
+        presenter.candidatesDidChange()
+        await search.waitForCalls(2)
+        // 取り消した最初の検索の結果は反映せず、パレットも出さない
+        search.respond(to: 0, with: PaletteRowFixtures.rows("history-only", "fern"))
+        await MainActorQueue.drain()
+        #expect(window.calls.isEmpty)
+
+        search.respond(to: 1, with: refreshed)
+        await waitForShow(count: 1)
+
+        #expect(window.calls == [.show(near: PanelContext.sample.frame, rowCount: refreshed.count)])
+        #expect(viewModel.rows == refreshed)
+    }
+
+    @Test("最初の候補を待っている間にパネルが動いたら、置き直さずに新しい位置で出す")
+    func movedPanelWhileWaitingShowsAtNewFrame() async {
+        let rows = PaletteRowFixtures.rows("fern")
+        let moved = PanelContext(id: PanelContext.sample.id, isDirectoriesOnly: false, frame: PanelContext.another.frame)
+        presenter.show(context: .sample)
+        await search.waitForCalls(1)
+
+        presenter.update(context: moved)
+        search.respond(to: 0, with: rows)
+        await waitForShow(count: 1)
+
+        #expect(window.calls == [.show(near: PanelContext.another.frame, rowCount: rows.count)])
+    }
+
+    @Test("最初の候補を待っている間のエラー表示では、まだ出していないパレットのキー入力を奪わない")
+    func errorWhileWaitingDoesNotReclaimKey() async {
+        presenter.show(context: .sample)
+        await search.waitForCalls(1)
+
+        presenter.showError("移動できませんでした")
+
+        #expect(window.calls.isEmpty)
+        #expect(viewModel.status == .error("移動できませんでした"))
+    }
+
+    @Test("候補を受け取り済みのパネルの再表示では、候補を待たずにすぐ出す")
+    func samePanelWithReceivedRowsShowsImmediately() async {
+        let rows = PaletteRowFixtures.rows("fern", "fern-docs")
+        await show(.sample, answering: rows)
+        presenter.hide()
+
+        presenter.show(context: .sample)
+
+        #expect(window.calls.last == .show(near: PanelContext.sample.frame, rowCount: rows.count))
+        #expect(viewModel.rows == rows)
     }
 
     // MARK: - パネルの情報の更新
