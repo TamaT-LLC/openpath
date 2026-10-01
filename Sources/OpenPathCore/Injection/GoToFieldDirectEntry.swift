@@ -57,9 +57,16 @@ public final class GoToFieldDirectEntry {
         self.clock = clock
     }
 
-    /// - Parameter primaryError: 主方式の失敗。入力欄が見つからない・探すのが期限を超えた場合に投げる。
+    /// - Parameters:
+    ///   - primaryError: 主方式の失敗。入力欄が見つからない・探すのが期限を超えた場合に投げる。
+    ///   - keyRoute: Return を送る経路。主方式が最後に使った経路（`GoToFolderPasteSequencer.lastKeyRoute`）を渡す。
     /// - Throws: `InjectionError`、キャンセル時は `CancellationError`。
-    public func run(path: String, autoConfirm: Bool, fallingBackFrom primaryError: InjectionError) async throws {
+    public func run(
+        path: String,
+        autoConfirm: Bool,
+        fallingBackFrom primaryError: InjectionError,
+        keyRoute: InjectionKeyRoute = .targetProcess
+    ) async throws {
         try Task.checkCancellation()
         let timeline = ElapsedTimeline(clock: clock)
         let foundControls = try await PanelControlOperation.lookUp(
@@ -83,7 +90,7 @@ public final class GoToFieldDirectEntry {
             try await PanelControlOperation.activate(goButton, by: .press)
             Log.debug("副方式: 「移動」を押しました（+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
         } else {
-            try await submitByReturnKey(controls: controls, on: timeline)
+            try await submitByReturnKey(controls: controls, via: keyRoute, on: timeline)
         }
         try await didSubmit(autoConfirm)
     }
@@ -97,14 +104,14 @@ public final class GoToFieldDirectEntry {
     }
 
     /// キー入力は注入先のキーウィンドウ（移動先シート）に届く。Return を送れなければ入力欄を確定する。
-    private func submitByReturnKey(controls: GoToFieldControls, on timeline: ElapsedTimeline) async throws {
+    private func submitByReturnKey(controls: GoToFieldControls, via route: InjectionKeyRoute, on timeline: ElapsedTimeline) async throws {
         await prepareForKeyEvents()
         try await waitForFieldFocus(controls: controls, on: timeline)
         // パレットにキーを手放させている間に切り替わっていないか、送る直前に確かめ直す
         try await InjectionTargetCheck.ensureAvailable(targetGuard, on: timeline)
         do {
-            try keyboard.post(.returnKey)
-            Log.debug("副方式: Return を送りました（+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
+            try await keyboard.post(.returnKey, via: route)
+            Log.debug("副方式: Return を送りました（経路: \(route.rawValue)、+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
         } catch {
             Log.debug("副方式: Return を送れなかったため、入力欄を確定します")
             try await PanelControlOperation.activate(controls.field, by: .confirm)

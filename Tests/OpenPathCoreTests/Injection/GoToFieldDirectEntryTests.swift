@@ -58,9 +58,19 @@ struct GoToFieldDirectEntryTests {
 
         func run(
             autoConfirm: Bool = false,
-            fallingBackFrom primaryError: InjectionError = .timeout(step: .waitSheet)
+            fallingBackFrom primaryError: InjectionError = .timeout(step: .waitSheet),
+            keyRoute: InjectionKeyRoute? = nil
         ) async throws {
-            try await entry.run(path: GoToFieldDirectEntryTests.path, autoConfirm: autoConfirm, fallingBackFrom: primaryError)
+            guard let keyRoute else {
+                try await entry.run(path: GoToFieldDirectEntryTests.path, autoConfirm: autoConfirm, fallingBackFrom: primaryError)
+                return
+            }
+            try await entry.run(
+                path: GoToFieldDirectEntryTests.path,
+                autoConfirm: autoConfirm,
+                fallingBackFrom: primaryError,
+                keyRoute: keyRoute
+            )
         }
 
         /// 入力欄・ボタンへの AX 操作（値のセット・押下・確定）。
@@ -107,6 +117,18 @@ struct GoToFieldDirectEntryTests {
             .targetCheck,
             .key(.returnKey),
             .didSubmitGoToSheet(autoConfirm: true),
+        ])
+    }
+
+    @Test("Return は渡された経路で送る（既定は注入先のプロセス）", arguments: [nil, InjectionKeyRoute.targetProcess, .systemWide])
+    func sendsReturnThroughGivenRoute(keyRoute: InjectionKeyRoute?) async throws {
+        let harness = Harness()
+        harness.locator.goButton = nil
+
+        try await harness.run(keyRoute: keyRoute)
+
+        #expect(harness.keyboard.routedKeyStrokes == [
+            KeyboardSpy.RoutedKeyStroke(keyStroke: .returnKey, route: keyRoute ?? .targetProcess),
         ])
     }
 
