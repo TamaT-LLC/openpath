@@ -100,6 +100,18 @@ public final class GoToFieldFocusWait {
         }
     }
 
+    /// 移動先シートの入力欄を探す（フォーカスは待たない。上限は入力欄を探す走査の上限）。
+    /// 注入の前から開いていた移動先シートの入力欄を、⌘⇧G を送る前に確かめるために使う（Issue #95）。
+    /// - Returns: 見つからない・探せなければ（AX の失敗・期限切れ）nil。
+    /// - Throws: キャンセル時は `CancellationError`。
+    public func locateField() async throws -> GoToFieldControls? {
+        try Task.checkCancellation()
+        let timeline = ElapsedTimeline(clock: clock)
+        return try await GoToFieldLookup.resolve(
+            nil, with: locator, within: timing.lookupLimit, on: timeline, context: "開いている移動先シート"
+        )
+    }
+
     /// 入力欄がいまフォーカスを持っているかを、待たずに 1 回だけ確かめる。
     /// 確定前の確認で確かめた入力欄に Return が届くことを、送る直前に確かめるために使う。
     /// - Throws: キャンセル時は `CancellationError`。AX の失敗は投げずに `.unavailable` を返す。

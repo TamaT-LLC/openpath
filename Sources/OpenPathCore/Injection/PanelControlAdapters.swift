@@ -21,6 +21,9 @@ public protocol PanelElementOperating {
     func isFocused() async throws -> Bool
     /// kAXFocused に true をセットし、要素をキー入力の受け先にする。
     func focus() async throws
+    /// kAXEnabled（押せる状態か）。属性が無い・真偽値でなければ nil（分からない）。
+    /// - Throws: 要素が消えていれば `.panelGone`、読めなければ `.axError`。
+    func isEnabled() async throws -> Bool?
 }
 
 /// 移動先シートの候補リスト（macOS 13 以降の移動先シートが入力欄の下に出す、移動先の候補）。
@@ -39,15 +42,19 @@ public struct GoToFieldControls {
     public let goButton: (any PanelElementOperating)?
     /// 入力欄と同じシートの候補リスト。無ければ nil。
     public let suggestionList: (any GoToSuggestionListReading)?
+    /// 入力欄を移動先シートの入力欄とみなした手掛かり。分からなければ nil。
+    public let evidence: GoToFieldEvidence?
 
     public init(
         field: any PanelElementOperating,
         goButton: (any PanelElementOperating)?,
-        suggestionList: (any GoToSuggestionListReading)? = nil
+        suggestionList: (any GoToSuggestionListReading)? = nil,
+        evidence: GoToFieldEvidence? = nil
     ) {
         self.field = field
         self.goButton = goButton
         self.suggestionList = suggestionList
+        self.evidence = evidence
     }
 }
 
@@ -61,6 +68,17 @@ public protocol GoToFieldLocating {
     func locateGoToField(cutoff: ScanCutoff) async throws -> GoToFieldControls?
 }
 
+/// 見つけた確定ボタンと、その特定のしかた。
+public struct OpenButtonLocation {
+    public let button: any PanelElementOperating
+    public let identification: OpenButtonIdentification
+
+    public init(button: any PanelElementOperating, identification: OpenButtonIdentification) {
+        self.button = button
+        self.identification = identification
+    }
+}
+
 /// auto_confirm: パネルの確定ボタン（「開く」等）を探す（DSN-001 §3.1 ステップ 8）。
 @MainActor
 public protocol OpenButtonLocating {
@@ -68,7 +86,7 @@ public protocol OpenButtonLocating {
     /// - Parameter cutoff: 走査の打ち切り条件。AX 操作のたびに確かめること。
     /// - Returns: 見つからなければ nil。
     /// - Throws: 注入先を特定できなければ `InjectionError`、打ち切ったら `ScanCutoff.Reached`。
-    func locateOpenButton(cutoff: ScanCutoff) async throws -> (any PanelElementOperating)?
+    func locateOpenButton(cutoff: ScanCutoff) async throws -> OpenButtonLocation?
 }
 
 /// 注入先の状態。
@@ -101,14 +119,28 @@ public struct PanelControlTiming: Equatable, Sendable {
     public let openButtonDelay: Duration
     /// 入力欄・ボタンを探す AX の走査の上限。
     public let controlLookupLimit: Duration
+    /// 「開く」を探し始めてから、見つかって押せる状態（AXEnabled）になるまで待つ上限（探す時間も含めた累積、Issue #89）。
+    public let openButtonReadyLimit: Duration
+    /// 「開く」が見つからない・押せない状態のとき、確かめ直す間隔（Issue #89）。
+    public let openButtonPollInterval: Duration
 
-    public init(openButtonDelay: Duration, controlLookupLimit: Duration) {
+    /// - Parameters:
+    ///   - openButtonReadyLimit: 省略時は controlLookupLimit（探す上限の中で、押せる状態になるのも待つ）。
+    public init(
+        openButtonDelay: Duration,
+        controlLookupLimit: Duration,
+        openButtonReadyLimit: Duration? = nil,
+        openButtonPollInterval: Duration = .milliseconds(50)
+    ) {
         self.openButtonDelay = openButtonDelay
         self.controlLookupLimit = controlLookupLimit
+        self.openButtonReadyLimit = openButtonReadyLimit ?? controlLookupLimit
+        self.openButtonPollInterval = openButtonPollInterval
     }
 
     /// 走査の上限は、主方式のシート待ち（600ms）と「開く」の待機（300ms）を足しても
     /// AppCoordinator の全体タイムアウト（1.5 秒）に収まりやすい長さにする。
+    /// 「開く」が押せる状態になるのを待つのも、探す上限（300ms）の中に収め、全体の最悪の時間を延ばさない。
     public static let standard = PanelControlTiming(
         openButtonDelay: .milliseconds(300),
         controlLookupLimit: .milliseconds(300)

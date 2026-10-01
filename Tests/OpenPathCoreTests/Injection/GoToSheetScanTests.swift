@@ -10,6 +10,7 @@ struct GoToSheetScanTests {
         let name: String
         let role: String?
         var placeholder: String?
+        var identifier: String?
         var children: [Element] = []
 
         static func window(_ children: [Element]) -> Element {
@@ -27,6 +28,19 @@ struct GoToSheetScanTests {
         static func button(_ name: String) -> Element {
             Element(name: name, role: "AXButton")
         }
+
+        /// macOS 13 以降の移動先シートの入力欄（placeholder は無く、AXIdentifier で見分ける）。
+        static func pathTextField(_ name: String) -> Element {
+            Element(name: name, role: "AXTextField", identifier: "PathTextField")
+        }
+
+        /// macOS 13 以降の移動先シート。
+        static func modernGoToSheet() -> Element {
+            Element(name: "go-to", role: "AXSheet", identifier: "GoToWindow", children: [
+                Element(name: "label", role: "AXStaticText"),
+                .pathTextField("path"),
+            ])
+        }
     }
 
     /// 子の取得を要求された要素の名前を記録しながら集計する。
@@ -38,7 +52,8 @@ struct GoToSheetScanTests {
                 visited.append(element.name)
                 return element.children
             },
-            placeholder: { $0.placeholder }
+            placeholder: { $0.placeholder },
+            identifier: { $0.identifier }
         )
     }
 
@@ -182,6 +197,98 @@ struct GoToSheetScanTests {
     )
     func pathFieldPlaceholder(placeholder: String, expected: Bool) {
         #expect(GoToSheetScan.isPathFieldPlaceholder(placeholder) == expected)
+    }
+
+    // MARK: - 移動先シートの入力欄（AXIdentifier、Issue #95）
+
+    @Test("AXIdentifier が移動先シートの入力欄のものを数える（placeholder の無い macOS 13 以降の移動先シート）")
+    func countsGoToFieldsByIdentifier() throws {
+        let window = Element.window(Self.panelBeforeGoTo.children + [.modernGoToSheet()])
+
+        let result = try Self.scan(window)
+
+        #expect(result == GoToSheetScan(sheetCount: 1, pathFieldCount: 0, goToFieldCount: 1))
+        #expect(result.hasGoToField)
+    }
+
+    @Test("⌘⇧G の前の基準で移動先シートの入力欄があれば、移動先シートは既に開いている")
+    func baselineShowsGoToSheetAlreadyOpen() throws {
+        let withGoToSheet = try Self.scan(.window(Self.panelBeforeGoTo.children + [.modernGoToSheet()]))
+        let withoutGoToSheet = try Self.scan(Self.panelBeforeGoTo)
+        // フォーカス中のウィンドウが移動先シートそのもの（起点）の場合も
+        let goToSheetAsRoot = try Self.scan(.modernGoToSheet())
+
+        #expect(withGoToSheet.hasGoToField)
+        #expect(!withoutGoToSheet.hasGoToField)
+        #expect(goToSheetAsRoot.hasGoToField)
+    }
+
+    @Test("シートが増えなくても、移動先シートの入力欄が増えたら出現とみなす")
+    func detectsNewGoToFieldWithoutSheet() throws {
+        let baseline = try Self.scan(Self.panelBeforeGoTo)
+        let afterGoTo = try Self.scan(.window(Self.panelBeforeGoTo.children + [
+            Element(name: "group", role: "AXGroup", children: [.pathTextField("path")]),
+        ]))
+
+        #expect(afterGoTo.sheetCount == baseline.sheetCount)
+        #expect(afterGoTo.indicatesSheetShown(since: baseline))
+    }
+
+    @Test("移動先シートの入力欄は placeholder を読まない（AX の往復を増やさない）")
+    func doesNotReadPlaceholderOfGoToField() throws {
+        var placeholderReads: [String] = []
+        let window = Element.window([.modernGoToSheet(), .textField("search", placeholder: "検索")])
+
+        _ = try GoToSheetScan.scan(
+            from: window,
+            role: { $0.role },
+            children: { $0.children },
+            placeholder: { element in
+                placeholderReads.append(element.name)
+                return element.placeholder
+            },
+            identifier: { $0.identifier }
+        )
+
+        #expect(placeholderReads == ["search"])
+    }
+
+    /// このツリーの走査は、子・ロール・placeholder・AXIdentifier の読み取りを合わせて 12 回の AX 操作になる。
+    @Test(
+        "AXIdentifier の読み取りでも、打ち切り条件に達したら次の AX 操作の前で止まる",
+        arguments: 1...11
+    )
+    func stopsBeforeIdentifierReadWhenCutoffIsReached(operationLimit: Int) {
+        let operationCount = OSAllocatedUnfairLock(initialState: 0)
+        let countOperation = { operationCount.withLock { $0 += 1 } }
+        let window = Element.window([
+            .textField("a", placeholder: "パス"),
+            .modernGoToSheet(),
+        ])
+
+        #expect(throws: ScanCutoff.Reached()) {
+            try GoToSheetScan.scan(
+                from: window,
+                cutoff: ScanCutoff { operationCount.withLock { $0 >= operationLimit } },
+                role: { element in
+                    countOperation()
+                    return element.role
+                },
+                children: { element in
+                    countOperation()
+                    return element.children
+                },
+                placeholder: { element in
+                    countOperation()
+                    return element.placeholder
+                },
+                identifier: { element in
+                    countOperation()
+                    return element.identifier
+                }
+            )
+        }
+        #expect(operationCount.withLock { $0 } == operationLimit)
     }
 
     @Test("placeholder の無い入力欄はパス入力欄とみなさない")

@@ -55,6 +55,10 @@ public protocol GoToSheetDetecting {
 /// 基準を記録済みの移動先シートの判定。
 @MainActor
 public protocol GoToSheetProbe {
+    /// ⌘⇧G を送る前（基準の時点）から移動先シートが開いているか（基準の走査で移動先シートの入力欄を見つけたか。Issue #95）。
+    /// 開いているシートに ⌘⇧G を送っても新しいシートは出ないため、呼び出し側は ⌘⇧G を送らずにそのシートを使う。
+    var isSheetAlreadyShown: Bool { get }
+
     /// 基準の時点から移動先シートが現れたか。
     /// - Parameter cutoff: 走査の打ち切り条件。AX 操作のたびに確かめること。
     /// - Throws: 打ち切った場合は `ScanCutoff.Reached`。

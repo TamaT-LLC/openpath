@@ -113,10 +113,11 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
 
 ```
 1. アクセシビリティ権限を currentStatus() で確認（未付与なら axError(apiDisabled) で即失敗）
-2. 基準走査: 現在の AXSheet 数とパス入力欄（placeholder に "パス"/"Path"/"Go to" を含む AXTextField / AXComboBox）数を記録（上限 600ms）
+2. 基準走査: 現在の AXSheet 数とパス入力欄（placeholder に "パス"/"Path"/"Go to" を含む AXTextField / AXComboBox）数、移動先シートの入力欄（AXIdentifier が PathTextField）数を記録（上限 600ms）
 3. CGEvent: Cmd+Shift+G  keyDown/keyUp（kVK_ANSI_G, flags [.maskCommand, .maskShift]）
+   - 2. の基準で移動先シートの入力欄が既にあり（移動先シートが注入の前から開いている）、その入力欄を §3.2 の 1.a（AXIdentifier）で特定できれば、⌘⇧G を送らず 4. の出現待ちも省き、その入力欄で 4. のフォーカス待ちから続ける（Issue #95）。特定できなければ従来どおり送る
 4. 最大 600ms、50ms 間隔（50, 100, …, 550ms）で「移動先シート」の出現を基準比で判定
-   - 判定: 2. の基準より AXSheet 数またはパス入力欄数が増えた
+   - 判定: 2. の基準より AXSheet 数・パス入力欄数・移動先シートの入力欄数のいずれかが増えた
    - パネル自体がシートとして表示される場合（サンドボックスアプリ等、⌘⇧G 前から AXSheet がある場合）も、基準からの増分で見るため誤検知しない
    - 出現を確認したら、移動先シートの入力欄（§3.2 の 1. と同じ探し方）が kAXFocused を持つまで、入力欄を探す時間を含めて最大 250ms、50ms 間隔で待つ（Issue #74）。来なければ、または待つ間に入力欄が消えたら、ペーストボードに触れずに timeout(.waitPaste) として副方式へ回す。入力欄が見つからない・フォーカスを読めなければ待たずに進む
 5. 4. を終えたら（フォーカスを確かめられない場合も）、NSPasteboard.general の全 items を退避（types ごとに Data で保持。いずれかの item が org.nspasteboard.ConcealedType を持つ場合はデータを読み出さず退避もしない）→ path を org.nspasteboard.TransientType 付きで setString(_:forType: .string)
@@ -125,10 +126,14 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
    - 入力欄の値が移動先にならない（fieldMismatch）: Return を送らず、ペーストボードを戻して timeout(.waitPaste) として副方式へ回す（前回の移動先へ確定してしまうのを防ぐ）
    - 候補の選択だけが追いつかない（suggestionNotUpdated）・入力欄を読めない（unavailable）: そのまま 8. へ
 8. CGEvent: Return（シート確定 → パネルが移動）。送る直前に、7. で確かめた入力欄がまだ kAXFocused を持つかを 1 回確かめ、持たなければ（入力欄が消えた場合も）Return を送らずに timeout(.waitPaste) として副方式へ回す（別のシートにフォーカスが移っていると、Return がそちらに届くため。Issue #74）
-9. auto_confirm または Cmd+Enter の場合: 300ms 待機後、パネル内「開く」ボタンを AXPress（auto_confirm フック。DSN-001 §2.2 のタイトル一覧で確定ボタンを探す）
+9. auto_confirm または Cmd+Enter の場合: 300ms 待機後、パネル内の確定ボタンを探し、押せる状態（AXEnabled）になってから AXPress（auto_confirm フック）
+   - 探す順: シートの中の表題 → シートの既定ボタン（AXDefaultButton）→ パネル自体の表題 → パネル自体の既定ボタン。表題は §2.2 と同じ 8 つ（前後の空白を除いて比べる）。既定ボタンは、表題がキャンセル・新規フォルダ・「移動」/「Go」のものは押さない。パネルでない通常のウィンドウ（ホスト）の既定ボタンは読まない（Issue #89）
+   - 見つからない・押せない状態（AXEnabled が false）・ボタンが消えた場合は、50ms 間隔で探し直し・確かめ直す。探し始めから累積 300ms（最後の確認は 250ms 後）まで待つ。押せる状態か分からない（属性が無い・読めない）場合は待たずに押す
 10. Return から 200ms 後（9. のフックが 200ms を超えた場合はフック完了直後）に、ペーストボードの changeCount が 5. でパスを書き込んだ直後の値から変わっていなければ退避内容へ復元する。変わっていれば、注入中に書き込まれた新しい内容を優先し復元しない。元の内容が機密（5. の ConcealedType）だった場合は復元せず、差し替えたパスを消して空にする。ただし 7. で入力欄が 6. の前の値（移動先でない値）から移動先に変わったことを確かめられた場合は、⌘V は処理済みのため Return の前に復元し、Return の後は待たない（Issue #74）
 ```
 
+- **注入の前から開いていた移動先シートへ注入する**（Issue #95）。開いている移動先シートに ⌘⇧G を送っても新しいシートは出ない（macOS 27 の自プロセスのパネルで、2 回目の ⌘⇧G でシートはそのまま残った）。基準と比べて出現を待つと 600ms でタイムアウトしてしまうため、3. のとおり ⌘⇧G を送らずにそのシートの入力欄を使う。入力欄のフォーカス待ち（4.）・確定前の確認（7.）・注入先の確認は従来どおり行う。パネルの別の入力欄へ貼り付けて Return を送らないよう、入力欄を AXIdentifier（PathTextField）で特定できた場合に限る。
+- **「開く」は押せる状態になってから押す**（Issue #89）。移動先シートを開いている間、パネルの既定ボタン（「開く」）は押せない状態（AXEnabled が false）になり、シートが閉じてから押せる状態に戻る（macOS 27 の自プロセスのパネルで、Return から約 410ms。9. の探し始め（300ms）より後）。押せない状態のボタンを押しても移動しないため、9. のとおり待つ。待つのは 9. の探す上限（300ms）の中に収め、全体の最悪の時間は変わらない。期限までに押せる状態にならなければ押さずに `axError(-25204)`、見つからなければ `axError(-25200)` を返す。
 - **入力欄のフォーカスを待ってから ⌘A / ⌘V を送る**（Issue #74）。macOS 26.6.2 の QA で、移動先シートの検知の 1ms 後に送った ⌘A / ⌘V が入力欄に届かず、確定前の確認（fieldMismatch）で毎回副方式に回っていた（注入に約 940ms）。入力欄がシートの最初のレスポンダになる前に送ったキーは入力欄に届かない。フォーカスが来ないときに AX で与えることはしない（シートがキーウィンドウでなければキー入力は届かないため）。kAXFocused はシートがキーウィンドウか（アプリが前面か）を反映しない（macOS 27 で確認）ため、前面かどうかは従来どおり注入先ガードがキー送出の直前に確かめる。
 - **貼り付けを確かめたら Return の前にペーストボードを戻す**（Issue #74）。7. で入力欄が別の値から移動先に変わったなら ⌘V は処理済みで、Return 後の 200ms 待ちは不要になる。最初から移動先が入っていた（前回と同じ移動先）場合や、入力欄を読めない場合は ⌘V が処理されたか分からないため、従来どおり Return の 200ms 後に戻す。Return の前に戻せなかった場合も Return は送り、最後に `pasteboardRestoreFailed` を返す。
 
@@ -149,7 +154,7 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
 主方式が `timeout(.waitSheet)` または `timeout(.waitPaste)` になった場合に、⌘⇧G で出たはずの移動先 UI を別の手掛かりで探し直す（`GoToFieldSearch`）。「⌘⇧G がまったく効かない」場合は救えないが、「移動先 UI は出たが主方式の基準比較で拾えなかった」場合（600ms より後に出た、AXSheet ではない要素として出た等）を救うためのもの（PR #54）。
 
 ```
-1. 注入開始時に記録したウィンドウ（とそのシート）を走査し、次の順で入力欄を選ぶ（同じシートの候補リスト AXTable も組にする）
+1. 注入開始時に記録したウィンドウ（とそのシート）を走査し、次の順で入力欄を選ぶ（同じシートの候補リスト AXTable も組にする）。記録したウィンドウ自体をパネルとみなす条件は §2.2 の条件 1 と同じ（ダイアログ・ロールが AXSheet・AXIdentifier が open-panel。下記）
    a. AXIdentifier が PathTextField の入力欄（macOS 13 以降の移動先シート。placeholder も「移動」ボタンも無い、PR #79）
    b. 「移動」/「Go」ボタンと同じシートにある AXTextField / AXComboBox（旧来の移動先シート）
    c. placeholder がパスを示す入力欄（主方式と同じ語）
@@ -161,6 +166,7 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
 6. 以降は主方式のステップ 9〜10 と同じ（副方式はペーストボードを使わないため、timeout(.waitPaste) 経由のフォールバックでも退避・復元は発生しない）
 ```
 
+- **記録したウィンドウ（起点）をパネルとみなす条件を §2.2 の条件 1 と揃えた**（Issue #89 / #95。副方式の入力欄・auto_confirm の確定ボタンの探索で共通）。以前はサブロール（AXDialog / AXSheet）だけで判定しており、シートとして付いたパネル（フォーカス中のウィンドウとしてはロール AXSheet・サブロール無しで返る）、非モーダルのパネル（AXStandardWindow・AXIdentifier `open-panel`）、注入の前から開いていた移動先シート（ロール AXSheet・AXIdentifier `GoToWindow`）では、起点の直下の要素（「開く」・入力欄）がパネルの外とみなされ見つからなかった（macOS 27 の自プロセスのパネルで構造を確認）。通常のウィンドウ（ホスト）のシートの外の要素を操作しない扱いは変わらない。
 - `timeout(.waitPaste)`（シートは出たがペーストボードの書き込み・キー送出に失敗）でもフォールバックする。Return を送る前の失敗なのでパネルはまだ移動しておらず、ペーストボードもキー操作も使わない AX 直接セットで救えるため（PR #54）。
 - `pasteboardRestoreFailed` や、Return 送出後（auto_confirm 等）の失敗ではフォールバックしない。
 - `AXValue` の書き込みが `kAXErrorAttributeUnsupported` 等を返す場合は `axError(code)` として失敗する。
@@ -179,7 +185,8 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
 | `panelGone`（上記以外。auto_confirm 開始後を除く） | 表示なし（パレットを閉じる） | Idle へ |
 
 - 自動確定（auto_confirm / Cmd+Enter）で注入を開始した後の `panelGone` は、AppCoordinator が成功として扱う（ARCH-001 §5、PR #52）。
-- 注入先ガード（`InjectionTargetGuard`）: 注入開始時に最前面アプリの pid とフォーカス中のウィンドウを記録し、以降の各キー送出・AX 操作の直前に確認する（確認 1 回の上限 100ms）。最前面から外れていれば `targetNotFrontmost`、ウィンドウが消えていれば `panelGone` を投げる（PR #52 で自動確定中に `panelGone` でも注入を止めなくなった結果、切替先のアプリへキーが届く恐れが生まれたための対策、PR #54）。
+- 注入先ガード（`InjectionTargetGuard`）: 注入開始時に最前面アプリの pid とフォーカス中のウィンドウを記録し、以降の各キー送出・AX 操作の直前に確認する（確認 1 回の上限 100ms）。フォーカス中のウィンドウが移動先シートそのもの（ロール AXSheet で、AXIdentifier が `GoToWindow` か、直下に入力欄 `PathTextField` を持つ）なら、それが付いたパネル（AXParent）を記録する。移動先シートを記録すると、確定でシートが閉じた後に注入先が消えたとみなされ、auto_confirm の「開く」も探せないため（Issue #95）。
+- auto_confirm の確定ボタンが期限（探し始めから 300ms）までに見つからなければ `axError(-25200)`、見つかったが押せる状態（AXEnabled）にならなければ `axError(-25204)`（Issue #89。§3.1 の 9.）。最前面から外れていれば `targetNotFrontmost`、ウィンドウが消えていれば `panelGone` を投げる（PR #52 で自動確定中に `panelGone` でも注入を止めなくなった結果、切替先のアプリへキーが届く恐れが生まれたための対策、PR #54）。
 
 ## 4. パス正規化
 

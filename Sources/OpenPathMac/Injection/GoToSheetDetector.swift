@@ -44,6 +44,10 @@ private final class GoToSheetAXProbe: GoToSheetProbe {
         self.baseline = baseline
     }
 
+    var isSheetAlreadyShown: Bool {
+        baseline.hasGoToField
+    }
+
     func isSheetShown(cutoff: ScanCutoff) async throws -> Bool {
         let window = window
         let current = try await onAXQueue { () throws -> GoToSheetScan in
@@ -82,7 +86,8 @@ enum GoToSheetAX {
             cutoff: cutoff,
             role: { $0.role },
             children: { $0.children.map(limitingMessagingTimeout) },
-            placeholder: { $0.attr(kAXPlaceholderValueAttribute) }
+            placeholder: { $0.attr(kAXPlaceholderValueAttribute) },
+            identifier: { $0.attr(kAXIdentifierAttribute) }
         )
     }
 

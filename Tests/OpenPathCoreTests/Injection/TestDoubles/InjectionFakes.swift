@@ -59,6 +59,10 @@ final class SheetDetectorFake: GoToSheetDetecting {
             self.detector = detector
         }
 
+        var isSheetAlreadyShown: Bool {
+            detector.isSheetAlreadyShown
+        }
+
         func isSheetShown(cutoff: ScanCutoff) async throws -> Bool {
             try await detector.check(cutoff: cutoff)
         }
@@ -71,6 +75,8 @@ final class SheetDetectorFake: GoToSheetDetecting {
     private let log: InjectionEventLog
     /// この経過時間以降の判定でシートが出たことにする。nil なら最後まで出ない。
     var appearsAt: Duration?
+    /// ⌘⇧G を送る前から移動先シートが開いていたことにする（基準の走査で移動先シートの入力欄を見つけた。Issue #95）。
+    var isSheetAlreadyShown = false
     /// 基準の記録（1 回の走査）にかかる時間。
     var probeLatency: Duration = .zero
     /// 1 回の判定（走査）にかかる時間。

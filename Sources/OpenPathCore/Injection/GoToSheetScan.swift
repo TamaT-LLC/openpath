@@ -2,6 +2,8 @@
 ///
 /// DSN-001 の判定条件「パネルの子孫に AXSheet または placeholder にパスを示す語を含む入力欄が出現」を、
 /// ⌘⇧G の送出前（基準）と後の集計の比較として扱う。送出前からあるシート（パネル自体がシートの場合）を誤認しないため。
+/// macOS 13 以降の移動先シートの入力欄（placeholder が無く AXIdentifier で見分ける）も数え、
+/// 基準の時点で既にあれば、移動先シートは ⌘⇧G を送る前から開いているとみなす（Issue #95）。
 /// AX から切り離し、要素の型と属性の読み方を呼び出し側から受け取ることでユニットテスト可能にしている。
 public struct GoToSheetScan: Equatable, Sendable {
     /// ロール名は AX の定数（kAXSheetRole 等）と同じ文字列。Core に ApplicationServices を持ち込まないため文字列で持つ。
@@ -14,16 +16,27 @@ public struct GoToSheetScan: Equatable, Sendable {
     static let prunedRoles: Set<String> = ["AXBrowser", "AXOutline", "AXTable", "AXList", "AXWebArea"]
 
     public let sheetCount: Int
+    /// placeholder がパスを示す入力欄の数。
     public let pathFieldCount: Int
+    /// AXIdentifier が移動先シートの入力欄（`GoToFieldSearch.pathFieldIdentifier`）の入力欄の数（Issue #95）。
+    public let goToFieldCount: Int
 
-    public init(sheetCount: Int, pathFieldCount: Int) {
+    public init(sheetCount: Int, pathFieldCount: Int, goToFieldCount: Int = 0) {
         self.sheetCount = sheetCount
         self.pathFieldCount = pathFieldCount
+        self.goToFieldCount = goToFieldCount
     }
 
-    /// 基準の時点からシートかパス入力欄が増えていれば、移動先シートが出たとみなす。
+    /// 移動先シートの入力欄があるか。⌘⇧G を送る前の基準でこれが真なら、移動先シートは既に開いている（Issue #95）。
+    public var hasGoToField: Bool {
+        goToFieldCount > 0
+    }
+
+    /// 基準の時点からシートかパス入力欄（移動先シートの入力欄を含む）が増えていれば、移動先シートが出たとみなす。
     public func indicatesSheetShown(since baseline: GoToSheetScan) -> Bool {
-        sheetCount > baseline.sheetCount || pathFieldCount > baseline.pathFieldCount
+        sheetCount > baseline.sheetCount
+            || pathFieldCount > baseline.pathFieldCount
+            || goToFieldCount > baseline.goToFieldCount
     }
 
     /// placeholder がパスの入力欄を示すか（「パス」「Path」「Go to」を含むか。大文字小文字は区別しない）。
@@ -39,6 +52,7 @@ public struct GoToSheetScan: Equatable, Sendable {
     ///   - role: 要素のロール。1 要素につき 1 回だけ呼ぶ。
     ///   - children: 要素の子。ファイル一覧など `prunedRoles` の要素には呼ばない。
     ///   - placeholder: 入力欄の placeholder。入力欄のロールの要素にだけ呼ぶ。
+    ///   - identifier: 入力欄の AXIdentifier。入力欄のロールの要素にだけ呼ぶ。
     /// - Throws: 打ち切り条件に達したら、それ以降の AX 操作をせずに `ScanCutoff.Reached`。
     public static func scan<Node>(
         from root: Node,
@@ -46,11 +60,13 @@ public struct GoToSheetScan: Equatable, Sendable {
         cutoff: ScanCutoff = .never,
         role: (Node) -> String?,
         children: (Node) -> [Node],
-        placeholder: (Node) -> String?
+        placeholder: (Node) -> String?,
+        identifier: (Node) -> String? = { _ in nil }
     ) throws -> GoToSheetScan {
         // ロールの読み取り（AX の往復）を 1 要素 1 回にするため、子を列挙するときにロールも読んで組にする
         let rootElement = ScannedElement(node: root, role: nil)
-        let matches = try search.descendants(
+        var counts: [ScannedKind: Int] = [:]
+        _ = try search.descendants(
             of: rootElement,
             children: { element in
                 if let elementRole = element.role, prunedRoles.contains(elementRole) {
@@ -63,18 +79,39 @@ public struct GoToSheetScan: Equatable, Sendable {
                 }
             },
             where: { element in
-                guard let elementRole = element.role else { return false }
-                if elementRole == sheetRole {
-                    return true
+                guard let kind = try classify(element, cutoff: cutoff, placeholder: placeholder, identifier: identifier) else {
+                    return false
                 }
-                guard pathFieldRoles.contains(elementRole) else { return false }
-                try cutoff.throwIfReached()
-                guard let text = placeholder(element.node) else { return false }
-                return isPathFieldPlaceholder(text)
+                counts[kind, default: 0] += 1
+                return true
             }
         )
-        let sheetCount = matches.count(where: { $0.role == sheetRole })
-        return GoToSheetScan(sheetCount: sheetCount, pathFieldCount: matches.count - sheetCount)
+        return GoToSheetScan(
+            sheetCount: counts[.sheet, default: 0],
+            pathFieldCount: counts[.pathField, default: 0],
+            goToFieldCount: counts[.goToField, default: 0]
+        )
+    }
+
+    /// 移動先シートの入力欄は AXIdentifier で見分け、placeholder は読まない（macOS 13 以降の入力欄には placeholder が無い）。
+    private static func classify<Node>(
+        _ element: ScannedElement<Node>,
+        cutoff: ScanCutoff,
+        placeholder: (Node) -> String?,
+        identifier: (Node) -> String?
+    ) throws -> ScannedKind? {
+        guard let elementRole = element.role else { return nil }
+        if elementRole == sheetRole {
+            return .sheet
+        }
+        guard pathFieldRoles.contains(elementRole) else { return nil }
+        try cutoff.throwIfReached()
+        if identifier(element.node) == GoToFieldSearch.pathFieldIdentifier {
+            return .goToField
+        }
+        try cutoff.throwIfReached()
+        guard let text = placeholder(element.node), isPathFieldPlaceholder(text) else { return nil }
+        return .pathField
     }
 }
 
@@ -82,4 +119,11 @@ public struct GoToSheetScan: Equatable, Sendable {
 private struct ScannedElement<Node> {
     let node: Node
     let role: String?
+}
+
+/// 集計する要素の種類。
+private enum ScannedKind: Hashable {
+    case sheet
+    case pathField
+    case goToField
 }

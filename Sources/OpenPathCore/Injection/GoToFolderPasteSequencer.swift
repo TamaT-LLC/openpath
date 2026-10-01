@@ -3,7 +3,9 @@
 /// 手順（括弧内は DSN-001 §3.1 のステップ番号）:
 /// 1. 移動先シートの判定基準を記録する（`GoToSheetDetecting.makeProbe`）
 /// 2. `hooks.prepareForKeyEvents` でキー入力を NSOpenPanel へ向ける
-/// 3. ⌘⇧G を送り（3）、最大 600ms・50ms 間隔でシートの出現を待つ（4）
+/// 3. ⌘⇧G を送り（3）、最大 600ms・50ms 間隔でシートの出現を待つ（4）。
+///    ただし基準の時点で移動先シートが既に開いていて、その入力欄を AXIdentifier で特定できれば、⌘⇧G を送らず・待たずに
+///    そのシートの入力欄を使う（Issue #95。開いているシートに ⌘⇧G を送っても新しいシートは出ない）
 /// 4. 移動先シートの入力欄がフォーカスを持つまで最大 250ms 待つ（`GoToFieldFocusWait`、Issue #74）。
 ///    来なければ（入力欄が消えた場合も）ペーストボードに触れずに `timeout(.waitPaste)` を投げる（副方式へ）
 /// 5. ペーストボードを退避してパスを書き込み（1, 2）、⌘A → ⌘V（5）
@@ -73,14 +75,17 @@ public final class GoToFolderPasteSequencer {
         let timeline = ElapsedTimeline(clock: clock)
 
         let probe = try await makeProbe(on: timeline)
+        let preopenedControls = try await locatePreopenedField(probe, on: timeline)
         await hooks.prepareForKeyEvents()
         try Task.checkCancellation()
-        try await post(.goToFolder, failingAs: .waitSheet, on: timeline)
-        Self.logStep("⌘⇧G を送りました", on: timeline)
-        try await waitForSheet(probe, on: timeline)
-        try Task.checkCancellation()
-        Self.logStep("移動先シートが出ました", on: timeline)
-        let controls = try await waitForFieldFocus(on: timeline)
+        if preopenedControls == nil {
+            try await post(.goToFolder, failingAs: .waitSheet, on: timeline)
+            Self.logStep("⌘⇧G を送りました", on: timeline)
+            try await waitForSheet(probe, on: timeline)
+            try Task.checkCancellation()
+            Self.logStep("移動先シートが出ました", on: timeline)
+        }
+        let controls = try await waitForFieldFocus(knownControls: preopenedControls, on: timeline)
         try Task.checkCancellation()
 
         // 入力欄がキーを受け取れるようになってから差し替えることで、⌘⇧G が効かない・入力欄にキーが届かない場合
@@ -112,6 +117,21 @@ public final class GoToFolderPasteSequencer {
         } catch {
             throw Self.injectionError(from: error, failingAs: .waitSheet)
         }
+    }
+
+    /// 注入の前から移動先シートが開いていれば（基準の走査で移動先シートの入力欄を見つけた）、その入力欄を返す（Issue #95）。
+    /// 開いているシートに ⌘⇧G を送っても新しいシートは出ず（macOS 27 で確認）、シート待ちがタイムアウトしてしまうため、
+    /// 呼び出し側は ⌘⇧G を送らずにこの入力欄を使う。入力欄のフォーカス待ち・確定前の確認・注入先の確認は従来どおり行う。
+    /// パネルの別の入力欄へ貼り付けて Return を送らないよう、入力欄を AXIdentifier で特定できたときだけ使う。
+    /// 特定できない・探せない・入力欄のフォーカスを待たない構成なら nil を返し、従来どおり ⌘⇧G を送る。
+    private func locatePreopenedField(_ probe: any GoToSheetProbe, on timeline: ElapsedTimeline) async throws -> GoToFieldControls? {
+        guard probe.isSheetAlreadyShown, let fieldFocus else { return nil }
+        guard let controls = try await fieldFocus.locateField(), controls.evidence == .pathFieldIdentifier else {
+            Self.logStep("移動先シートが既に開いているようですが、その入力欄を特定できないため ⌘⇧G を送ります", on: timeline)
+            return nil
+        }
+        Self.logStep("移動先シートが既に開いているため、⌘⇧G を送らずにその入力欄を使います", on: timeline)
+        return controls
     }
 
     /// 最初の確認は間隔 1 回分待ってから行う。⌘⇧G の直後にシートが出ていることはなく、AX の往復が無駄になるため。
@@ -147,10 +167,11 @@ public final class GoToFolderPasteSequencer {
     /// （Issue #74。macOS 26.6.2 の QA で、シートの検知の 1ms 後に送った ⌘A / ⌘V が効かなかった）。
     /// フォーカスが来なければ、貼り付けても入力欄に入らず確定前の確認で副方式へ回るだけなので、待ち（約 350ms）を省いて副方式に任せる。
     /// AX でフォーカスを与えても、シートがキーウィンドウでなければキー入力は届かないため、ここでは与えない。
+    /// - Parameter knownControls: 見つけ済みの入力欄（注入の前から開いていた移動先シート）。nil なら探す。
     /// - Returns: 見つけた入力欄（確定前の確認で探し直さずに使う）。
-    private func waitForFieldFocus(on timeline: ElapsedTimeline) async throws -> GoToFieldControls? {
+    private func waitForFieldFocus(knownControls: GoToFieldControls?, on timeline: ElapsedTimeline) async throws -> GoToFieldControls? {
         guard let fieldFocus else { return nil }
-        let result = try await fieldFocus.waitUntilFocused()
+        let result = try await fieldFocus.waitUntilFocused(controls: knownControls)
         Self.logStep("入力欄のフォーカスを待ちました（\(result.focus.rawValue)）", on: timeline)
         switch result.focus {
         case .focused, .unavailable:
