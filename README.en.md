@@ -191,8 +191,9 @@ System Settings > Privacy & Security > Files and Folders, then choose
 - The clipboard is used briefly to paste the path, and its previous contents
   are restored afterwards. Contents marked as concealed
   (`org.nspasteboard.ConcealedType`, used by password managers) are not saved;
-  the clipboard is cleared after the path is entered instead. If something new
-  is copied while the path is being entered, that new content is kept.
+  the clipboard is cleared instead, whether entering the path succeeds or
+  fails. If something new is copied while the path is being entered, that new
+  content is kept.
 - Stored data: configuration (`~/.config/openpath/config.toml`), confirmed-path
   history (`~/Library/Application Support/openpath/history.json`), and logs
   (`~/Library/Logs/openpath/`). None of it leaves your Mac.
