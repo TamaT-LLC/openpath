@@ -7,9 +7,10 @@ import OpenPathCore
 /// 入力方式: `NSEvent.addLocalMonitorForEvents` で、パレット宛ての keyDown / keyUp をウィンドウへ配送される前に受け取る。
 /// - キーの振り分けは Core の `PaletteKeyBinding` に任せ、ここでは NSEvent からの変換と実行だけを行う。
 /// - パレットで処理したキーは消費する（nil を返す）。検索フィールドやレスポンダチェーンには届かない。
-/// - 確定（Enter / Cmd+Enter）は keyDown で内容を決めるが、`onEvent` で伝えるのはそのキーを離したとき（keyUp）にする
-///   （`PaletteConfirmKeyHold`、Issue #90）。伝えると注入が始まってパレットがキーを手放し、押したままの Enter の
-///   リピートが背後の NSOpenPanel に届いて「開く」が押されてしまうため。離すまではパレットがキーのままで、
+/// - 確定（Enter / Cmd+Enter）と閉じる（Esc）は keyDown で内容を決めるが、`onEvent` で伝えるのはそのキーを
+///   離したとき（keyUp）にする（`PaletteEventKeyHold`、Issue #90・#100）。伝えると、確定なら注入が始まり、
+///   閉じるならパレットが隠れて、パレットがキーを手放す。押したままのリピートが背後の NSOpenPanel に届き、
+///   Enter なら「開く」、Esc なら「キャンセル」が押されてしまうため。離すまではパレットがキーのままで、
 ///   その間の keyDown はすべてここで消費する。keyUp は観測するだけで、消費しない。
 /// - IME の変換中はパレットの操作にせず、そのまま IME（検索フィールドの入力コンテキスト）へ渡す。
 ///   変換中かどうかはキーを受け取った時点のフィールドエディタの `hasMarkedText()` で判定する。
@@ -26,8 +27,8 @@ public final class PaletteKeyController {
     private let viewModel: PaletteViewModel
     private var monitor: Any?
     private var resignKeyObserver: NSObjectProtocol?
-    /// 確定のキーを離すまで預かる確定
-    private var confirmKeyHold = PaletteConfirmKeyHold(clock: ContinuousClock())
+    /// キーを離すまで預かる確定・閉じる
+    private var eventKeyHold = PaletteEventKeyHold(clock: ContinuousClock())
 
     /// - Parameters:
     ///   - window: パレットのウィンドウ（`PaletteWindow.window`）。このウィンドウ宛てのキーだけを扱う。
@@ -40,14 +41,14 @@ public final class PaletteKeyController {
             return self.handle(event)
         }
         // パネルの消滅で隠れた・パネルをクリックした等でキーでなくなったら、そのキーの keyUp はパレットに届かない。
-        // 別のパネルの表示に切り替わった後に前の確定を伝えないよう、預かっている確定を取り消す
+        // 別のパネルの表示に切り替わった後に前の確定・閉じるを伝えないよう、預かっているイベントを取り消す
         resignKeyObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didResignKeyNotification,
             object: window,
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.cancelHeldConfirm()
+                self?.cancelHeldEvent()
             }
         }
     }
@@ -71,8 +72,8 @@ public final class PaletteKeyController {
         }
 
         let input = PaletteKeyInput(event: event, hasMarkedText: hasMarkedText, isLocked: viewModel.isLocked)
-        // 確定のキーを離すまでは、PaletteKeyBinding に回さずすべて消費する
-        switch confirmKeyHold.resolve(input) {
+        // 確定・閉じるのキーを離すまでは、PaletteKeyBinding に回さずすべて消費する
+        switch eventKeyHold.resolve(input) {
         case .passThrough:
             focusSearchFieldIfNeeded()
             return event
@@ -83,30 +84,29 @@ public final class PaletteKeyController {
             NSApp.sendAction(command.selector, to: nil, from: nil)
             return nil
         case .perform(let action):
-            // 確定はキーを離すまで預かり、閉じる（Esc）はすぐ伝える
-            if let paletteEvent = viewModel.perform(action),
-               let immediateEvent = confirmKeyHold.receive(paletteEvent, onKeyDownOf: event.keyCode) {
-                onEvent?(immediateEvent)
+            // 確定・閉じる（Esc）は、そのキーを離すまで預かる
+            if let paletteEvent = viewModel.perform(action) {
+                eventKeyHold.receive(paletteEvent, onKeyDownOf: event.keyCode)
             }
             return nil
         }
     }
 
-    /// 確定のキーを離したら、預かっていた確定を伝える。
+    /// 確定・閉じるのキーを離したら、預かっていたイベントを伝える。
     private func handleKeyUp(_ event: NSEvent) {
-        switch confirmKeyHold.keyUp(keyCode: event.keyCode) {
-        case .confirm(let paletteEvent):
+        switch eventKeyHold.keyUp(keyCode: event.keyCode) {
+        case .send(let paletteEvent):
             onEvent?(paletteEvent)
-        case .expired:
-            Log.debug("確定のキーを \(PaletteConfirmKeyHold.maximumHold.components.seconds) 秒以上押し続けたため、確定を取り消しました")
+        case .expired(let paletteEvent):
+            Log.debug(paletteEvent.expiredLogMessage)
         case .unrelated:
             break
         }
     }
 
-    private func cancelHeldConfirm() {
-        guard confirmKeyHold.cancel() else { return }
-        Log.debug("確定のキーを離す前にパレットがキーでなくなったため、確定を取り消しました")
+    private func cancelHeldEvent() {
+        guard let paletteEvent = eventKeyHold.cancel() else { return }
+        Log.debug(paletteEvent.canceledLogMessage)
     }
 
     /// 検索フィールドの編集中はフィールドエディタ（NSTextView）がファーストレスポンダになる。
@@ -118,6 +118,30 @@ public final class PaletteKeyController {
     private func focusSearchFieldIfNeeded() {
         guard !(window.firstResponder is NSTextView) else { return }
         PaletteSearchTextFieldView.first(in: window)?.focus()
+    }
+}
+
+/// 預かっていたイベントを取り消したときの debug ログ。確定のパスは含めない。
+private extension PaletteEvent {
+    /// キーを上限以上押し続けたため取り消したとき
+    var expiredLogMessage: String {
+        let seconds = PaletteEventKeyHold.maximumHold.components.seconds
+        switch self {
+        case .confirm:
+            return "確定のキーを \(seconds) 秒以上押し続けたため、確定を取り消しました"
+        case .dismiss:
+            return "Esc を \(seconds) 秒以上押し続けたため、パレットを閉じる操作を取り消しました"
+        }
+    }
+
+    /// キーを離す前にパレットがキーでなくなったため取り消したとき
+    var canceledLogMessage: String {
+        switch self {
+        case .confirm:
+            return "確定のキーを離す前にパレットがキーでなくなったため、確定を取り消しました"
+        case .dismiss:
+            return "Esc を離す前にパレットがキーでなくなったため、パレットを閉じる操作を取り消しました"
+        }
     }
 }
 
