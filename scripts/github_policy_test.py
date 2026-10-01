@@ -298,6 +298,20 @@ class SettingsManifestTests(RepositoryFixture):
         self.assert_rejected("'swift build / swift test'")
         self.write_workflow('ci.yml', CI.replace('    runs-on: ubuntu-24.04\n', "    if: github.actor != 'x'\n    runs-on: ubuntu-24.04\n"))
         self.assert_rejected("'policy'")
+        for key in ('"if"', "'if'", 'if '):
+            with self.subTest(key):
+                self.write_workflow('ci.yml', CI.replace('    runs-on: macos-15\n', f'    {key}: false\n    runs-on: macos-15\n'))
+                self.assert_rejected("'swift build / swift test'")
+
+    def test_quoted_trigger_filters_are_detected(self):
+        for key in ('"paths"', "'paths-ignore'"):
+            with self.subTest(key):
+                self.write_workflow('ci.yml', CI.replace('  pull_request:\n', f'  pull_request:\n    {key}:\n      - Sources/**\n'))
+                self.assert_rejected("'swift build / swift test'")
+
+    def test_explicit_yaml_keys_are_rejected(self):
+        self.write_workflow('ci.yml', CI.replace('    runs-on: macos-15\n', '    ? if\n    : false\n    runs-on: macos-15\n'))
+        self.assert_rejected('explicit YAML keys')
 
     def test_tag_ruleset_cannot_require_reviews_or_checks(self):
         settings = copy.deepcopy(SETTINGS)

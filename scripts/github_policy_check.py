@@ -43,6 +43,7 @@ VERSION_COMMENT = re.compile(r'v([0-9]+)(?:\.[0-9]+){0,2}\Z')
 USES_LINE = re.compile(r'(?P<indent> *)(?P<dash>- +)?uses: *(?P<spec>\S+) *(?:# *(?P<comment>\S*))? *\Z')
 USES_KEY = re.compile(r'''(?<![A-Za-z0-9_])["']?uses["']? *:''')
 YAML_ESCAPE = re.compile(r'\\(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})')
+EXPLICIT_KEY = re.compile(r' *(?:- +)?\?(?: |\Z)')
 PERSIST_FALSE = re.compile(r' *persist-credentials: *false *(?:#.*)?\Z')
 PATH_FILTERS = ('paths', 'paths-ignore')
 READ_ONLY_PERMISSIONS = ([], ['contents: read'])
@@ -90,6 +91,12 @@ def _scalar(value):
     return value
 
 
+def _key_value(code):
+    """Split `key: value`; the key loses quotes and spaces, since `"if":` and `if :` are the same key."""
+    key, _, value = code.strip().partition(':')
+    return _scalar(key), value
+
+
 def _top_level(lines, key):
     """Return the lines of a top-level block mapping, or None when absent."""
     for index, line in enumerate(lines):
@@ -111,7 +118,7 @@ def _block_keys(lines, key):
         code = _code(line)
         if not code.strip():
             continue
-        name = code.strip().split(':', 1)[0]
+        name, _ = _key_value(code)
         if _indent(line) == 2:
             current = keys.setdefault(name, [])
         elif _indent(line) == 4 and current is not None:
@@ -129,7 +136,7 @@ def _jobs(lines):
         if not code.strip():
             continue
         indent = _indent(line)
-        key, _, value = code.strip().partition(':')
+        key, value = _key_value(code)
         if indent == 2:
             current = jobs.setdefault(key, {'check': key, 'environment': None, 'conditional': False})
             in_environment = False
@@ -178,6 +185,8 @@ def check_workflow(workflow, pins):
         errors.append(f'{name}: pull_request_target is forbidden')
     if YAML_ESCAPE.search(workflow.text):
         errors.append(f'{name}: YAML hex or unicode escapes are forbidden')
+    if any(EXPLICIT_KEY.match(_code(line)) for line in workflow.lines):
+        errors.append(f'{name}: explicit YAML keys (`? key`) are forbidden')
     if not workflow.triggers:
         errors.append(f'{name}: triggers must be declared as a top-level `on:` block')
     errors += _check_permissions(name, workflow)
