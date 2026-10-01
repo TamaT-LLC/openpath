@@ -32,6 +32,20 @@ struct CandidateIndexInvalidateTests {
         #expect(index.count == 1)
     }
 
+    @Test("続けて無効にしても、後の呼び出しの Task が終わった時点で、先に取り除いた候補がクエリに反映されている")
+    func repeatedInvalidateWaitsForEarlierRemoval() async {
+        // 統合し直しに時間がかかる程度の候補を持たせ、先の無効化の反映が後の無効化より遅れる状況を作る
+        let index = F.makeIndex()
+        let rootItems = (0..<Self.raceItemCount).map { F.directory("/Users/me/repos/app/\($0)") }
+        await index.replace(source: Self.root, with: rootItems)
+        await index.replace(source: .history, with: [Self.historyItem])
+
+        index.invalidate(source: .history)
+        await index.invalidate(source: .history).value
+
+        #expect(index.count == rootItems.count)
+    }
+
     @Test("無効にする前に取った世代での差し替えは反映しない（消す前の履歴を読んだ収集で候補を戻さない）")
     func replaceWithStaleGenerationIsSuperseded() async throws {
         let index = F.makeIndex()

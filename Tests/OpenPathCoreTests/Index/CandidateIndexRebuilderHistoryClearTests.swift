@@ -111,6 +111,28 @@ struct CandidateIndexRebuilderHistoryClearTests {
         #expect(countAtDidRemove == rootItems.count)
     }
 
+    @Test("続けて履歴を消しても、どちらの didRemove の時点でも取り除いた候補がクエリに反映されている")
+    func repeatedClearCallsDidRemoveAfterRemovalIsPublished() async {
+        let harness = RebuilderHarness()
+        let rootItems = (0..<Self.manyRootItemCount).map { F.directory("/rebuild/first/\($0)") }
+        harness.source(.history).setSnapshot(items: [F.directory(Self.historyOnly)])
+        harness.source(.root(F.firstRoot)).setSnapshot(items: rootItems)
+        await harness.startAndWait()
+
+        // 2 回目は取り除く候補が無いが、1 回目の反映を待ってから知らせる
+        let index = harness.index
+        let (counts, continuation) = AsyncStream.makeStream(of: Int.self)
+        harness.rebuilder.historyDidClear { continuation.yield(index.count) }
+        harness.rebuilder.historyDidClear { continuation.yield(index.count) }
+        var countsAtDidRemove: [Int] = []
+        for await count in counts {
+            countsAtDidRemove.append(count)
+            if countsAtDidRemove.count == 2 { break }
+        }
+
+        #expect(countsAtDidRemove == [rootItems.count, rootItems.count])
+    }
+
     @Test("履歴を消した後に確定した場所は、履歴の取り直しで候補に加わる")
     func historyRecordedAfterClearIsIndexed() async throws {
         let harness = RebuilderHarness()

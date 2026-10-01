@@ -47,6 +47,7 @@ public final class CandidateIndex: Sendable {
         /// ソースごとの差し替えの世代。`invalidate(source:)` のたびに進める（無いソースは 0）
         var generations: [CandidateSourceKind: Int] = [:]
 
+        /// `source` の今の差し替えの世代
         func generation(of source: CandidateSourceKind) -> Generation {
             Generation(value: generations[source] ?? 0)
         }
@@ -139,19 +140,24 @@ public final class CandidateIndex: Sendable {
     /// （起動時の最初の差し替えより前に消した場合も、消す前に読んだ収集の結果を反映しないため）。
     /// 世代とソースの候補は呼んだ時点で（同期的に）更新する。クエリが使う統合済みの候補は全ソースの候補数に比例した
     /// CPU を使うため、並行実行用のスレッドで作り直す。
-    /// - Returns: 統合し直した候補をクエリに反映し終える Task。取り除く候補が無ければすぐ終わる。
+    /// - Returns: 呼んだ時点のソースの候補（取り除いた後）をクエリに反映し終える Task。取り除く候補が無くても、
+    ///   先に取り除いた分などの反映が済んでいなければ、それを含めて反映するまで終わらない（続けて呼んだ場合に、
+    ///   後の呼び出しの完了を待った側が、まだ取り除かれていない候補で引き直さないようにするため）。
     @discardableResult
     func invalidate(source: CandidateSourceKind) -> Task<Void, Never> {
-        let removed: (sources: [CandidateSourceKind: [PreparedCandidate]], revision: Int)? = state.withLock { state in
+        let pending: (sources: [CandidateSourceKind: [PreparedCandidate]], revision: Int)? = state.withLock { state in
             state.generations[source, default: 0] += 1
-            guard state.sources.removeValue(forKey: source) != nil else { return nil }
-            state.revision += 1
+            if state.sources.removeValue(forKey: source) != nil {
+                state.revision += 1
+            }
+            // クエリが使う候補が今のソースの候補に追いついていれば、作り直す必要は無い
+            guard state.catalogRevision < state.revision else { return nil }
             return (state.sources, state.revision)
         }
-        guard let removed else { return Task {} }
+        guard let pending else { return Task {} }
         // 利用者の操作（メニュー）の結果で、表示中のパレットがこの反映を待つため、走査（utility）より優先する
         return Task.detached(priority: .userInitiated) { [self] in
-            publishCatalog(merging: removed.sources, revision: removed.revision)
+            publishCatalog(merging: pending.sources, revision: pending.revision)
         }
     }
 
