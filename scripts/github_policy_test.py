@@ -37,7 +37,8 @@ CI = f'''name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
 
 permissions:
@@ -308,6 +309,26 @@ class SettingsManifestTests(RepositoryFixture):
             with self.subTest(key):
                 self.write_workflow('ci.yml', CI.replace('  pull_request:\n', f'  pull_request:\n    {key}:\n      - Sources/**\n'))
                 self.assert_rejected("'swift build / swift test'")
+
+    def test_flow_style_mapping_in_triggers_is_rejected(self):
+        cases = {
+            'flow mapping': CI.replace('  pull_request:\n', "  pull_request: {paths: ['Sources/**']}\n"),
+            'deeper indentation': CI.replace('  pull_request:\n', '  pull_request:\n      paths:\n        - Sources/**\n'),
+        }
+        for label, text in cases.items():
+            with self.subTest(label):
+                self.write_workflow('ci.yml', text)
+                self.assert_rejected('block style')
+
+    def test_flow_style_sequence_in_pull_request_job_is_rejected(self):
+        cases = {
+            'flow sequence': CI.replace('    runs-on: macos-15\n', '    needs: [policy]\n    runs-on: macos-15\n'),
+            'alias': CI.replace('    runs-on: macos-15\n', '    <<: *defaults\n    runs-on: macos-15\n'),
+        }
+        for label, text in cases.items():
+            with self.subTest(label):
+                self.write_workflow('ci.yml', text)
+                self.assert_rejected('block style')
 
     def test_explicit_yaml_keys_are_rejected(self):
         self.write_workflow('ci.yml', CI.replace('    runs-on: macos-15\n', '    ? if\n    : false\n    runs-on: macos-15\n'))

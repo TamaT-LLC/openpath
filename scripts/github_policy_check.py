@@ -16,6 +16,11 @@ workflow policy of TamaT-LLC/depgraph-cli (`github-actions-policy-v1`):
   a job-level `if:` (a skipped job reports success), or from CodeQL default
   setup, and every deployment environment used by a workflow is declared.
 
+Workflows are read line by line, so the check fails closed: any form it cannot
+read reliably is rejected instead of being interpreted. In `on:` and in the job
+headers of pull request workflows, that means 2-space block style only (no flow
+collections, anchors, aliases, tags, merge keys, or explicit keys).
+
 This check cannot stop a pull request from skipping the `repository policy`
 job itself; code owner review of .github/ changes covers that case.
 
@@ -44,6 +49,15 @@ USES_LINE = re.compile(r'(?P<indent> *)(?P<dash>- +)?uses: *(?P<spec>\S+) *(?:# 
 USES_KEY = re.compile(r'''(?<![A-Za-z0-9_])["']?uses["']? *:''')
 YAML_ESCAPE = re.compile(r'\\(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})')
 EXPLICIT_KEY = re.compile(r' *(?:- +)?\?(?: |\Z)')
+# Flow collections, anchors, aliases, and tags; the line-based reader cannot see keys inside them.
+UNREADABLE_INLINE_STARTS = ('{', '[', '&', '*', '!')
+MERGE_KEY = '<<'
+INDENT_STEP = 2
+# Job headers are at indent 2 and their own keys (name, if, ...) at indent 4.
+JOB_KEY_INDENT = 4
+BLOCK_STYLE_MESSAGE = ('write `on:` and the jobs of pull request workflows in block style with 2-space '
+                       'indentation; flow collections, anchors, aliases, tags, and merge keys are rejected '
+                       'because this check reads workflows line by line')
 PERSIST_FALSE = re.compile(r' *persist-credentials: *false *(?:#.*)?\Z')
 PATH_FILTERS = ('paths', 'paths-ignore')
 READ_ONLY_PERMISSIONS = ([], ['contents: read'])
@@ -97,17 +111,53 @@ def _key_value(code):
     return _scalar(key), value
 
 
-def _top_level(lines, key):
-    """Return the lines of a top-level block mapping, or None when absent."""
+def _block_lines(lines, key):
+    """Return (index, line) pairs of a top-level block mapping, or None when absent."""
     for index, line in enumerate(lines):
         if _code(line) == key + ':':
             block = []
-            for child in lines[index + 1:]:
+            for offset, child in enumerate(lines[index + 1:], start=index + 1):
                 if _code(child) and _indent(child) == 0:
                     break
-                block.append(child)
+                block.append((offset, child))
             return block
     return None
+
+
+def _top_level(lines, key):
+    """Return the lines of a top-level block mapping, or None when absent."""
+    block = _block_lines(lines, key)
+    return None if block is None else [line for _, line in block]
+
+
+def _is_unreadable_inline(code):
+    """True for an inline value or key the line-based reader cannot interpret."""
+    text = code.strip()
+    if text.startswith('- '):
+        text = text[2:].strip()
+    key, separator, value = text.partition(':')
+    if separator and _scalar(key) == MERGE_KEY:
+        return True
+    inline = value.strip() if separator else text
+    return inline[:1] in UNREADABLE_INLINE_STARTS
+
+
+def _layout_errors(location, block, max_indent=None):
+    """Fail closed on block lines (up to max_indent) that are not 2-space block style."""
+    errors = []
+    previous = 0
+    for index, line in block or []:
+        code = _code(line)
+        if not code.strip():
+            continue
+        indent = _indent(line)
+        inspected = max_indent is None or indent <= max_indent
+        nested_too_deep = (max_indent is None or previous <= max_indent) \
+            and indent > previous and indent != previous + INDENT_STEP
+        if nested_too_deep or (inspected and _is_unreadable_inline(code)):
+            errors.append(f'{location}:{index + 1}: {BLOCK_STYLE_MESSAGE}')
+        previous = indent
+    return errors
 
 
 def _block_keys(lines, key):
@@ -187,6 +237,9 @@ def check_workflow(workflow, pins):
         errors.append(f'{name}: YAML hex or unicode escapes are forbidden')
     if any(EXPLICIT_KEY.match(_code(line)) for line in workflow.lines):
         errors.append(f'{name}: explicit YAML keys (`? key`) are forbidden')
+    errors += _layout_errors(name, _block_lines(workflow.lines, 'on'))
+    if workflow.is_pull_request:
+        errors += _layout_errors(name, _block_lines(workflow.lines, 'jobs'), JOB_KEY_INDENT)
     if not workflow.triggers:
         errors.append(f'{name}: triggers must be declared as a top-level `on:` block')
     errors += _check_permissions(name, workflow)

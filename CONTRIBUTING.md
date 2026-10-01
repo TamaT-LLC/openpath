@@ -72,6 +72,8 @@ Pull Request の CI は、Swift のビルドとテストに加えて、この検
 ### GitHub Actions を変える場合
 
 workflow の `uses:` は、tag ではなく commit SHA に固定し、末尾に `# vX.Y.Z` の形で version を書きます。
+`github_policy_check.py` は workflow を行単位で読み、正しく読めると保証できない書き方は拒否します（fail closed）。
+`on:` と、Pull Request で動く job の見出しの直下は、2 スペース字下げの block style で書いてください（`{}` や `[]` のインライン、anchor、alias は使えません）。
 新しい Action を使う場合や version を上げる場合は、upstream の tag から SHA を解決し、`.github/actions-policy.json` も同じ変更で更新してください。
 
 ```console
