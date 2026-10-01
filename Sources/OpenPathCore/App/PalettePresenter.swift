@@ -17,6 +17,8 @@
 ///   info でログに出す。PanelWatcher の `panel detected` と同じパネル ID を含め、両者のタイムスタンプ（ミリ秒）の差で
 ///   検知レイテンシを測る（FR-DETECT-03、#30）。初出では最初の候補を待ってから出すため、この差には候補の検索の時間
 ///   （最長 `initialRowsWaitLimit`）が含まれる。待っている間に閉じたパレットは出さないため記録しない。パスは含まない。
+/// - 診断: 出した時点の行数・空状態の案内の有無・最初の候補を待った時間、閉じたこと、履歴のクリアなどで候補を
+///   引き直したことを `diagnose` で報告する（`PalettePresenterDiagnostic`。既定では debug ログに出す。実機 QA の判定用）。
 @MainActor
 public final class PalettePresenter: PaletteDisplaying {
     /// 初出の表示で、最初の候補を待つ上限。空クエリの検索（frecency の上位と存在確認）は通常数十 ms で終わる（#91 の録画で約 33ms）。
@@ -29,6 +31,7 @@ public final class PalettePresenter: PaletteDisplaying {
     private let search: PaletteQuerySession.Search
     private let clock: any Clock<Duration>
     private let didShow: @MainActor (PanelContext) -> Void
+    private let diagnose: @MainActor (PalettePresenterDiagnostic) -> Void
     private lazy var querySession = PaletteQuerySession(search: search) { [weak self] rows, keepingSelection in
         self?.apply(rows, keepingSelection: keepingSelection)
     }
@@ -38,7 +41,9 @@ public final class PalettePresenter: PaletteDisplaying {
     private var lastPanelID: PanelContext.ID?
     private var buildProgress = CandidateBuildProgress()
     /// 最初の候補を待っている間の、待ちの上限のタイマー。ウィンドウを出していない間だけ持つ
-    private var pendingReveal: Task<Void, Never>?
+    private var pendingReveal: PendingReveal?
+    /// 最後に候補を引いた契機。`PaletteQuerySession` は最新の要求の結果だけを反映するため、反映した候補の契機でもある
+    private var lastRowsRequest = RowsRequest.show
     /// ウィンドウを出しているか。別のパネルの候補を待つ前に、前のパネルのパレットを閉じるかの判定に使う
     private var isWindowShown = false
 
@@ -49,13 +54,15 @@ public final class PalettePresenter: PaletteDisplaying {
     ///   - search: 候補の引き方。
     ///   - clock: 初出の表示で最初の候補を待つ上限の計測に使う。テストでは手動で進める Clock を渡す。
     ///   - didShow: ウィンドウを出した直後に、表示のたびに呼ぶ。既定では `palette shown` をログに出す。
+    ///   - diagnose: 表示・閉じる・候補の引き直しの報告先。既定では debug ログに出す。
     public init(
         viewModel: PaletteViewModel,
         window: any PaletteWindowControlling,
         includeFiles: @escaping @MainActor () -> Bool,
         search: @escaping PaletteQuerySession.Search,
         clock: any Clock<Duration> = ContinuousClock(),
-        didShow: @escaping @MainActor (PanelContext) -> Void = PalettePresenter.logShown
+        didShow: @escaping @MainActor (PanelContext) -> Void = PalettePresenter.logShown,
+        diagnose: @escaping @MainActor (PalettePresenterDiagnostic) -> Void = PalettePresenterDiagnostic.log
     ) {
         self.viewModel = viewModel
         self.window = window
@@ -63,6 +70,7 @@ public final class PalettePresenter: PaletteDisplaying {
         self.search = search
         self.clock = clock
         self.didShow = didShow
+        self.diagnose = diagnose
         viewModel.onQueryChange = { [weak self] _ in
             self?.queryDidChange()
         }
@@ -83,7 +91,7 @@ public final class PalettePresenter: PaletteDisplaying {
         presentedPanel = context
         lastPanelID = context.id
         window.rowCount = viewModel.rows.count
-        requestRows(keepingSelection: isSamePanel)
+        requestRows(.show, keepingSelection: isSamePanel)
         // 候補を受け取り済みなら（同じパネルの再表示）、その候補のまますぐ出す
         guard viewModel.hasReceivedRows else {
             // 前のパネルのパレットが出たままなら、候補を消したまま前の位置に残さないよう閉じておく
@@ -91,7 +99,7 @@ public final class PalettePresenter: PaletteDisplaying {
             scheduleRevealAfterWaitLimit()
             return
         }
-        revealWindow()
+        revealWindow(.immediately)
     }
 
     public func update(context: PanelContext) {
@@ -103,15 +111,21 @@ public final class PalettePresenter: PaletteDisplaying {
         }
         // 選択モードの推定し直しでフォルダのみかどうかが変わったときだけ、絞り込みを合わせて引き直す
         guard presentedPanel.isDirectoriesOnly != context.isDirectoriesOnly else { return }
-        requestRows(keepingSelection: true)
+        requestRows(.panelContextChanged, keepingSelection: true)
     }
 
     public func hide() {
+        let hiddenPanel = presentedPanel
+        let wasVisible = isWindowShown
         cancelPendingReveal()
         presentedPanel = nil
         querySession.cancel()
         isWindowShown = false
         window.hide()
+        // 閉じている間の hide（Idle の panelGone 等）は報告しない
+        if let hiddenPanel {
+            diagnose(.hidden(panelID: hiddenPanel.id, wasVisible: wasVisible))
+        }
     }
 
     public func setLocked(_ isLocked: Bool) {
@@ -156,25 +170,27 @@ public final class PalettePresenter: PaletteDisplaying {
         let didFinish = buildProgress.update(isRebuilding: isRebuilding)
         viewModel.setBuildingCandidates(buildProgress.showsBuildingStatus)
         guard didFinish, presentedPanel != nil else { return }
-        requestRows(keepingSelection: true)
+        requestRows(.rebuildFinished, keepingSelection: true)
     }
 
     /// 全件の再構築の完了とは別に、候補が差し替わったときに呼ぶ（履歴のクリアで履歴の候補を取り除いた後。Issue #92）。
     /// 表示中なら、検索語を変えずに選択を保ったまま候補を引き直す（選択していた候補が消えたら先頭を選ぶ）。
     public func candidatesDidChange() {
+        diagnose(.candidatesChanged(panelID: presentedPanel?.id, isBuildingCandidates: buildProgress.showsBuildingStatus))
         guard presentedPanel != nil else { return }
-        requestRows(keepingSelection: true)
+        requestRows(.candidatesChanged, keepingSelection: true)
     }
 
     // MARK: - 候補
 
     private func queryDidChange() {
         guard presentedPanel != nil else { return }
-        requestRows(keepingSelection: false)
+        requestRows(.queryChange, keepingSelection: false)
     }
 
-    private func requestRows(keepingSelection: Bool) {
+    private func requestRows(_ request: RowsRequest, keepingSelection: Bool) {
         guard let presentedPanel else { return }
+        lastRowsRequest = request
         querySession.request(
             viewModel.query,
             directoriesOnly: presentedPanel.showsDirectoriesOnly(includeFiles: includeFiles()),
@@ -183,11 +199,27 @@ public final class PalettePresenter: PaletteDisplaying {
     }
 
     private func apply(_ rows: [PaletteRow], keepingSelection: Bool) {
+        let previousSelectionID = viewModel.selectedRow?.id
         viewModel.replaceRows(rows, keepingSelection: keepingSelection)
         window.rowCount = rows.count
+        reportRefresh(previousSelectionID: previousSelectionID)
         guard isAwaitingInitialRows else { return }
         // 候補を反映した行数で最初のフレームから描かれるよう、差し替えた後に出す
-        revealWindow()
+        revealWindow(.initialRowsArrived)
+    }
+
+    /// 検索語の変更以外の契機で引き直した候補を反映したら報告する。表示時と打鍵ごとの検索は報告しない
+    /// （初出の候補は `palette reveal` で分かる）。選択中の候補のパスは、選択を保てたかの判定にだけ使う。
+    private func reportRefresh(previousSelectionID: PaletteRow.ID?) {
+        guard let presentedPanel, let trigger = lastRowsRequest.refreshTrigger else { return }
+        let rows = viewModel.rows
+        diagnose(.rowsRefreshed(PaletteRowsRefreshRecord(
+            panelID: presentedPanel.id,
+            trigger: trigger,
+            rowCount: rows.count,
+            lastUsedRowCount: rows.count { $0.lastUsed != nil },
+            isSelectionKept: previousSelectionID != nil && viewModel.selectedRow?.id == previousSelectionID
+        )))
     }
 
     // MARK: - 初出の表示
@@ -197,12 +229,19 @@ public final class PalettePresenter: PaletteDisplaying {
         pendingReveal != nil
     }
 
-    private func revealWindow() {
+    private func revealWindow(_ reason: RevealReason) {
+        let waited = pendingReveal?.elapsed() ?? .zero
         cancelPendingReveal()
         guard let presentedPanel else { return }
         isWindowShown = true
         window.show(near: presentedPanel.frame)
         didShow(presentedPanel)
+        diagnose(.revealed(PaletteRevealRecord(
+            panelID: presentedPanel.id,
+            rowCount: viewModel.rows.count,
+            showsEmptyMessage: viewModel.emptyMessage != nil,
+            initialRows: reason.initialRows(waited: waited)
+        )))
     }
 
     private func hideWindow() {
@@ -212,7 +251,7 @@ public final class PalettePresenter: PaletteDisplaying {
     }
 
     private func scheduleRevealAfterWaitLimit() {
-        pendingReveal = Self.makeRevealTimer(on: clock) { [weak self] in
+        pendingReveal = Self.makePendingReveal(on: clock) { [weak self] in
             self?.revealWithoutInitialRows()
         }
     }
@@ -220,21 +259,23 @@ public final class PalettePresenter: PaletteDisplaying {
     private func revealWithoutInitialRows() {
         guard isAwaitingInitialRows else { return }
         Log.debug("最初の候補が待ちの上限（initialRowsWaitLimit）までに届かなかったため、候補を待たずにパレットを出します")
-        revealWindow()
+        revealWindow(.waitLimitReached)
     }
 
     private func cancelPendingReveal() {
-        pendingReveal?.cancel()
+        pendingReveal?.timer.cancel()
         pendingReveal = nil
     }
 
     /// 期限は呼び出し時点で確定させる。Task の開始が遅れても、待ちの起点がずれないようにするため。
-    private static func makeRevealTimer<C: Clock<Duration>>(
+    /// 待った時間（診断用）も同じ時点から測る。
+    private static func makePendingReveal<C: Clock<Duration>>(
         on clock: C,
         onDeadline: @escaping @MainActor () -> Void
-    ) -> Task<Void, Never> {
-        let deadline = clock.now.advanced(by: initialRowsWaitLimit)
-        return Task {
+    ) -> PendingReveal {
+        let start = clock.now
+        let deadline = start.advanced(by: initialRowsWaitLimit)
+        let timer = Task {
             do {
                 try await clock.sleep(until: deadline, tolerance: nil)
             } catch {
@@ -244,6 +285,52 @@ public final class PalettePresenter: PaletteDisplaying {
             // 取り消しも続きも MainActor で行うため、ここで取り消しを確かめれば次のパネルの待ちと取り違えない
             guard !Task.isCancelled else { return }
             onDeadline()
+        }
+        return PendingReveal(timer: timer) { start.duration(to: clock.now) }
+    }
+}
+
+/// 最初の候補を待っている間の、待ちの上限のタイマーと、待ち始めてからの経過時間。
+private struct PendingReveal {
+    let timer: Task<Void, Never>
+    let elapsed: @Sendable () -> Duration
+}
+
+/// ウィンドウを出した理由。
+private enum RevealReason {
+    /// 候補を受け取り済みで、待たずに出した
+    case immediately
+    /// 最初の候補が届いた
+    case initialRowsArrived
+    /// 待ちの上限に達した
+    case waitLimitReached
+
+    func initialRows(waited: Duration) -> PaletteRevealRecord.InitialRows {
+        switch self {
+        case .immediately: .alreadyReceived
+        case .initialRowsArrived: .received(after: waited)
+        case .waitLimitReached: .waitLimitReached(after: waited)
+        }
+    }
+}
+
+/// 候補を引いた契機。
+private enum RowsRequest {
+    /// パレットを出した
+    case show
+    /// 検索語が変わった
+    case queryChange
+    case rebuildFinished
+    case candidatesChanged
+    case panelContextChanged
+
+    /// 引き直しとして報告する契機。表示時と検索語の変更は報告しない
+    var refreshTrigger: PaletteRowsRefreshRecord.Trigger? {
+        switch self {
+        case .show, .queryChange: nil
+        case .rebuildFinished: .rebuildFinished
+        case .candidatesChanged: .candidatesChanged
+        case .panelContextChanged: .panelContextChanged
         }
     }
 }

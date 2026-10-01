@@ -69,16 +69,20 @@ struct RebuilderHarness {
     let index: CandidateIndex
     let provider = ScriptedSourceProvider()
     let scheduleClock = ScheduleTestClock()
+    /// 履歴のクリアについて debug ログ向けに報告された診断
+    let historyClearDiagnostics = DiagnosticRecorder<HistoryClearDiagnostic>()
     let rebuilder: CandidateIndexRebuilder
 
     init(config: Config = RebuilderFixtures.config()) {
         let index = CandidateIndex(fileExistence: RecordingFileExistenceChecker(), now: { IndexFixtures.now }, history: { [] })
         self.index = index
+        let historyClearDiagnostics = historyClearDiagnostics
         rebuilder = CandidateIndexRebuilder(
             index: index,
             config: config,
             sourceProvider: provider,
-            clock: scheduleClock
+            clock: scheduleClock,
+            diagnose: { historyClearDiagnostics.record($0) }
         )
     }
 

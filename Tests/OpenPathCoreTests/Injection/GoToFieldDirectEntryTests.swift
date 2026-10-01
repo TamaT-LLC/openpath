@@ -58,9 +58,19 @@ struct GoToFieldDirectEntryTests {
 
         func run(
             autoConfirm: Bool = false,
-            fallingBackFrom primaryError: InjectionError = .timeout(step: .waitSheet)
+            fallingBackFrom primaryError: InjectionError = .timeout(step: .waitSheet),
+            keyRoute: InjectionKeyRoute? = nil
         ) async throws {
-            try await entry.run(path: GoToFieldDirectEntryTests.path, autoConfirm: autoConfirm, fallingBackFrom: primaryError)
+            guard let keyRoute else {
+                try await entry.run(path: GoToFieldDirectEntryTests.path, autoConfirm: autoConfirm, fallingBackFrom: primaryError)
+                return
+            }
+            try await entry.run(
+                path: GoToFieldDirectEntryTests.path,
+                autoConfirm: autoConfirm,
+                fallingBackFrom: primaryError,
+                keyRoute: keyRoute
+            )
         }
 
         /// 入力欄・ボタンへの AX 操作（値のセット・押下・確定）。
@@ -108,6 +118,34 @@ struct GoToFieldDirectEntryTests {
             .key(.returnKey),
             .didSubmitGoToSheet(autoConfirm: true),
         ])
+    }
+
+    @Test("Return は渡された経路で送る（既定は注入先のプロセス）", arguments: [nil, InjectionKeyRoute.targetProcess, .systemWide])
+    func sendsReturnThroughGivenRoute(keyRoute: InjectionKeyRoute?) async throws {
+        let harness = Harness()
+        harness.locator.goButton = nil
+
+        try await harness.run(keyRoute: keyRoute)
+
+        #expect(harness.keyboard.routedKeyStrokes == [
+            KeyboardSpy.RoutedKeyStroke(keyStroke: .returnKey, route: keyRoute ?? .targetProcess),
+        ])
+    }
+
+    @Test("Return の送り先を決めている間に注入先が無効になったら、Return を送らずに投げる")
+    func checksTargetAfterResolvingReturnDestination() async {
+        let harness = Harness()
+        harness.locator.goButton = nil
+        harness.keyboard.onPrepare = { [targetGuard = harness.targetGuard] _ in
+            targetGuard.invalidation = (fromCheck: targetGuard.checkCount, status: .notFrontmost)
+        }
+
+        await #expect(throws: InjectionError.targetNotFrontmost) {
+            try await harness.run()
+        }
+
+        #expect(harness.log.keyStrokes.isEmpty)
+        #expect(!harness.log.events.contains(.didSubmitGoToSheet(autoConfirm: false)))
     }
 
     @Test("「移動」ボタンが無く Return も送れなければ、入力欄を確定する（kAXConfirmAction）")

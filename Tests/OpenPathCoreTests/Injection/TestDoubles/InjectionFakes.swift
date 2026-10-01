@@ -31,20 +31,67 @@ final class Suspension {
 /// 送られたキー操作を記録する。
 @MainActor
 final class KeyboardSpy: KeyStrokePosting {
+    /// 送ったキー操作と経路。
+    struct RoutedKeyStroke: Equatable {
+        let keyStroke: InjectionKeyStroke
+        let route: InjectionKeyRoute
+    }
+
     private let log: InjectionEventLog
     /// 送出に失敗させるキー操作。
     var failingKeyStrokes: Set<InjectionKeyStroke> = []
     /// 送出を記録した直後に呼ばれる（送出直後のキャンセルを再現するため）。
     var onPost: ((InjectionKeyStroke) -> Void)?
+    /// 送出を記録した直後に、経路と一緒に呼ばれる（経路によって届く・届かないを再現するため）。
+    var onRoutedPost: ((InjectionKeyStroke, InjectionKeyRoute) -> Void)?
+    /// 送る準備（送り先の決定）の中で呼ばれる（送り先を決めている間の切り替わり・キャンセルを再現するため）。
+    var onPrepare: ((InjectionKeyStroke) -> Void)?
+    /// 送ったキー操作と経路（発生順）。共有のログには経路を残さないため、こちらで確かめる。
+    private(set) var routedKeyStrokes: [RoutedKeyStroke] = []
 
     init(log: InjectionEventLog) {
         self.log = log
     }
 
-    func post(_ keyStroke: InjectionKeyStroke) throws {
+    /// キーは `post()` で送ったときに記録する（準備しただけでは記録しない）。
+    func prepare(_ keyStroke: InjectionKeyStroke, via route: InjectionKeyRoute) async throws -> PreparedKeyStroke {
         guard !failingKeyStrokes.contains(keyStroke) else { throw AdapterFailure() }
-        log.record(.key(keyStroke))
-        onPost?(keyStroke)
+        onPrepare?(keyStroke)
+        return PreparedKeyStroke { [self] in
+            log.record(.key(keyStroke))
+            routedKeyStrokes.append(RoutedKeyStroke(keyStroke: keyStroke, route: route))
+            onPost?(keyStroke)
+            onRoutedPost?(keyStroke, route)
+        }
+    }
+}
+
+/// フォーカス中の要素の読み取り。読んだ回数と時刻を記録する。
+@MainActor
+final class FocusReaderFake: InjectionFocusReading {
+    private let clock: VirtualClock
+    /// 読み取りの結果。
+    var element: InjectionFocusedElement = .fileList
+    /// 読み取りで投げるエラー。
+    var error: (any Error)?
+    /// 1 回の読み取りにかかる時間。
+    var latency: Duration = .zero
+    /// 読み取った時刻。
+    private(set) var readTimes: [Duration] = []
+
+    init(clock: VirtualClock) {
+        self.clock = clock
+    }
+
+    func focusedElement(cutoff: ScanCutoff) async throws -> InjectionFocusedElement {
+        readTimes.append(clock.elapsed)
+        try cutoff.throwIfReached()
+        clock.advance(by: latency)
+        try cutoff.throwIfReached()
+        if let error {
+            throw error
+        }
+        return element
     }
 }
 

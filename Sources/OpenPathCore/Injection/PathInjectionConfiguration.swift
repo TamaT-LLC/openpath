@@ -8,19 +8,30 @@ public struct PathInjectionTiming: Equatable, Sendable {
     public let pasteSettleDelay: Duration
     /// Return からペーストボードを戻すまでの時間（ステップ 9、ARCH-001 §7）。
     public let restoreDelay: Duration
+    /// 注入先のプロセスへ送った ⌘⇧G でシートが出ず、代替（`GoToSheetFallback`）で送り直してから、シートの出現を待つ上限。
+    /// AppCoordinator の全体タイムアウト（1.5 秒）のうち、最初のシート待ち（600ms）の残りに収めるため短くする。
+    public let fallbackSheetWaitLimit: Duration
 
-    public init(sheetWaitLimit: Duration, sheetPollInterval: Duration, pasteSettleDelay: Duration, restoreDelay: Duration) {
+    public init(
+        sheetWaitLimit: Duration,
+        sheetPollInterval: Duration,
+        pasteSettleDelay: Duration,
+        restoreDelay: Duration,
+        fallbackSheetWaitLimit: Duration = .milliseconds(500)
+    ) {
         self.sheetWaitLimit = sheetWaitLimit
         self.sheetPollInterval = sheetPollInterval
         self.pasteSettleDelay = pasteSettleDelay
         self.restoreDelay = restoreDelay
+        self.fallbackSheetWaitLimit = fallbackSheetWaitLimit
     }
 
     public static let standard = PathInjectionTiming(
         sheetWaitLimit: .milliseconds(600),
         sheetPollInterval: .milliseconds(50),
         pasteSettleDelay: .milliseconds(100),
-        restoreDelay: .milliseconds(200)
+        restoreDelay: .milliseconds(200),
+        fallbackSheetWaitLimit: .milliseconds(500)
     )
 }
 
