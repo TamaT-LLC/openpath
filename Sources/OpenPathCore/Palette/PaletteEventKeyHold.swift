@@ -46,7 +46,7 @@ public struct PaletteEventKeyHold: Sendable {
         let deadline: Duration
         /// そのキーの keyDown（最初の押下・リピート）を最後に受けた時刻（生成からの経過時間）
         var lastKeyDown: Duration
-        /// 預かっている間に捨てた、そのキーの keyDown（リピート）の数（診断用）
+        /// 預かっている間に捨てた、そのキーのリピートの数（診断用）
         var discardedRepeatCount = 0
         /// 預かっている間に捨てた、ほかのキーの keyDown の数（診断用）
         var discardedOtherKeyCount = 0
@@ -153,12 +153,13 @@ public struct PaletteEventKeyHold: Sendable {
     }
 
     /// 押し続けているとみなして捨てた keyDown を数える（診断用）。
+    /// 同じキーのリピートでない keyDown（keyUp を取りこぼしたまま上限の前に押し直した等）は、リピートではないため数えない。
     private mutating func countDiscarded(_ input: PaletteKeyInput) {
         guard var hold else { return }
-        if input.keyCode == hold.keyCode {
-            hold.discardedRepeatCount += 1
-        } else {
+        if input.keyCode != hold.keyCode {
             hold.discardedOtherKeyCount += 1
+        } else if input.isRepeat {
+            hold.discardedRepeatCount += 1
         }
         self.hold = hold
     }

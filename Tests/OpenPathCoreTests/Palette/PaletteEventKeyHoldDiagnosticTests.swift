@@ -120,6 +120,25 @@ struct PaletteEventKeyHoldDiagnosticTests {
         ))
     }
 
+    @Test("同じキーのリピートでない keyDown は、捨ててもリピートとして数えない（ほかのキーとしても数えない）")
+    func doesNotCountSameKeyNonRepeatAsRepeat() {
+        var hold = makeHold()
+        hold.receive(Self.confirm, onKeyDownOf: KeyStroke.returnKey.keyCode)
+        clock.advance(by: .milliseconds(100))
+        // keyUp を取りこぼしたまま、上限の前に同じキーを押し直した（合成イベント等）
+        let resolution = hold.resolve(KeyStroke.returnKey.input())
+        _ = hold.resolve(KeyStroke.returnKey.input(isRepeat: true))
+        clock.advance(by: .milliseconds(100))
+
+        _ = hold.keyUp(keyCode: KeyStroke.returnKey.keyCode)
+
+        #expect(resolution == .discard)
+        #expect(recorder.diagnostics.last == .ended(
+            Self.record(.confirm(openImmediately: false), key: .returnKey, held: .milliseconds(200), repeats: 1),
+            .sent
+        ))
+    }
+
     // MARK: - 取り消し
 
     @Test("上限を過ぎてから離したら、取り消したこと（expired）を、上限の後に捨てたリピートも含めて報告する")

@@ -60,7 +60,7 @@ public struct PaletteKeyHoldRecord: Equatable, Sendable {
     public let heldDuration: Duration
     /// 上限（`PaletteEventKeyHold.maximumHold`）に達していたか
     public let isLimitReached: Bool
-    /// 預かっている間に捨てた、そのキーの keyDown（リピート）の数
+    /// 預かっている間に捨てた、そのキーのリピートの数。同じキーのリピートでない keyDown は数えない
     public let discardedRepeatCount: Int
     /// 預かっている間に捨てた、ほかのキーの keyDown の数
     public let discardedOtherKeyCount: Int
