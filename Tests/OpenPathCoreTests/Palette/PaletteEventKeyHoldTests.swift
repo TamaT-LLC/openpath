@@ -2,11 +2,11 @@ import Testing
 
 import OpenPathCore
 
-/// 確定のキー（Enter）を離すまで確定を預かる状態機械（Issue #90）。
+/// 外へ伝えるイベント（確定・閉じる）を、そのキーを離すまで預かる状態機械（Issue #90、#100）。
 /// 時刻はテストから手動で進める Clock（`TestClock`）で決める。
-@Suite("PaletteEventKeyHold: 確定のキーを離すまで預かる")
+@Suite("PaletteEventKeyHold: 確定・閉じるのキーを離すまで預かる")
 struct PaletteEventKeyHoldTests {
-    private static let confirm = PaletteEvent.confirm(path: "/Users/example/Library", openImmediately: false)
+    private static let confirm = HeldKey.returnKey.event
     private static let returnKeyCode = KeyStroke.returnKey.keyCode
     private static let justBeforeLimit = PaletteEventKeyHold.maximumHold - .milliseconds(1)
 
@@ -16,35 +16,37 @@ struct PaletteEventKeyHoldTests {
         PaletteEventKeyHold(clock: clock)
     }
 
-    /// keyDown で確定が出て、預けた直後の状態。
-    private func holdingConfirm(_ event: PaletteEvent = confirm, keyCode: UInt16 = returnKeyCode) -> PaletteEventKeyHold {
+    /// keyDown でイベントが出て、預けた直後の状態。
+    private func holding(_ event: PaletteEvent, keyCode: UInt16) -> PaletteEventKeyHold {
         var hold = makeHold()
-        let immediate = hold.receive(event, onKeyDownOf: keyCode)
-        #expect(immediate == nil)
+        hold.receive(event, onKeyDownOf: keyCode)
         return hold
+    }
+
+    private func holding(_ heldKey: HeldKey) -> PaletteEventKeyHold {
+        holding(heldKey.event, keyCode: heldKey.key.keyCode)
     }
 
     // MARK: - 預ける・離す
 
-    @Test("確定は keyDown では外へ伝えず、キーを離すまで預かる")
-    func confirmIsHeldUntilKeyUp() {
+    @Test("確定（Enter）も閉じる（Esc）も、keyDown では外へ伝えず、キーを離すまで預かる", arguments: HeldKey.all)
+    func eventIsHeldUntilKeyUp(heldKey: HeldKey) {
         var hold = makeHold()
 
-        let immediate = hold.receive(Self.confirm, onKeyDownOf: Self.returnKeyCode)
+        hold.receive(heldKey.event, onKeyDownOf: heldKey.key.keyCode)
 
-        #expect(immediate == nil)
         #expect(hold.isHolding)
     }
 
-    @Test("確定のキーを離したら、預かった確定を 1 回だけ返す")
-    func keyUpReleasesConfirmOnce() {
-        var hold = holdingConfirm()
+    @Test("そのキーを離したら、預かったイベントを 1 回だけ返す", arguments: HeldKey.all)
+    func keyUpReleasesEventOnce(heldKey: HeldKey) {
+        var hold = holding(heldKey)
         clock.advance(by: .milliseconds(120))
 
-        let first = hold.keyUp(keyCode: Self.returnKeyCode)
-        let second = hold.keyUp(keyCode: Self.returnKeyCode)
+        let first = hold.keyUp(keyCode: heldKey.key.keyCode)
+        let second = hold.keyUp(keyCode: heldKey.key.keyCode)
 
-        #expect(first == .send(Self.confirm))
+        #expect(first == .send(heldKey.event))
         #expect(second == .unrelated)
         #expect(!hold.isHolding)
     }
@@ -59,43 +61,31 @@ struct PaletteEventKeyHoldTests {
     )
     func confirmKeepsContentsDecidedOnKeyDown(key: KeyStroke, openImmediately: Bool) {
         let event = PaletteEvent.confirm(path: "/Users/example/repos/fern", openImmediately: openImmediately)
-        var hold = holdingConfirm(event, keyCode: key.keyCode)
+        var hold = holding(event, keyCode: key.keyCode)
 
         let release = hold.keyUp(keyCode: key.keyCode)
 
         #expect(release == .send(event))
     }
 
-    @Test("閉じる（Esc）は預からず、keyDown ですぐ外へ伝える")
-    func dismissIsSentImmediately() {
-        var hold = makeHold()
-
-        let immediate = hold.receive(.dismiss, onKeyDownOf: KeyStroke.escape.keyCode)
-        let release = hold.keyUp(keyCode: KeyStroke.escape.keyCode)
-
-        #expect(immediate == .dismiss)
-        #expect(release == .unrelated)
-        #expect(!hold.isHolding)
-    }
-
-    @Test("ほかのキーを離しても確定せず、預かったままにする", arguments: [KeyStroke.escape, .keypadEnter, .downArrow, .a])
-    func otherKeyUpDoesNotRelease(otherKey: KeyStroke) {
-        var hold = holdingConfirm()
+    @Test("ほかのキーを離しても伝えず、預かったままにする", arguments: HeldKey.withOtherKeys)
+    func otherKeyUpDoesNotRelease(heldKey: HeldKey, otherKey: KeyStroke) {
+        var hold = holding(heldKey)
 
         let otherRelease = hold.keyUp(keyCode: otherKey.keyCode)
         let isStillHolding = hold.isHolding
-        let release = hold.keyUp(keyCode: Self.returnKeyCode)
+        let release = hold.keyUp(keyCode: heldKey.key.keyCode)
 
         #expect(otherRelease == .unrelated)
         #expect(isStillHolding)
-        #expect(release == .send(Self.confirm))
+        #expect(release == .send(heldKey.event))
     }
 
-    @Test("何も預かっていなければ、キーを離しても何も返さない")
-    func keyUpWithoutHoldIsUnrelated() {
+    @Test("何も預かっていなければ、キーを離しても何も返さない", arguments: HeldKey.all)
+    func keyUpWithoutHoldIsUnrelated(heldKey: HeldKey) {
         var hold = makeHold()
 
-        let release = hold.keyUp(keyCode: Self.returnKeyCode)
+        let release = hold.keyUp(keyCode: heldKey.key.keyCode)
 
         #expect(release == .unrelated)
     }
@@ -104,10 +94,10 @@ struct PaletteEventKeyHoldTests {
 
     @Test(
         "預かっている間は、パレットのキー・文字入力・リピートをすべて消費する（背後のパネルへも検索フィールドへも渡さない）",
-        arguments: KeyChord.paletteChords + KeyChord.textInputChords
+        arguments: HeldKey.all, KeyChord.paletteChords + KeyChord.textInputChords
     )
-    func everyKeyDownIsDiscardedWhileHolding(chord: KeyChord) {
-        var hold = holdingConfirm()
+    func everyKeyDownIsDiscardedWhileHolding(heldKey: HeldKey, chord: KeyChord) {
+        var hold = holding(heldKey)
         clock.advance(by: Self.justBeforeLimit)
 
         let resolutions = [chord.input(), chord.input(isRepeat: true)].map { hold.resolve($0) }
@@ -127,58 +117,60 @@ struct PaletteEventKeyHoldTests {
 
     // MARK: - 上限
 
-    @Test("上限の直前に離せば確定する")
-    func keyUpJustBeforeLimitReleases() {
-        var hold = holdingConfirm()
+    @Test("上限の直前に離せば伝える", arguments: HeldKey.all)
+    func keyUpJustBeforeLimitReleases(heldKey: HeldKey) {
+        var hold = holding(heldKey)
         clock.advance(by: Self.justBeforeLimit)
 
         let isHolding = hold.isHolding
-        let release = hold.keyUp(keyCode: Self.returnKeyCode)
+        let release = hold.keyUp(keyCode: heldKey.key.keyCode)
 
         #expect(isHolding)
-        #expect(release == .send(Self.confirm))
+        #expect(release == .send(heldKey.event))
     }
 
-    @Test("上限に達したら確定を取り消す。離しても確定せず、取り消したことを 1 回だけ返す")
-    func holdExpiresAtLimit() {
-        var hold = holdingConfirm()
+    @Test("上限に達したら取り消す。離しても伝えず、取り消したことを 1 回だけ返す", arguments: HeldKey.all)
+    func holdExpiresAtLimit(heldKey: HeldKey) {
+        var hold = holding(heldKey)
         clock.advance(by: PaletteEventKeyHold.maximumHold)
 
         let isHolding = hold.isHolding
-        let first = hold.keyUp(keyCode: Self.returnKeyCode)
-        let second = hold.keyUp(keyCode: Self.returnKeyCode)
+        let first = hold.keyUp(keyCode: heldKey.key.keyCode)
+        let second = hold.keyUp(keyCode: heldKey.key.keyCode)
 
         #expect(!isHolding)
-        #expect(first == .expired)
+        #expect(first == .expired(heldKey.event))
         #expect(second == .unrelated)
     }
 
-    @Test("上限を過ぎ、リピートも来ていなければ、キーの扱いは PaletteKeyBinding に戻る（Enter のリピートは従来どおり消費し、↓ は選択を動かす）")
-    func keysFollowKeyBindingAfterExpiry() {
-        var hold = holdingConfirm()
+    @Test(
+        "上限を過ぎ、リピートも来ていなければ、キーの扱いは PaletteKeyBinding に戻る（そのキーのリピートは従来どおり消費し、↓ は選択を動かす）",
+        arguments: HeldKey.all
+    )
+    func keysFollowKeyBindingAfterExpiry(heldKey: HeldKey) {
+        var hold = holding(heldKey)
         clock.advance(by: max(PaletteEventKeyHold.maximumHold, PaletteEventKeyHold.repeatTimeout))
 
-        let returnRepeat = hold.resolve(KeyStroke.returnKey.input(isRepeat: true))
-        // 直前の Enter のリピートで押し続けているとみなされないよう、リピートの途切れを待ってから↓を押す
+        let heldKeyRepeat = hold.resolve(heldKey.key.input(isRepeat: true))
+        // 直前のリピートで押し続けているとみなされないよう、リピートの途切れを待ってから↓を押す
         clock.advance(by: PaletteEventKeyHold.repeatTimeout)
         let downArrow = hold.resolve(KeyStroke.downArrow.input())
 
-        #expect(returnRepeat == .discard)
+        #expect(heldKeyRepeat == .discard)
         #expect(downArrow == .perform(.moveSelection(by: 1)))
     }
 
-    @Test("上限を過ぎた後に押し直した Enter は、新しい確定として預かる")
-    func newConfirmAfterExpiryIsHeldAgain() {
-        var hold = holdingConfirm()
+    @Test("上限を過ぎた後に押し直したキーは、新しいイベントとして預かる", arguments: HeldKey.all)
+    func newEventAfterExpiryIsHeldAgain(heldKey: HeldKey) {
+        var hold = holding(heldKey)
         clock.advance(by: PaletteEventKeyHold.maximumHold)
-        let retried = PaletteEvent.confirm(path: "/Users/example/repos/fern", openImmediately: false)
+        let retried = heldKey.retriedEvent
 
-        let immediate = hold.receive(retried, onKeyDownOf: Self.returnKeyCode)
+        hold.receive(retried, onKeyDownOf: heldKey.key.keyCode)
         clock.advance(by: Self.justBeforeLimit)
         let isHolding = hold.isHolding
-        let release = hold.keyUp(keyCode: Self.returnKeyCode)
+        let release = hold.keyUp(keyCode: heldKey.key.keyCode)
 
-        #expect(immediate == nil)
         #expect(isHolding)
         #expect(release == .send(retried))
     }
@@ -189,7 +181,7 @@ struct PaletteEventKeyHoldTests {
         clock.advance(by: .seconds(10))
         var hold = PaletteEventKeyHold(clock: clock, maximumHold: limit)
         clock.advance(by: .seconds(5))
-        _ = hold.receive(Self.confirm, onKeyDownOf: Self.returnKeyCode)
+        hold.receive(Self.confirm, onKeyDownOf: Self.returnKeyCode)
 
         clock.advance(by: limit - .milliseconds(1))
         let isHoldingBeforeLimit = hold.isHolding
@@ -199,104 +191,133 @@ struct PaletteEventKeyHoldTests {
 
         #expect(isHoldingBeforeLimit)
         #expect(!isHoldingAtLimit)
-        #expect(release == .expired)
+        #expect(release == .expired(Self.confirm))
     }
 
     // MARK: - 上限で取り消した後も押し続けている場合
 
     @Test(
-        "上限で取り消した後も、そのキーのリピートが続いている間はキー入力をすべて捨てる（Esc で閉じると残りのリピートが背後のパネルへ届くため）",
-        arguments: [KeyStroke.escape, .tab, .downArrow, .a]
+        "上限で取り消した後も、そのキーのリピートが続いている間はキー入力をすべて捨てる（ほかのキーで閉じたり確定したりすると、残りのリピートが背後のパネルへ届くため）",
+        arguments: HeldKey.withOtherKeys
     )
-    func keysStayOwnedWhileRepeatContinuesAfterExpiry(otherKey: KeyStroke) {
-        var hold = holdingConfirm()
-        let resolutionsWhileHeld = repeatingReturn(&hold, until: PaletteEventKeyHold.maximumHold + .milliseconds(500))
+    func keysStayOwnedWhileRepeatContinuesAfterExpiry(heldKey: HeldKey, otherKey: KeyStroke) {
+        var hold = holding(heldKey)
+        let resolutionsWhileHeld = repeating(heldKey.key, on: &hold, until: PaletteEventKeyHold.maximumHold + .milliseconds(500))
         let otherKeyWhileHeld = hold.resolve(otherKey.input())
 
-        let release = hold.keyUp(keyCode: Self.returnKeyCode)
+        let release = hold.keyUp(keyCode: heldKey.key.keyCode)
         let otherKeyAfterRelease = hold.resolve(otherKey.input())
 
         #expect(resolutionsWhileHeld.allSatisfy { $0 == .discard })
         #expect(otherKeyWhileHeld == .discard)
-        #expect(release == .expired)
+        #expect(release == .expired(heldKey.event))
         #expect(otherKeyAfterRelease == PaletteKeyBinding.resolve(otherKey.input()))
     }
 
-    @Test("上限で取り消した後、リピートが途切れたら（keyUp を取りこぼした）キーの扱いを PaletteKeyBinding に戻す")
-    func keysAreReleasedWhenRepeatStopsAfterExpiry() {
-        var hold = holdingConfirm()
-        _ = repeatingReturn(&hold, until: PaletteEventKeyHold.maximumHold + .milliseconds(200))
+    @Test("上限で取り消した後、リピートが途切れたら（keyUp を取りこぼした）キーの扱いを PaletteKeyBinding に戻す", arguments: HeldKey.all)
+    func keysAreReleasedWhenRepeatStopsAfterExpiry(heldKey: HeldKey) {
+        var hold = holding(heldKey)
+        _ = repeating(heldKey.key, on: &hold, until: PaletteEventKeyHold.maximumHold + .milliseconds(200))
 
         clock.advance(by: PaletteEventKeyHold.repeatTimeout - .milliseconds(1))
-        let escapeBeforeTimeout = hold.resolve(KeyStroke.escape.input())
+        let downArrowBeforeTimeout = hold.resolve(KeyStroke.downArrow.input())
         clock.advance(by: PaletteEventKeyHold.repeatTimeout)
-        let escapeAfterTimeout = hold.resolve(KeyStroke.escape.input())
+        let downArrowAfterTimeout = hold.resolve(KeyStroke.downArrow.input())
 
-        #expect(escapeBeforeTimeout == .discard)
-        #expect(escapeAfterTimeout == .perform(.dismiss))
+        #expect(downArrowBeforeTimeout == .discard)
+        #expect(downArrowAfterTimeout == .perform(.moveSelection(by: 1)))
     }
 
     @Test(
-        "上限で取り消した後に同じキーを押し直したら（前の keyUp を取りこぼした）、新しい確定として扱う",
-        arguments: [false, true]
+        "上限で取り消した後に同じキーを押し直したら（前の keyUp を取りこぼした）、新しい操作として扱う",
+        arguments: HeldKey.all, [false, true]
     )
-    func pressingSameKeyAgainAfterExpiryStartsNewConfirm(isRepeating: Bool) {
-        var hold = holdingConfirm()
+    func pressingSameKeyAgainAfterExpiryStartsNewEvent(heldKey: HeldKey, isRepeating: Bool) {
+        var hold = holding(heldKey)
         if isRepeating {
-            _ = repeatingReturn(&hold, until: PaletteEventKeyHold.maximumHold + .milliseconds(200))
+            _ = repeating(heldKey.key, on: &hold, until: PaletteEventKeyHold.maximumHold + .milliseconds(200))
         } else {
             clock.advance(by: PaletteEventKeyHold.maximumHold)
         }
-        let retried = PaletteEvent.confirm(path: "/Users/example/repos/fern", openImmediately: false)
+        let retried = heldKey.retriedEvent
 
-        let resolution = hold.resolve(KeyStroke.returnKey.input())
-        let immediate = hold.receive(retried, onKeyDownOf: Self.returnKeyCode)
-        let release = hold.keyUp(keyCode: Self.returnKeyCode)
+        let resolution = hold.resolve(heldKey.key.input())
+        hold.receive(retried, onKeyDownOf: heldKey.key.keyCode)
+        let isHolding = hold.isHolding
+        let release = hold.keyUp(keyCode: heldKey.key.keyCode)
 
-        #expect(resolution == .perform(.confirm(openImmediately: false)))
-        #expect(immediate == nil)
+        #expect(resolution == .perform(heldKey.action))
+        #expect(isHolding)
         #expect(release == .send(retried))
     }
 
-    /// Enter のリピート（50ms 間隔）を、keyDown からの経過時間が `until` に達するまで渡す。
-    private func repeatingReturn(_ hold: inout PaletteEventKeyHold, until end: Duration) -> [PaletteKeyResolution] {
+    /// キーのリピート（50ms 間隔）を、keyDown からの経過時間が `until` に達するまで渡す。
+    private func repeating(_ key: KeyStroke, on hold: inout PaletteEventKeyHold, until end: Duration) -> [PaletteKeyResolution] {
         let interval: Duration = .milliseconds(50)
         var elapsed: Duration = .zero
         var resolutions: [PaletteKeyResolution] = []
         while elapsed < end {
             clock.advance(by: interval)
             elapsed += interval
-            resolutions.append(hold.resolve(KeyStroke.returnKey.input(isRepeat: true)))
+            resolutions.append(hold.resolve(key.input(isRepeat: true)))
         }
         return resolutions
     }
 
     // MARK: - 取り消し
 
-    @Test("パレットがキーでなくなったら取り消し、その後に離しても確定しない")
-    func cancelDropsHeldConfirm() {
-        var hold = holdingConfirm()
+    @Test("パレットがキーでなくなったら取り消し、取り消したイベントを返す。その後に離しても伝えない", arguments: HeldKey.all)
+    func cancelDropsHeldEvent(heldKey: HeldKey) {
+        var hold = holding(heldKey)
 
-        let didCancel = hold.cancel()
-        let release = hold.keyUp(keyCode: Self.returnKeyCode)
+        let canceled = hold.cancel()
+        let release = hold.keyUp(keyCode: heldKey.key.keyCode)
 
-        #expect(didCancel)
+        #expect(canceled == heldKey.event)
         #expect(!hold.isHolding)
         #expect(release == .unrelated)
     }
 
-    @Test("預かっていない確定・上限を過ぎた確定の取り消しは、取り消した確定として数えない")
-    func cancelWithoutActiveHoldReturnsFalse() {
+    @Test("預かっていないイベント・上限を過ぎたイベントの取り消しは、取り消したイベントとして返さない", arguments: HeldKey.all)
+    func cancelWithoutActiveHoldReturnsNil(heldKey: HeldKey) {
         var idle = makeHold()
-        var expired = holdingConfirm()
+        var expired = holding(heldKey)
         clock.advance(by: PaletteEventKeyHold.maximumHold)
 
-        let didCancelIdle = idle.cancel()
-        let didCancelExpired = expired.cancel()
-        let releaseAfterCancel = expired.keyUp(keyCode: Self.returnKeyCode)
+        let canceledIdle = idle.cancel()
+        let canceledExpired = expired.cancel()
+        let releaseAfterCancel = expired.keyUp(keyCode: heldKey.key.keyCode)
 
-        #expect(!didCancelIdle)
-        #expect(!didCancelExpired)
+        #expect(canceledIdle == nil)
+        #expect(canceledExpired == nil)
         #expect(releaseAfterCancel == .unrelated)
+    }
+}
+
+/// 離すまで預かるキーと、そのキーの操作・外へ伝えるイベント。
+struct HeldKey: Sendable, CustomTestStringConvertible {
+    let key: KeyStroke
+    let action: PaletteAction
+    let event: PaletteEvent
+    /// 同じキーを押し直したときのイベント。確定は別の候補で押し直した場合を表す
+    let retriedEvent: PaletteEvent
+
+    var testDescription: String { key.testDescription }
+
+    static let returnKey = HeldKey(
+        key: .returnKey,
+        action: .confirm(openImmediately: false),
+        event: .confirm(path: "/Users/example/Library", openImmediately: false),
+        retriedEvent: .confirm(path: "/Users/example/repos/fern", openImmediately: false)
+    )
+    static let escape = HeldKey(key: .escape, action: .dismiss, event: .dismiss, retriedEvent: .dismiss)
+
+    static let all: [HeldKey] = [.returnKey, .escape]
+
+    /// 預かっているキーと、それとは別のキーの組
+    static let withOtherKeys: [(HeldKey, KeyStroke)] = all.flatMap { heldKey in
+        [KeyStroke.returnKey, .escape, .keypadEnter, .tab, .downArrow, .a]
+            .filter { $0.keyCode != heldKey.key.keyCode }
+            .map { (heldKey, $0) }
     }
 }
