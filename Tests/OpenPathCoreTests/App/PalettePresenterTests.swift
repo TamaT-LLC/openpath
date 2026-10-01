@@ -264,6 +264,26 @@ struct PalettePresenterTests {
         #expect(window.calls.isEmpty)
     }
 
+    @Test("最初の候補を待っている間に候補が差し替わったら（履歴のクリア）、引き直した候補で出す")
+    func candidatesChangeWhileWaitingShowsRefreshedRows() async {
+        let refreshed = PaletteRowFixtures.rows("fern")
+        presenter.show(context: .sample)
+        await search.waitForCalls(1)
+
+        presenter.candidatesDidChange()
+        await search.waitForCalls(2)
+        // 取り消した最初の検索の結果は反映せず、パレットも出さない
+        search.respond(to: 0, with: PaletteRowFixtures.rows("history-only", "fern"))
+        await MainActorQueue.drain()
+        #expect(window.calls.isEmpty)
+
+        search.respond(to: 1, with: refreshed)
+        await waitForShow(count: 1)
+
+        #expect(window.calls == [.show(near: PanelContext.sample.frame, rowCount: refreshed.count)])
+        #expect(viewModel.rows == refreshed)
+    }
+
     @Test("最初の候補を待っている間にパネルが動いたら、置き直さずに新しい位置で出す")
     func movedPanelWhileWaitingShowsAtNewFrame() async {
         let rows = PaletteRowFixtures.rows("fern")
