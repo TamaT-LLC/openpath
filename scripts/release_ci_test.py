@@ -17,6 +17,8 @@ SCRIPTS = pathlib.Path(__file__).resolve().parent
 
 def load(name):
     spec = importlib.util.spec_from_file_location(name, SCRIPTS / (name + '.py'))
+    if spec is None or spec.loader is None:
+        raise ImportError(f'cannot load {name} from {SCRIPTS}')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

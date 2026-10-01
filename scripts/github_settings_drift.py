@@ -41,6 +41,7 @@ import sys
 import github_settings_manifest as manifest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+DESCRIPTION = 'List differences between .github/settings-desired-v1.json and the live settings.'
 KNOWN_APPS = {15368: 'github-actions', 2740: 'renovate'}
 ALLOWED_RULES = {
     'branch': {'deletion', 'non_fast_forward', 'pull_request', 'required_status_checks'},
@@ -286,7 +287,7 @@ def drift_report(desired, fetch):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__.split('\n', 1)[0])
+    parser = argparse.ArgumentParser(description=DESCRIPTION)
     parser.add_argument('--root', type=pathlib.Path, default=ROOT, help='repository root')
     args = parser.parse_args(argv)
     desired, errors = manifest.load(args.root)
