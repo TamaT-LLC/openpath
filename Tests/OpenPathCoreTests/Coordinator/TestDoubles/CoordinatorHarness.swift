@@ -12,6 +12,8 @@ final class CoordinatorHarness {
     let palette = PaletteSpy()
     let history = HistorySpy()
     let clock = TestClock()
+    /// AppCoordinator が debug ログ向けに報告した診断
+    let diagnostics = DiagnosticRecorder<CoordinatorDiagnostic>()
     let injector: InjectorFake
     let settings: SettingsStub
     let coordinator: AppCoordinator
@@ -23,12 +25,14 @@ final class CoordinatorHarness {
         let settings = SettingsStub(isAutoConfirmEnabled: isAutoConfirmEnabled)
         self.injector = injector
         self.settings = settings
+        let diagnostics = diagnostics
         coordinator = AppCoordinator(
             palette: palette,
             injector: injector,
             history: history,
             isAutoConfirmEnabled: { settings.isAutoConfirmEnabled },
-            clock: clock
+            clock: clock,
+            diagnose: { diagnostics.record($0) }
         )
         coordinator.onStateChange = { [weak self] state in
             self?.didObserve(state)
