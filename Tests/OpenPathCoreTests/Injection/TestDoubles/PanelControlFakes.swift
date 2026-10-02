@@ -14,6 +14,8 @@ final class TargetGuardFake: InjectionTargetGuarding {
     var checkError: (any Error)?
     private(set) var captureCount = 0
     private(set) var checkCount = 0
+    /// 記録した注入先の識別（経路の記憶 `GoToSheetRouteMemory` の鍵）。nil なら識別できない注入先。
+    var identity: InjectionTargetIdentity?
 
     init(log: InjectionEventLog) {
         self.log = log

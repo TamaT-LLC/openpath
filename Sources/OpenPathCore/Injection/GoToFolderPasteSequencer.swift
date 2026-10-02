@@ -3,8 +3,9 @@
 /// 手順（括弧内は DSN-001 §3.1 のステップ番号）:
 /// 1. 移動先シートの判定基準を記録する（`GoToSheetDetecting.makeProbe`）
 /// 2. `hooks.prepareForKeyEvents` でキー入力を NSOpenPanel へ向ける
-/// 3. ⌘⇧G を注入先のプロセスへ送り（3）、最大 600ms・50ms 間隔でシートの出現を待つ（4）。出なければ代替として、
-///    / かシステム経由の ⌘⇧G で送り直して最大 500ms 待ち、以降のキーもシステム経由で送る（`GoToSheetOpener`）。
+/// 3. ⌘⇧G を注入先のプロセスへ送り（3）、50ms 間隔でシートの出現を待つ（4。代替があれば最大 200ms、無ければ 600ms）。
+///    出なければ、フォーカスがファイル一覧なら / を、出なければ ⌘⇧G をシステム経由で送り直し（最大 300ms / 500ms）、
+///    以降のキーもシステム経由で送る（`GoToSheetOpener`、Issue #29）。
 ///    ただし基準の時点で移動先シートが既に開いていて、その入力欄を AXIdentifier で特定できれば、⌘⇧G を送らず・待たずに
 ///    そのシートの入力欄を使う（Issue #95。開いているシートに ⌘⇧G を送っても新しいシートは出ない）
 /// 4. 移動先シートの入力欄がフォーカスを持つまで最大 250ms 待つ（`GoToFieldFocusWait`、Issue #74）。
@@ -52,6 +53,7 @@ public final class GoToFolderPasteSequencer {
     ///   - fieldFocus: ⌘A / ⌘V の前に、移動先シートの入力欄がフォーカスを持つまで待つ。nil なら待たずに送る。
     ///   - submitGate: Return の前に移動先シートの入力欄と候補の選択を確かめる。nil なら確かめずに Return を送る。
     ///   - sheetFallback: 注入先のプロセスへ送った ⌘⇧G でシートが出なかったときの代替。nil なら代替を試さずに `timeout(.waitSheet)` を投げる。
+    ///     注入をまたいで経路を覚える `GoToSheetRouteMemory` もここで渡す。
     ///   - clock: 待機に使う。テストでは実時間を待たない Clock を渡す。
     public init(
         pasteboard: any PasteboardAccessing,
@@ -153,17 +155,12 @@ public final class GoToFolderPasteSequencer {
         return controls
     }
 
-    /// ⌘⇧G を注入先のプロセスへ送ってシートを開く。出なければ代替で送り直し、以降のキーをシステム経由に切り替える。
+    /// 移動先シートを開く（① 注入先のプロセスへの ⌘⇧G → ② / → ③ システム経由の ⌘⇧G）。
+    /// ②・③ へ進んだら、シートが出ずに副方式へ回る場合も含めて、以降のキー（副方式の Return を含む）をシステム経由に切り替える。
     private func openGoToSheet(_ probe: any GoToSheetProbe, on timeline: ElapsedTimeline) async throws {
-        if try await opener.openThroughTargetProcess(probe, on: timeline) {
-            return
+        try await opener.open(probe, on: timeline) {
+            lastKeyRoute = .systemWide
         }
-        guard opener.canFallBack else {
-            throw InjectionError.timeout(step: .waitSheet)
-        }
-        // 注入先のプロセスへ送ったキーが届かなかったとみなし、代替が失敗しても副方式の Return はシステム経由で送る
-        lastKeyRoute = .systemWide
-        try await opener.openThroughSystemRoute(probe, on: timeline)
     }
 
     /// シートが AX に現れた直後は入力欄がまだキー入力の受け先になっておらず、⌘A / ⌘V が入力欄に届かないことがある

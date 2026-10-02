@@ -28,10 +28,12 @@ final class FlowHarness {
     ///   - sheetAppearsAt: この経過時間以降の判定で移動先シートが出たことにする。nil なら出ない（副方式へ）。
     ///   - fallsBackWhenSheetMissing: 注入先のプロセスへ送った ⌘⇧G でシートが出なければ代替を試すか（PanelInjector は試す）。
     ///     既存のタイムラインのテストを変えないよう、既定では試さない。
+    ///   - routeMemory: 注入先のプロセスへの ⌘⇧G でシートが出なかった注入先の記憶。注入先の識別は `targetGuard.identity`。
     init(
         sheetAppearsAt: Duration? = .milliseconds(150),
         clipboard: PasteboardSnapshot = .userClipboard,
-        fallsBackWhenSheetMissing: Bool = false
+        fallsBackWhenSheetMissing: Bool = false,
+        routeMemory: GoToSheetRouteMemory? = nil
     ) {
         let log = InjectionEventLog(clock: clock)
         let pasteboard = FakePasteboard(contents: clipboard)
@@ -79,7 +81,13 @@ final class FlowHarness {
                 targetGuard: targetGuard,
                 fieldFocus: primaryFieldFocus,
                 submitGate: GoToSheetSubmitGate(locator: submitCheckLocator, normalizer: normalizer, clock: clock),
-                sheetFallback: fallsBackWhenSheetMissing ? GoToSheetFallback(focusReader: focusReader) : nil,
+                sheetFallback: fallsBackWhenSheetMissing
+                    ? GoToSheetFallback(
+                        focusReader: focusReader,
+                        routeMemory: routeMemory,
+                        targetIdentity: { [targetGuard] in targetGuard.identity }
+                    )
+                    : nil,
                 hooks: PathInjectionHooks(prepareForKeyEvents: prepareForKeyEvents, didSubmitGoToSheet: didSubmit),
                 clock: clock
             ),

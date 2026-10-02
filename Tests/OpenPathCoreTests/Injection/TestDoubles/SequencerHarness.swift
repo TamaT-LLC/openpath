@@ -31,13 +31,15 @@ final class SequencerHarness {
     ///   - waitsForFieldFocus: ⌘A / ⌘V の前に入力欄がフォーカスを持つまで待つか（`GoToFieldFocusWait`、Issue #74）。
     ///   - fallsBackWhenSheetMissing: 注入先のプロセスへ送った ⌘⇧G でシートが出なければ代替を試すか（`GoToSheetFallback`）。
     ///   - readsFocusForFallback: 代替で、フォーカス中の要素を読んで / を使うか。false なら ⌘⇧G だけを送り直す。
+    ///   - routeMemory: 注入先のプロセスへの ⌘⇧G でシートが出なかった注入先の記憶。注入先の識別は `targetGuard.identity`。
     init(
         sheetAppearsAt: Duration? = .milliseconds(150),
         clipboard: PasteboardSnapshot = .userClipboard,
         checksBeforeSubmit: Bool = false,
         waitsForFieldFocus: Bool = false,
         fallsBackWhenSheetMissing: Bool = false,
-        readsFocusForFallback: Bool = true
+        readsFocusForFallback: Bool = true,
+        routeMemory: GoToSheetRouteMemory? = nil
     ) {
         let log = InjectionEventLog(clock: clock)
         let pasteboard = FakePasteboard(contents: clipboard)
@@ -77,7 +79,11 @@ final class SequencerHarness {
                 )
                 : nil,
             sheetFallback: fallsBackWhenSheetMissing
-                ? GoToSheetFallback(focusReader: readsFocusForFallback ? focusReader : nil)
+                ? GoToSheetFallback(
+                    focusReader: readsFocusForFallback ? focusReader : nil,
+                    routeMemory: routeMemory,
+                    targetIdentity: { [targetGuard] in targetGuard.identity }
+                )
                 : nil,
             hooks: hooks.hooks,
             timing: .standard,

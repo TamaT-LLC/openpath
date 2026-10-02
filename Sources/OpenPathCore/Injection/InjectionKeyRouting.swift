@@ -1,15 +1,49 @@
 /// `InjectionKeyRoute.targetProcess` でキーを送るプロセスを決める。
 public enum InjectionKeyDestination {
+    /// 送り先をそのプロセスに決めた理由。debug ログで、キーがどのプロセスへ向かったかを切り分けるために使う（Issue #29）。
+    public enum Reason: String, Equatable, Sendable {
+        /// フォーカス中の要素のプロセスを読めない（読み取りの失敗・不正な値）ため、注入先のアプリへ送る。
+        case focusedElementUnavailable
+        /// フォーカス中の要素が注入先のアプリ自身のもの。注入先のアプリへ送る。
+        case focusedElementInTarget
+        /// フォーカス中の要素が別のプロセス（パネルを描く openAndSavePanelService 等）のもの。そのプロセスへ送る。
+        case focusedElementInOtherProcess
+        /// フォーカス中の要素が openpath 自身のもの。自分へは送らず、注入先のアプリへ送る。
+        case focusedElementInOwnProcess
+    }
+
+    /// 決めた送り先と、その理由。
+    public struct Resolution: Equatable, Sendable {
+        public let processID: Int32
+        public let reason: Reason
+
+        public init(processID: Int32, reason: Reason) {
+            self.processID = processID
+            self.reason = reason
+        }
+    }
+
     /// フォーカス中の要素を持つプロセスを優先し、分からなければ注入先のアプリへ送る。
     /// - Parameters:
     ///   - targetProcessID: 注入の最初に記録した注入先のアプリ。
     ///   - focusedElementProcessID: 注入先のアプリのフォーカス中の要素（AXFocusedUIElement）を持つプロセス。読めなければ nil。
     ///   - ownProcessID: openpath 自身。自分へは送らない。
-    public static func processID(targetProcessID: Int32, focusedElementProcessID: Int32?, ownProcessID: Int32) -> Int32 {
-        guard let focusedElementProcessID, focusedElementProcessID > 0, focusedElementProcessID != ownProcessID else {
-            return targetProcessID
+    public static func resolve(targetProcessID: Int32, focusedElementProcessID: Int32?, ownProcessID: Int32) -> Resolution {
+        guard let focusedElementProcessID, focusedElementProcessID > 0 else {
+            return Resolution(processID: targetProcessID, reason: .focusedElementUnavailable)
         }
-        return focusedElementProcessID
+        if focusedElementProcessID == ownProcessID {
+            return Resolution(processID: targetProcessID, reason: .focusedElementInOwnProcess)
+        }
+        if focusedElementProcessID == targetProcessID {
+            return Resolution(processID: targetProcessID, reason: .focusedElementInTarget)
+        }
+        return Resolution(processID: focusedElementProcessID, reason: .focusedElementInOtherProcess)
+    }
+
+    /// `resolve` の送り先だけを返す。
+    public static func processID(targetProcessID: Int32, focusedElementProcessID: Int32?, ownProcessID: Int32) -> Int32 {
+        resolve(targetProcessID: targetProcessID, focusedElementProcessID: focusedElementProcessID, ownProcessID: ownProcessID).processID
     }
 }
 
@@ -53,20 +87,38 @@ public protocol InjectionFocusReading {
     func focusedElement(cutoff: ScanCutoff) async throws -> InjectionFocusedElement
 }
 
-/// ⌘⇧G を注入先のプロセスへ送っても移動先シートが出なかったときの、もう一度の試み（DSN-001 §3.1）。
+/// ⌘⇧G を注入先のプロセスへ送っても移動先シートが出なかったときの、続く試み（DSN-001 §3.1、`GoToSheetOpener`）。
 ///
 /// 注入先のプロセスへ送ったキーが届かない（パネルを別プロセスが描いていて届かない等）か、アプリが ⌘⇧G を受け取らなかったとみて、
 /// 物理キーボードと同じ経路（`InjectionKeyRoute.systemWide`）で送り直す。
-/// - ファイル一覧にフォーカスがあれば / を送る。/ は他アプリのグローバルホットキーにならないため横取りされない。
-/// - それ以外（入力欄にフォーカスがある・読めない）は ⌘⇧G を送る。他アプリのグローバルホットキーに横取りされることがある（従来の送り方）。
+/// - ②: ファイル一覧にフォーカスがあれば / を送る。/ は他アプリのグローバルホットキーにならないため横取りされない。
+/// - ③: ② を飛ばした（入力欄にフォーカスがある・読めない）か、② でもシートが出なければ ⌘⇧G を送る。
+///   #107 より前の送り方で、macOS 26 の VS Code のリモートのパネルでも届いた（Issue #29）が、他アプリのグローバルホットキーに横取りされることがある。
+/// - ① でシートが出なかった注入先を `routeMemory` に覚え、次の注入では ① を飛ばして ②・③ から始める。
 public struct GoToSheetFallback {
+    /// 注入先のアプリの識別を返す。識別できなければ nil（経路を覚えない）。
+    public typealias TargetIdentityProvider = @MainActor () -> InjectionTargetIdentity?
+
     /// フォーカス中の要素を読む上限。
     public static let focusReadLimit: Duration = .milliseconds(100)
 
     /// フォーカス中の要素の読み取り。nil なら / を使わず、⌘⇧G だけを送り直す。
     public let focusReader: (any InjectionFocusReading)?
+    /// ① でシートが出なかった注入先の記憶。nil なら覚えず、毎回 ① から試す。
+    public let routeMemory: GoToSheetRouteMemory?
+    /// 記憶の鍵にする、注入先のアプリの識別。
+    public let targetIdentity: TargetIdentityProvider
 
-    public init(focusReader: (any InjectionFocusReading)?) {
+    /// - Parameters:
+    ///   - routeMemory: 注入をまたいで同じものを渡す（`PanelInjector` が持つ）。
+    ///   - targetIdentity: 注入の最初に記録した注入先の識別（`InjectionTargetGuard`）。
+    public init(
+        focusReader: (any InjectionFocusReading)?,
+        routeMemory: GoToSheetRouteMemory? = nil,
+        targetIdentity: @escaping TargetIdentityProvider = { nil }
+    ) {
         self.focusReader = focusReader
+        self.routeMemory = routeMemory
+        self.targetIdentity = targetIdentity
     }
 }
