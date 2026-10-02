@@ -20,6 +20,7 @@ public final class InjectionTargetGuard: InjectionTargetGuarding {
     private struct Target {
         let processID: pid_t
         let window: AXUIElement
+        let identity: InjectionTargetIdentity
     }
 
     private let frontmostProcessID: FrontmostProcessID
@@ -43,6 +44,11 @@ public final class InjectionTargetGuard: InjectionTargetGuarding {
         target?.window
     }
 
+    /// 記録した注入先のアプリの識別（bundle id、無ければ pid）。経路の記憶（`GoToSheetRouteMemory`）の鍵にする。
+    public var targetIdentity: InjectionTargetIdentity? {
+        target?.identity
+    }
+
     public func captureTarget(cutoff: ScanCutoff) async throws {
         target = nil
         guard let processID = frontmostProcessID(), processID != ProcessInfo.processInfo.processIdentifier else {
@@ -62,7 +68,12 @@ public final class InjectionTargetGuard: InjectionTargetGuarding {
         if isParentOfGoToSheet {
             Log.debug("注入先: 移動先シートが既に開いていたため、そのシートが付いたパネルを注入先にしました")
         }
-        target = Target(processID: processID, window: window)
+        let bundleIdentifier = NSRunningApplication(processIdentifier: processID)?.bundleIdentifier
+        target = Target(
+            processID: processID,
+            window: window,
+            identity: InjectionTargetIdentity(bundleIdentifier: bundleIdentifier, processID: processID)
+        )
     }
 
     public func currentStatus(cutoff: ScanCutoff) async throws -> InjectionTargetStatus {

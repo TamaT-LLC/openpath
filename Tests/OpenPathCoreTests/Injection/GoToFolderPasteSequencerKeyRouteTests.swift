@@ -43,11 +43,6 @@ struct GoToFolderPasteSequencerKeyRouteTests {
         }
     }
 
-    @Test("代替のシート待ちの既定値は 500ms")
-    func standardFallbackTiming() {
-        #expect(PathInjectionTiming.standard.fallbackSheetWaitLimit == .milliseconds(500))
-    }
-
     @Test("通常は ⌘⇧G・⌘A・⌘V・Return をすべて注入先のプロセスへ送る（他アプリのグローバルホットキーを経由しない）")
     func sendsEveryKeyToTargetProcess() async throws {
         let harness = SequencerHarness(sheetAppearsAt: .milliseconds(150), fallsBackWhenSheetMissing: true)
@@ -65,7 +60,7 @@ struct GoToFolderPasteSequencerKeyRouteTests {
         #expect(harness.focusReader.readTimes.isEmpty)
     }
 
-    @Test("シートが出なければ、最後の確認（550ms）の後にフォーカスを確かめ、ファイル一覧なら / をシステム経由で送り直す。以降のキーもシステム経由")
+    @Test("シートが出なければ、① の最後の確認（150ms）の後にフォーカスを確かめ、ファイル一覧なら / をシステム経由で送り直す。以降のキーもシステム経由")
     func fallsBackToSlashThroughSystemRoute() async throws {
         let harness = Self.makeHarness()
 
@@ -78,19 +73,19 @@ struct GoToFolderPasteSequencerKeyRouteTests {
             Routed(keyStroke: .paste, route: .systemWide),
             Routed(keyStroke: .returnKey, route: .systemWide),
         ])
-        #expect(harness.focusReader.readTimes == [.milliseconds(550)])
+        #expect(harness.focusReader.readTimes == [.milliseconds(150)])
         #expect(Self.keyEntries(harness) == [
             .init(time: .zero, event: .key(.goToFolder)),
-            .init(time: .milliseconds(550), event: .key(.slash)),
-            .init(time: .milliseconds(700), event: .key(.selectAll)),
-            .init(time: .milliseconds(700), event: .key(.paste)),
-            .init(time: .milliseconds(800), event: .key(.returnKey)),
+            .init(time: .milliseconds(150), event: .key(.slash)),
+            .init(time: .milliseconds(300), event: .key(.selectAll)),
+            .init(time: .milliseconds(300), event: .key(.paste)),
+            .init(time: .milliseconds(400), event: .key(.returnKey)),
         ])
-        // 代替を送ってからは 50ms 間隔で確かめ、150ms 後（700ms）に出たシートで続ける
+        // 代替を送ってからは 50ms 間隔で確かめ、150ms 後（300ms）に出たシートで続ける
         let checks = harness.log.entries.filter {
             $0.event == .sheetCheck(isShown: false) || $0.event == .sheetCheck(isShown: true)
         }
-        #expect(checks.suffix(3).map(\.time) == [.milliseconds(600), .milliseconds(650), .milliseconds(700)])
+        #expect(checks.suffix(3).map(\.time) == [.milliseconds(200), .milliseconds(250), .milliseconds(300)])
         #expect(harness.sequencer.lastKeyRoute == .systemWide)
         #expect(harness.pasteboard.contents == .userClipboard)
     }
@@ -127,8 +122,8 @@ struct GoToFolderPasteSequencerKeyRouteTests {
             #expect(harness.log.keyStrokes.prefix(2) == [.goToFolder, .goToFolder])
             #expect(harness.keyboard.routedKeyStrokes[1] == Routed(keyStroke: .goToFolder, route: .systemWide))
         }
-        // 読み取りが期限（550ms + 100ms）を過ぎたら、その時点で打ち切って送る（フェイクの読み取りは 150ms で 1 回の AX 操作）
-        #expect(Self.keyEntries(slow)[1].time == .milliseconds(700))
+        // 読み取りが期限（150ms + 100ms）を過ぎたら、その時点で打ち切って送る（フェイクの読み取りは 150ms で 1 回の AX 操作）
+        #expect(Self.keyEntries(slow)[1].time == .milliseconds(300))
     }
 
     @Test("フォーカスを読まない構成では、⌘⇧G をシステム経由で送り直す")
@@ -141,7 +136,7 @@ struct GoToFolderPasteSequencerKeyRouteTests {
         #expect(harness.focusReader.readTimes.isEmpty)
     }
 
-    @Test("代替でもシートが出なければ、代替の期限（500ms）まで 50ms 間隔で確かめて timeout(waitSheet)。ペーストボードには触れない")
+    @Test("代替（/ と システム経由の ⌘⇧G）でもシートが出なければ、各段の期限まで 50ms 間隔で確かめて timeout(waitSheet)。ペーストボードには触れない")
     func timesOutWhenFallbackAlsoFails() async {
         let harness = Self.makeHarness(opensSheetBy: .returnKey)
 
@@ -150,25 +145,26 @@ struct GoToFolderPasteSequencerKeyRouteTests {
         }
 
         let checkTimes = harness.log.entries.filter { $0.event == .sheetCheck(isShown: false) }.map(\.time)
-        let firstChecks = (1...11).map { Duration.milliseconds(50 * $0) }
-        let fallbackChecks = (0...8).map { Duration.milliseconds(600 + 50 * $0) }
-        #expect(checkTimes == firstChecks + fallbackChecks)
-        #expect(harness.log.keyStrokes == [.goToFolder, .slash])
+        let firstChecks = (1...3).map { Duration.milliseconds(50 * $0) }
+        let slashChecks = (0...4).map { Duration.milliseconds(200 + 50 * $0) }
+        let systemGoToChecks = (0...8).map { Duration.milliseconds(450 + 50 * $0) }
+        #expect(checkTimes == firstChecks + slashChecks + systemGoToChecks)
+        #expect(harness.log.keyStrokes == [.goToFolder, .slash, .goToFolder])
         #expect(harness.pasteboard.writes.isEmpty)
         // 副方式が Return を送るときも、システム経由で送る
         #expect(harness.sequencer.lastKeyRoute == .systemWide)
     }
 
-    @Test("判定の走査が期限（600ms）をまたいで打ち切られたら、期限までに出なかったものとして代替を試す")
+    @Test("判定の走査が期限（200ms）をまたいで打ち切られたら、期限までに出なかったものとして代替を試す")
     func fallsBackWhenScanIsCutOffAtDeadline() async throws {
         let harness = Self.makeHarness()
         harness.sheetDetector.checkLatency = .milliseconds(200)
 
         try await harness.run(path: Self.path)
 
-        // 50ms に開始・250ms に終了 → 300ms に開始・500ms に終了 → 550ms に開始し、600ms の次の AX 操作の前で打ち切る
+        // 50ms に開始し、200ms の次の AX 操作の前で打ち切る
         let slash = try #require(Self.keyEntries(harness).first { $0.event == .key(.slash) })
-        #expect(slash.time == .milliseconds(600))
+        #expect(slash.time == .milliseconds(200))
         #expect(harness.log.keyStrokes == [.goToFolder, .slash, .selectAll, .paste, .returnKey])
     }
 

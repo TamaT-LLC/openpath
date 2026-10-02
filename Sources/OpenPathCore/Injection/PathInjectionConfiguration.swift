@@ -1,6 +1,14 @@
 /// 主方式の待ち時間（DSN-001 §3.1）。
+///
+/// 移動先シートを開く 3 段（① 注入先のプロセスへの ⌘⇧G → ② システム経由の / → ③ システム経由の ⌘⇧G、`GoToSheetOpener`）の
+/// 待ちは、① が届かない注入先（macOS 26 の VS Code のリモートのパネル、Issue #29）でも ③ まで進んで
+/// AppCoordinator の全体タイムアウト（1.5 秒）に収まるよう配分する。各段は最後の確認を期限の 1 間隔前に行うため、
+/// ① は 150ms・② は送ってから 250ms で見切る。② を経て ③ で開く最も遅い経路でも、シートが ③ の 150ms 後に出れば
+/// auto_confirm の「開く」まで 1.5 秒に収まる（PathInjectionFlowKeyRouteTests）。③ の上限まで待つ最悪の場合は収まらないが、
+/// その場合も 1.5 秒で打ち切られるだけで、別のアプリへキーを送ることはない。
 public struct PathInjectionTiming: Equatable, Sendable {
-    /// ⌘⇧G から移動先シートの出現を待つ上限（ステップ 4）。
+    /// 代替（`GoToSheetFallback`）の無い構成で、⌘⇧G から移動先シートの出現を待つ上限（ステップ 4）。
+    /// 基準の走査（ステップ 2）の上限にも使う。
     public let sheetWaitLimit: Duration
     /// 移動先シートの出現を確かめる間隔（ステップ 4）。
     public let sheetPollInterval: Duration
@@ -8,30 +16,41 @@ public struct PathInjectionTiming: Equatable, Sendable {
     public let pasteSettleDelay: Duration
     /// Return からペーストボードを戻すまでの時間（ステップ 9、ARCH-001 §7）。
     public let restoreDelay: Duration
-    /// 注入先のプロセスへ送った ⌘⇧G でシートが出ず、代替（`GoToSheetFallback`）で送り直してから、シートの出現を待つ上限。
-    /// AppCoordinator の全体タイムアウト（1.5 秒）のうち、最初のシート待ち（600ms）の残りに収めるため短くする。
-    public let fallbackSheetWaitLimit: Duration
+    /// ①: 代替がある構成で、注入先のプロセスへ送った ⌘⇧G からシートの出現を待つ上限。
+    /// 届かない注入先で ②・③ に進むまでの時間を短くするため、`sheetWaitLimit` より短くする。
+    public let targetProcessSheetWaitLimit: Duration
+    /// ②: システム経由で送った / からシートの出現を待つ上限。
+    public let slashSheetWaitLimit: Duration
+    /// ③: システム経由で送った ⌘⇧G からシートの出現を待つ上限。#107 より前に VS Code で移動まで成功した経路のため、最も長く待つ。
+    public let systemGoToSheetWaitLimit: Duration
 
     public init(
         sheetWaitLimit: Duration,
         sheetPollInterval: Duration,
         pasteSettleDelay: Duration,
         restoreDelay: Duration,
-        fallbackSheetWaitLimit: Duration = .milliseconds(500)
+        targetProcessSheetWaitLimit: Duration = Self.defaultTargetProcessSheetWaitLimit,
+        slashSheetWaitLimit: Duration = Self.defaultSlashSheetWaitLimit,
+        systemGoToSheetWaitLimit: Duration = Self.defaultSystemGoToSheetWaitLimit
     ) {
         self.sheetWaitLimit = sheetWaitLimit
         self.sheetPollInterval = sheetPollInterval
         self.pasteSettleDelay = pasteSettleDelay
         self.restoreDelay = restoreDelay
-        self.fallbackSheetWaitLimit = fallbackSheetWaitLimit
+        self.targetProcessSheetWaitLimit = targetProcessSheetWaitLimit
+        self.slashSheetWaitLimit = slashSheetWaitLimit
+        self.systemGoToSheetWaitLimit = systemGoToSheetWaitLimit
     }
+
+    public static let defaultTargetProcessSheetWaitLimit: Duration = .milliseconds(200)
+    public static let defaultSlashSheetWaitLimit: Duration = .milliseconds(300)
+    public static let defaultSystemGoToSheetWaitLimit: Duration = .milliseconds(500)
 
     public static let standard = PathInjectionTiming(
         sheetWaitLimit: .milliseconds(600),
         sheetPollInterval: .milliseconds(50),
         pasteSettleDelay: .milliseconds(100),
-        restoreDelay: .milliseconds(200),
-        fallbackSheetWaitLimit: .milliseconds(500)
+        restoreDelay: .milliseconds(200)
     )
 }
 

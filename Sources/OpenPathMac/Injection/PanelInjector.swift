@@ -9,7 +9,8 @@ import OpenPathCore
 /// ここでは NSPasteboard / CGEvent / AX / NSWorkspace のアダプタを組み立てて渡すだけにする。
 /// - パスの正規化（DSN-001 §4）
 /// - 主方式（⌘⇧G + ペースト、§3.1）と、シートが出ない・貼り付けられない場合の副方式（AX 直接セット、§3.2）
-/// - キーは注入先のプロセスへ直接送り（`KeyboardEventPoster`）、シートが出なければ / かシステム経由の ⌘⇧G で送り直す（`GoToSheetFallback`）
+/// - キーは注入先のプロセスへ直接送り（`KeyboardEventPoster`）、シートが出なければ / とシステム経由の ⌘⇧G で送り直す（`GoToSheetFallback`）。
+///   注入先のプロセスへの ⌘⇧G でシートが出なかった注入先は、注入をまたいで覚えておき（`GoToSheetRouteMemory`）、次はシステム経由から始める
 /// - キー入力（⌘A / ⌘V / Return）の前の、移動先シートの入力欄のフォーカスの待ち合わせ（`GoToFieldFocusWait`、Issue #74）
 /// - 確定（Return・「移動」）の前の、移動先シートの入力欄と候補の選択の確認（`GoToSheetSubmitGate`、Issue #74）
 /// - auto_confirm / Cmd+Enter の「開く」の押下（§3.1 ステップ 8）
@@ -24,6 +25,8 @@ public final class PanelInjector: PathInjecting {
 
     private let flow: PathInjectionFlow
     private let targetWindow: InjectionTargetWindow
+    /// 注入をまたいで保持する（注入ごとに作り直すと、① の待ちを毎回払うことになる）。
+    private let routeMemory = GoToSheetRouteMemory()
 
     /// - Parameters:
     ///   - prepareForKeyEvents: キー操作を送る前に呼ぶ。パレットにキーウィンドウを手放させてから戻ること。
@@ -58,7 +61,11 @@ public final class PanelInjector: PathInjecting {
                 targetGuard: targetGuard,
                 fieldFocus: fieldFocus,
                 submitGate: submitGate,
-                sheetFallback: GoToSheetFallback(focusReader: InjectionFocusReader(targetProcessID: targetProcessID)),
+                sheetFallback: GoToSheetFallback(
+                    focusReader: InjectionFocusReader(targetProcessID: targetProcessID),
+                    routeMemory: routeMemory,
+                    targetIdentity: { [targetGuard] in targetGuard.targetIdentity }
+                ),
                 hooks: PathInjectionHooks(prepareForKeyEvents: prepareForKeyEvents, didSubmitGoToSheet: autoConfirm.hook),
                 clock: clock
             ),

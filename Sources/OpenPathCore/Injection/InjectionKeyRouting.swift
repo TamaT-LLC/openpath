@@ -87,20 +87,38 @@ public protocol InjectionFocusReading {
     func focusedElement(cutoff: ScanCutoff) async throws -> InjectionFocusedElement
 }
 
-/// ⌘⇧G を注入先のプロセスへ送っても移動先シートが出なかったときの、もう一度の試み（DSN-001 §3.1）。
+/// ⌘⇧G を注入先のプロセスへ送っても移動先シートが出なかったときの、続く試み（DSN-001 §3.1、`GoToSheetOpener`）。
 ///
 /// 注入先のプロセスへ送ったキーが届かない（パネルを別プロセスが描いていて届かない等）か、アプリが ⌘⇧G を受け取らなかったとみて、
 /// 物理キーボードと同じ経路（`InjectionKeyRoute.systemWide`）で送り直す。
-/// - ファイル一覧にフォーカスがあれば / を送る。/ は他アプリのグローバルホットキーにならないため横取りされない。
-/// - それ以外（入力欄にフォーカスがある・読めない）は ⌘⇧G を送る。他アプリのグローバルホットキーに横取りされることがある（従来の送り方）。
+/// - ②: ファイル一覧にフォーカスがあれば / を送る。/ は他アプリのグローバルホットキーにならないため横取りされない。
+/// - ③: ② を飛ばした（入力欄にフォーカスがある・読めない）か、② でもシートが出なければ ⌘⇧G を送る。
+///   #107 より前の送り方で、macOS 26 の VS Code のリモートのパネルでも届いた（Issue #29）が、他アプリのグローバルホットキーに横取りされることがある。
+/// - ① でシートが出なかった注入先を `routeMemory` に覚え、次の注入では ① を飛ばして ②・③ から始める。
 public struct GoToSheetFallback {
+    /// 注入先のアプリの識別を返す。識別できなければ nil（経路を覚えない）。
+    public typealias TargetIdentityProvider = @MainActor () -> InjectionTargetIdentity?
+
     /// フォーカス中の要素を読む上限。
     public static let focusReadLimit: Duration = .milliseconds(100)
 
     /// フォーカス中の要素の読み取り。nil なら / を使わず、⌘⇧G だけを送り直す。
     public let focusReader: (any InjectionFocusReading)?
+    /// ① でシートが出なかった注入先の記憶。nil なら覚えず、毎回 ① から試す。
+    public let routeMemory: GoToSheetRouteMemory?
+    /// 記憶の鍵にする、注入先のアプリの識別。
+    public let targetIdentity: TargetIdentityProvider
 
-    public init(focusReader: (any InjectionFocusReading)?) {
+    /// - Parameters:
+    ///   - routeMemory: 注入をまたいで同じものを渡す（`PanelInjector` が持つ）。
+    ///   - targetIdentity: 注入の最初に記録した注入先の識別（`InjectionTargetGuard`）。
+    public init(
+        focusReader: (any InjectionFocusReading)?,
+        routeMemory: GoToSheetRouteMemory? = nil,
+        targetIdentity: @escaping TargetIdentityProvider = { nil }
+    ) {
         self.focusReader = focusReader
+        self.routeMemory = routeMemory
+        self.targetIdentity = targetIdentity
     }
 }
