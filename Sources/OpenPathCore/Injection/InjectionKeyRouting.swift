@@ -1,15 +1,49 @@
 /// `InjectionKeyRoute.targetProcess` でキーを送るプロセスを決める。
 public enum InjectionKeyDestination {
+    /// 送り先をそのプロセスに決めた理由。debug ログで、キーがどのプロセスへ向かったかを切り分けるために使う（Issue #29）。
+    public enum Reason: String, Equatable, Sendable {
+        /// フォーカス中の要素のプロセスを読めない（読み取りの失敗・不正な値）ため、注入先のアプリへ送る。
+        case focusedElementUnavailable
+        /// フォーカス中の要素が注入先のアプリ自身のもの。注入先のアプリへ送る。
+        case focusedElementInTarget
+        /// フォーカス中の要素が別のプロセス（パネルを描く openAndSavePanelService 等）のもの。そのプロセスへ送る。
+        case focusedElementInOtherProcess
+        /// フォーカス中の要素が openpath 自身のもの。自分へは送らず、注入先のアプリへ送る。
+        case focusedElementInOwnProcess
+    }
+
+    /// 決めた送り先と、その理由。
+    public struct Resolution: Equatable, Sendable {
+        public let processID: Int32
+        public let reason: Reason
+
+        public init(processID: Int32, reason: Reason) {
+            self.processID = processID
+            self.reason = reason
+        }
+    }
+
     /// フォーカス中の要素を持つプロセスを優先し、分からなければ注入先のアプリへ送る。
     /// - Parameters:
     ///   - targetProcessID: 注入の最初に記録した注入先のアプリ。
     ///   - focusedElementProcessID: 注入先のアプリのフォーカス中の要素（AXFocusedUIElement）を持つプロセス。読めなければ nil。
     ///   - ownProcessID: openpath 自身。自分へは送らない。
-    public static func processID(targetProcessID: Int32, focusedElementProcessID: Int32?, ownProcessID: Int32) -> Int32 {
-        guard let focusedElementProcessID, focusedElementProcessID > 0, focusedElementProcessID != ownProcessID else {
-            return targetProcessID
+    public static func resolve(targetProcessID: Int32, focusedElementProcessID: Int32?, ownProcessID: Int32) -> Resolution {
+        guard let focusedElementProcessID, focusedElementProcessID > 0 else {
+            return Resolution(processID: targetProcessID, reason: .focusedElementUnavailable)
         }
-        return focusedElementProcessID
+        if focusedElementProcessID == ownProcessID {
+            return Resolution(processID: targetProcessID, reason: .focusedElementInOwnProcess)
+        }
+        if focusedElementProcessID == targetProcessID {
+            return Resolution(processID: targetProcessID, reason: .focusedElementInTarget)
+        }
+        return Resolution(processID: focusedElementProcessID, reason: .focusedElementInOtherProcess)
+    }
+
+    /// `resolve` の送り先だけを返す。
+    public static func processID(targetProcessID: Int32, focusedElementProcessID: Int32?, ownProcessID: Int32) -> Int32 {
+        resolve(targetProcessID: targetProcessID, focusedElementProcessID: focusedElementProcessID, ownProcessID: ownProcessID).processID
     }
 }
 

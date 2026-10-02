@@ -58,19 +58,28 @@ public final class KeyboardEventPoster: KeyStrokePosting {
     }
 
     /// 送り先のプロセス。注入先のアプリのフォーカス中の要素を持つプロセスを優先し、読めなければ注入先のアプリとする。
+    /// debug ログが有効なら、送り先の切り分けのためにフォーカス中の要素のロールとサブロールも読む（Issue #29）。
     private func destinationProcessID(for keyStroke: InjectionKeyStroke) async throws -> Destination {
         guard let target = targetProcessID() else {
             throw KeyEventPostingError(keyStroke: keyStroke)
         }
-        let focusedElementOwner = await onAXQueue { () -> pid_t? in
-            FocusedElementAX.focusedElement(ofProcess: target).flatMap(FocusedElementAX.processID(of:))
+        let readsRoles = Log.isDebugEnabled
+        let focused = await onAXQueue { () -> FocusedElementSummary in
+            guard let element = FocusedElementAX.focusedElement(ofProcess: target) else {
+                return FocusedElementSummary(processID: nil, role: nil, subrole: nil)
+            }
+            return FocusedElementSummary(
+                processID: FocusedElementAX.processID(of: element),
+                role: readsRoles ? element.role : nil,
+                subrole: readsRoles ? element.subrole : nil
+            )
         }
-        let processID = InjectionKeyDestination.processID(
+        let resolution = InjectionKeyDestination.resolve(
             targetProcessID: target,
-            focusedElementProcessID: focusedElementOwner,
+            focusedElementProcessID: focused.processID,
             ownProcessID: getpid()
         )
-        return Destination(processID: processID, targetProcessID: target)
+        return Destination(resolution: resolution, targetProcessID: target, focused: focused)
     }
 
     private static func eventFlags(for modifiers: InjectionKeyModifiers) -> CGEventFlags {
@@ -84,19 +93,52 @@ public final class KeyboardEventPoster: KeyStrokePosting {
         return flags
     }
 
-    private struct Destination {
-        let processID: pid_t
-        let targetProcessID: pid_t
+    /// フォーカス中の要素の、送り先の決定と診断に使う属性。ロールとサブロールは debug ログが有効なときだけ読む。
+    private struct FocusedElementSummary {
+        let processID: pid_t?
+        let role: String?
+        let subrole: String?
     }
 
+    private struct Destination {
+        let resolution: InjectionKeyDestination.Resolution
+        let targetProcessID: pid_t
+        let focused: FocusedElementSummary
+
+        var processID: pid_t {
+            resolution.processID
+        }
+    }
+
+    /// 送り先の pid がどう決まったか（フォーカス中の要素の pid を読めたか、注入先と同じか、別のプロセスか）と、
+    /// フォーカス中の要素のロールを区別して残す（Issue #29: VS Code のリモートのパネルで ⌘⇧G が届かなかった切り分け用）。
     private static func describe(_ destination: Destination?) -> String {
         guard let destination else {
             return "経路: システム（HID）"
         }
-        guard destination.processID != destination.targetProcessID else {
-            return "経路: 注入先のプロセス（pid \(destination.processID)）"
+        let processID = destination.processID
+        let owner: String
+        switch destination.resolution.reason {
+        case .focusedElementInOtherProcess:
+            owner = "フォーカス中の要素の pid \(processID)（別のプロセス）、注入先のアプリは pid \(destination.targetProcessID)"
+        case .focusedElementInTarget:
+            owner = "pid \(processID)、フォーカス中の要素の pid は注入先のアプリと同じ"
+        case .focusedElementUnavailable:
+            owner = "pid \(processID)、フォーカス中の要素の pid を読めないため注入先のアプリ"
+        case .focusedElementInOwnProcess:
+            owner = "pid \(processID)、フォーカス中の要素が openpath 自身のため注入先のアプリ"
         }
-        return "経路: 注入先のプロセス（フォーカス中の要素の pid \(destination.processID)、注入先のアプリは pid \(destination.targetProcessID)）"
+        return "経路: 注入先のプロセス（\(owner)、フォーカス中の要素: \(describe(destination.focused))）"
+    }
+
+    private static func describe(_ focused: FocusedElementSummary) -> String {
+        guard let role = focused.role else {
+            return "ロールを読めない"
+        }
+        guard let subrole = focused.subrole else {
+            return role
+        }
+        return "\(role) / \(subrole)"
     }
 
     private static func describe(_ key: InjectionResolvedKey) -> String {

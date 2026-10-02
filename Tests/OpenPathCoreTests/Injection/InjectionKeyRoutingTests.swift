@@ -41,6 +41,36 @@ struct InjectionKeyRoutingTests {
         #expect(destination == Self.target)
     }
 
+    @Test("送り先を決めた理由を、フォーカス中の要素のプロセスの読み取り結果ごとに区別する（Issue #29 の切り分け用）")
+    func resolvesDestinationWithReason() {
+        let service = InjectionKeyDestination.resolve(
+            targetProcessID: Self.target, focusedElementProcessID: Self.panelService, ownProcessID: Self.ownProcess
+        )
+        let sameAsTarget = InjectionKeyDestination.resolve(
+            targetProcessID: Self.target, focusedElementProcessID: Self.target, ownProcessID: Self.ownProcess
+        )
+        let unreadable = InjectionKeyDestination.resolve(
+            targetProcessID: Self.target, focusedElementProcessID: nil, ownProcessID: Self.ownProcess
+        )
+        let own = InjectionKeyDestination.resolve(
+            targetProcessID: Self.target, focusedElementProcessID: Self.ownProcess, ownProcessID: Self.ownProcess
+        )
+
+        #expect(service == .init(processID: Self.panelService, reason: .focusedElementInOtherProcess))
+        #expect(sameAsTarget == .init(processID: Self.target, reason: .focusedElementInTarget))
+        #expect(unreadable == .init(processID: Self.target, reason: .focusedElementUnavailable))
+        #expect(own == .init(processID: Self.target, reason: .focusedElementInOwnProcess))
+    }
+
+    @Test("フォーカス中の要素のプロセスが不正（0 以下）なら、読めなかったものとして注入先へ送る", arguments: [0, -1] as [Int32])
+    func treatsInvalidProcessIDAsUnavailable(focusedElementProcessID: Int32) {
+        let resolution = InjectionKeyDestination.resolve(
+            targetProcessID: Self.target, focusedElementProcessID: focusedElementProcessID, ownProcessID: Self.ownProcess
+        )
+
+        #expect(resolution == .init(processID: Self.target, reason: .focusedElementUnavailable))
+    }
+
     @Test(
         "ファイル一覧（カラム表示の列・アイコン表示の AXList、リスト表示の AXOutline・AXTable、ブラウザ）にフォーカスがあれば / を送ってよい",
         arguments: ["AXList", "AXOutline", "AXTable", "AXBrowser"]
