@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Release gates run against isolated Git fixtures and a mocked GitHub CLI."""
+"""Release gates run against isolated Git fixtures and a mocked GitHub CLI.
+
+It also checks the arguments scripts/test.sh passes to `swift test`, because the release workflow runs that script.
+"""
 import hashlib
 import importlib.util
 import json
@@ -202,6 +205,78 @@ class CleanupTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1 if failures else 0, result.stderr)
                 if 'rm' not in failures:
                     self.assertFalse(credentials.exists())
+
+
+class TestScriptTests(unittest.TestCase):
+    """scripts/test.sh が CLT の構成ごとに `swift test` へ渡す引数を、swift をスタブに差し替えて確かめる。
+
+    CLT のパスは OPENPATH_TEST_CLT_DIR で一時ディレクトリに差し替えるため、開発機の CLT には触れない。
+    macOS 標準の bash 3.2 でも set -u の下で動くことを確かめるため、/bin/bash で実行する。
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = pathlib.Path(self.temp.name)
+        self.clt = self.root / 'CommandLineTools'
+        self.frameworks = self.clt / 'Library/Developer/Frameworks'
+        self.usr_lib = self.clt / 'Library/Developer/usr/lib'
+        self.log = self.root / 'swift-args'
+        commands = self.root / 'bin'
+        commands.mkdir()
+        stub = commands / 'swift'
+        stub.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$ARGS_LOG"\n')
+        stub.chmod(0o755)
+        self.commands = commands
+
+    def install_testing_framework(self):
+        (self.frameworks / 'Testing.framework').mkdir(parents=True)
+
+    def install_testing_interop(self):
+        self.usr_lib.mkdir(parents=True)
+        (self.usr_lib / 'lib_TestingInterop.dylib').touch()
+
+    def swift_args(self, *args, developer_dir=None):
+        env = dict(os.environ, OPENPATH_TEST_CLT_DIR=str(self.clt), ARGS_LOG=str(self.log),
+                   DEVELOPER_DIR=str(self.clt) if developer_dir is None else developer_dir,
+                   PATH=str(self.commands) + ':' + os.environ['PATH'])
+        result = subprocess.run(['/bin/bash', str(SCRIPTS / 'test.sh'), *args], env=env,
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return self.log.read_text().splitlines()
+
+    def clt_args(self):
+        return ['test',
+                '-Xswiftc', '-F', '-Xswiftc', str(self.frameworks),
+                '-Xlinker', '-rpath', '-Xlinker', str(self.frameworks),
+                '-Xswiftc', '-Xfrontend', '-Xswiftc', '-disable-cross-import-overlays']
+
+    def test_clt_without_testing_interop_keeps_existing_arguments(self):
+        self.install_testing_framework()
+        self.assertEqual(self.swift_args(), self.clt_args())
+
+    def test_clt_with_testing_interop_adds_its_directory_to_rpath(self):
+        self.install_testing_framework()
+        self.install_testing_interop()
+        self.assertEqual(self.swift_args(), self.clt_args() + ['-Xlinker', '-rpath', '-Xlinker', str(self.usr_lib)])
+
+    def test_user_arguments_follow_the_added_ones(self):
+        self.install_testing_framework()
+        self.install_testing_interop()
+        args = self.swift_args('--filter', 'AppInfo')
+        self.assertEqual(args[-2:], ['--filter', 'AppInfo'])
+        self.assertIn(str(self.usr_lib), args)
+
+    def test_interop_directory_is_ignored_without_testing_framework(self):
+        self.install_testing_interop()
+        self.assertEqual(self.swift_args('--filter', 'AppInfo'), ['test', '--filter', 'AppInfo'])
+
+    def test_xcode_toolchain_passes_arguments_through_unchanged(self):
+        self.install_testing_framework()
+        self.install_testing_interop()
+        xcode = '/Applications/Xcode.app/Contents/Developer'
+        self.assertEqual(self.swift_args(developer_dir=xcode), ['test'])
+        self.assertEqual(self.swift_args('--filter', 'AppInfo', developer_dir=xcode), ['test', '--filter', 'AppInfo'])
 
 
 if __name__ == '__main__':
