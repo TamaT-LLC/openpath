@@ -3,16 +3,19 @@
 /// 1. パスを正規化する（§4）
 /// 2. 最前面アプリとそのウィンドウを注入先として記録する（以降のキー操作・AX 操作の直前ごとに確かめる）
 /// 3. 主方式（⌘⇧G + ペースト、§3.1）
-/// 4. 主方式が移動先シートを見つけられない（waitSheet）か、貼り付けの操作に失敗した（waitPaste）ら、副方式（AX 直接セット、§3.2）
+/// 4. 主方式が移動先シートを見つけられない（waitSheet）か、貼り付けの操作に失敗した（waitPaste）か、
+///    Return を送っても移動先シートが閉じなかった（waitSheetClose、Issue #95）ら、副方式（AX 直接セット、§3.2）
 ///
 /// 前の注入が副方式まで終えるまで、次の注入は始めない。
 /// autoConfirm で「開く」を押す前にパネルが消えたら `.panelGoneBeforeConfirm` を投げ、押した後の消滅（成功）と区別する。
 /// 注入するパス（正規化の前後）・使った方式・結果を debug ログに残す（Issue #74 の切り分け用。パスは `Log.debugPath`）。
 @MainActor
 public final class PathInjectionFlow {
-    /// 副方式へ切り替える主方式の失敗。どちらもシートの確定（Return）を送る前の失敗で、パネルはまだ移動していない。
-    /// ペーストボードも、waitSheet では触れておらず、waitPaste では主方式が戻し終えている。
-    static let fallbackSteps: Set<InjectionStep> = [.waitSheet, .waitPaste]
+    /// 副方式へ切り替える主方式の失敗。waitSheet と waitPaste はシートの確定（Return）を送る前の失敗で、パネルはまだ移動していない。
+    /// waitSheetClose は Return を送ったがシートが閉じなかった・閉じたことを確かめられなかった失敗で（Issue #95）、
+    /// シートが残っていればパネルは移動していない（副方式は、シートが見つからなければ確定し直さない）。
+    /// ペーストボードも、waitSheet では触れておらず、waitPaste と waitSheetClose では主方式が戻し終えている。
+    static let fallbackSteps: Set<InjectionStep> = [.waitSheet, .waitPaste, .waitSheetClose]
 
     private let targetGuard: any InjectionTargetGuarding
     private let primary: GoToFolderPasteSequencer

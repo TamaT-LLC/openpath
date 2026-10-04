@@ -94,4 +94,37 @@ public final class InjectionTargetGuard: InjectionTargetGuarding {
         guard frontmostProcessID() == target.processID else { return .notFrontmost }
         return .available
     }
+
+    /// 注入先のアプリのフォーカス中のウィンドウが、記録したウィンドウに付いた移動先シートか（Issue #95）。フォーカス中のウィンドウが無ければ false。
+    /// 移動先シートがキーウィンドウなら、フォーカス中のウィンドウは移動先シートそのものになる（macOS 27 の自プロセスのパネルで確認。
+    /// 注入先の記録（`captureTarget`）と同じ前提。リモートのパネルでは実機で確かめる）。
+    /// 記録したウィンドウとの対応は注入先の確認（`currentStatus` の `hasFocus`）と同じ `InjectionWindowRelation` で見るため、
+    /// 注入先の確認が通る環境で、記録したウィンドウに付いた移動先シートを弾くことはない。
+    /// キーを送る直前の最後の確認として使うため、AX の往復の後に注入先のアプリがまだ最前面かも確かめ直す。
+    public func isGoToSheetFocused(cutoff: ScanCutoff) async throws -> Bool {
+        guard let target, frontmostProcessID() == target.processID else { return false }
+        let isGoToSheet = try await onAXQueue { () throws -> Bool in
+            try cutoff.throwIfReached()
+            let focusedWindow: AXUIElement
+            do {
+                focusedWindow = try GoToSheetAX.focusedWindow(ofProcess: target.processID)
+            } catch InjectionError.panelGone {
+                return false
+            }
+            // 同じアプリの別のパネルに付いた移動先シートへ送らないよう、注入先の確認（hasFocus）と同じ対応づけで、
+            // 記録したウィンドウそのものか、それに付いたシートであることも確かめる（PR #118 のレビュー）
+            return try GoToSheetIdentity.isGoToSheet(
+                focusedWindow,
+                attachedTo: target.window,
+                cutoff: cutoff,
+                isSameElement: { CFEqual($0, $1) },
+                parent: { element -> AXUIElement? in element.attr(kAXParentAttribute) },
+                role: { $0.role },
+                identifier: { $0.attr(kAXIdentifierAttribute) },
+                children: PanelControlAX.children(of:)
+            )
+        }
+        // AX の往復（最大でメッセージングタイムアウトまで）の間に別のアプリへ切り替わっていれば、Return はそのアプリに届く
+        return isGoToSheet && frontmostProcessID() == target.processID
+    }
 }

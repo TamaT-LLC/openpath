@@ -23,6 +23,11 @@ final class FlowHarness {
     /// ⌘⇧G でシートが出なかったときの代替が読む、フォーカス中の要素（fallsBackWhenSheetMissing のときだけ使う）。
     let focusReader: FocusReaderFake
     let flow: PathInjectionFlow
+    /// Return が届いて移動先シートを閉じるか（送った経路ごと）。既定はどの経路でも閉じる（Issue #95）。
+    /// 「移動」の押下は常に閉じる。
+    var returnClosesSheet: (InjectionKeyRoute) -> Bool = { _ in true }
+    /// Return・「移動」の押下から移動先シートが閉じる（入力欄が消える）までの時間。
+    var sheetCloseDelay: Duration = .zero
 
     /// - Parameters:
     ///   - sheetAppearsAt: この経過時間以降の判定で移動先シートが出たことにする。nil なら出ない（副方式へ）。
@@ -63,15 +68,17 @@ final class FlowHarness {
         }
 
         let autoConfirm = OpenButtonAutoConfirm(locator: openButtonLocator, targetGuard: targetGuard, clock: clock)
-        let didSubmit: PathInjectionHooks.DidSubmitGoToSheet = { isAutoConfirm in
+        let didSubmit: PathInjectionHooks.DidSubmitGoToSheet = { isAutoConfirm, elapsedSinceSubmit in
             log.record(.didSubmitGoToSheet(autoConfirm: isAutoConfirm))
-            try await autoConfirm.confirm(autoConfirm: isAutoConfirm)
+            try await autoConfirm.confirm(autoConfirm: isAutoConfirm, elapsedSinceSubmit: elapsedSinceSubmit)
         }
         let prepareForKeyEvents: PathInjectionHooks.PrepareForKeyEvents = { log.record(.prepareForKeyEvents) }
         let normalizer = InjectionPathNormalizer(homeDirectory: Self.homeDirectory)
         // PanelInjector と同じく、主方式と副方式で同じ待ち方を使う（主方式は探したことをログに残さない探し方で探す）
         let primaryFieldFocus = GoToFieldFocusWait(locator: submitCheckLocator, clock: clock)
         let secondaryFieldFocus = GoToFieldFocusWait(locator: goToFieldLocator, clock: clock)
+        // シートが閉じたかの確認は、副方式の探し方と区別するため、探したことをログに残さない探し方で探す
+        let sheetCloseWait = GoToSheetCloseWait(locator: submitCheckLocator, clock: clock)
         flow = PathInjectionFlow(
             targetGuard: targetGuard,
             primary: GoToFolderPasteSequencer(
@@ -81,6 +88,7 @@ final class FlowHarness {
                 targetGuard: targetGuard,
                 fieldFocus: primaryFieldFocus,
                 submitGate: GoToSheetSubmitGate(locator: submitCheckLocator, normalizer: normalizer, clock: clock),
+                sheetCloseWait: sheetCloseWait,
                 sheetFallback: fallsBackWhenSheetMissing
                     ? GoToSheetFallback(
                         focusReader: focusReader,
@@ -98,12 +106,45 @@ final class FlowHarness {
                 prepareForKeyEvents: prepareForKeyEvents,
                 submitGate: GoToSheetSubmitGate(locator: goToFieldLocator, normalizer: normalizer, clock: clock),
                 fieldFocus: secondaryFieldFocus,
+                sheetCloseWait: sheetCloseWait,
                 didSubmit: didSubmit,
                 clock: clock
             ),
             normalizer: normalizer,
             clock: clock
         )
+        keyboard.onPostForSheet = { [unowned self] keyStroke, route in
+            switch keyStroke {
+            case .returnKey where returnClosesSheet(route):
+                closeGoToSheet(after: sheetCloseDelay)
+            case .goToFolder, .slash:
+                // 次の注入の ⌘⇧G・/ で、閉じた移動先シートが開き直す
+                reopenGoToSheet()
+            default:
+                break
+            }
+        }
+        goButton.onActivate = { [unowned self] in
+            closeGoToSheet(after: sheetCloseDelay)
+        }
+    }
+
+    /// 移動先シートを閉じる（delay 後に入力欄が消え、主方式・副方式のどちらから探しても見つからなくなる）。
+    func closeGoToSheet(after delay: Duration = .zero) {
+        let closesAt = clock.elapsed + delay
+        let clock = clock
+        let isClosed: @MainActor () -> Bool = { clock.elapsed >= closesAt }
+        let field = goToField
+        goToField.isGoneProvider = isClosed
+        goToFieldLocator.fieldProvider = { isClosed() ? nil : field }
+        submitCheckLocator.fieldProvider = { isClosed() ? nil : field }
+    }
+
+    /// 閉じた移動先シートを開き直す。
+    func reopenGoToSheet() {
+        goToField.isGoneProvider = nil
+        goToFieldLocator.fieldProvider = nil
+        submitCheckLocator.fieldProvider = nil
     }
 
     func run(path: String, autoConfirm: Bool = false) async throws {

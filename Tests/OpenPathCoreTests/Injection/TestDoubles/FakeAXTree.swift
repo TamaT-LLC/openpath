@@ -51,6 +51,19 @@ struct FakeAXElement: Equatable, Sendable {
         ])
     }
 
+    /// 子孫のうち、element（名前で見分ける）を直下の子に持つ要素（AXParent）。見つからなければ nil。
+    func parent(of element: FakeAXElement) -> FakeAXElement? {
+        if children.contains(where: { $0.name == element.name }) {
+            return self
+        }
+        for child in children {
+            if let found = child.parent(of: element) {
+                return found
+            }
+        }
+        return nil
+    }
+
     /// 自身と子孫のうち、名前が name の最初の要素。
     func descendant(named name: String) -> FakeAXElement? {
         if self.name == name {
@@ -220,6 +233,26 @@ enum FakeAXSearch {
                 counter.record()
                 return container.defaultButtonName.flatMap(container.descendant(named:))
             },
+            children: { counter.record(); return $0.children }
+        )
+    }
+
+    /// application（アプリの AX ツリー）の中で、focusedWindow が targetWindow に付いた移動先シートか。要素は名前で見分ける。
+    static func isGoToSheet(
+        _ focusedWindow: FakeAXElement,
+        attachedTo targetWindow: FakeAXElement,
+        in application: FakeAXElement,
+        counter: AXOperationCounter = AXOperationCounter(),
+        cutoff: ScanCutoff = .never
+    ) throws -> Bool {
+        try GoToSheetIdentity.isGoToSheet(
+            focusedWindow,
+            attachedTo: targetWindow,
+            cutoff: cutoff,
+            isSameElement: { $0.name == $1.name },
+            parent: { counter.record(); return application.parent(of: $0) },
+            role: { counter.record(); return $0.role },
+            identifier: { counter.record(); return $0.identifier },
             children: { counter.record(); return $0.children }
         )
     }

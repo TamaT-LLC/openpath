@@ -46,6 +46,9 @@ final class KeyboardSpy: KeyStrokePosting {
     var onRoutedPost: ((InjectionKeyStroke, InjectionKeyRoute) -> Void)?
     /// 送る準備（送り先の決定）の中で呼ばれる（送り先を決めている間の切り替わり・キャンセルを再現するため）。
     var onPrepare: ((InjectionKeyStroke) -> Void)?
+    /// 送出を記録した直後に、経路と一緒に呼ばれる。ハーネスが移動先シートの開閉（Return で閉じ、⌘⇧G で開き直す）を
+    /// 再現するために使う（Issue #95）。テストが `onPost` / `onRoutedPost` を差し替えても、この振る舞いが残るよう分けて持つ。
+    var onPostForSheet: ((InjectionKeyStroke, InjectionKeyRoute) -> Void)?
     /// 送ったキー操作と経路（発生順）。共有のログには経路を残さないため、こちらで確かめる。
     private(set) var routedKeyStrokes: [RoutedKeyStroke] = []
 
@@ -62,6 +65,7 @@ final class KeyboardSpy: KeyStrokePosting {
             routedKeyStrokes.append(RoutedKeyStroke(keyStroke: keyStroke, route: route))
             onPost?(keyStroke)
             onRoutedPost?(keyStroke, route)
+            onPostForSheet?(keyStroke, route)
         }
     }
 }
@@ -206,6 +210,8 @@ final class HooksSpy {
     var submitSuspension: Suspension?
     /// didSubmitGoToSheet の中で呼ばれる（注入中の外部の書き込みを再現するため）。
     var onSubmit: (() -> Void)?
+    /// didSubmitGoToSheet に渡された、確定からの経過時間（呼ばれた順）。
+    private(set) var elapsedSinceSubmit: [Duration] = []
 
     init(clock: VirtualClock, log: InjectionEventLog) {
         self.clock = clock
@@ -217,7 +223,8 @@ final class HooksSpy {
             prepareForKeyEvents: { [self] in
                 log.record(.prepareForKeyEvents)
             },
-            didSubmitGoToSheet: { [self] autoConfirm in
+            didSubmitGoToSheet: { [self] autoConfirm, elapsed in
+                elapsedSinceSubmit.append(elapsed)
                 try await didSubmit(autoConfirm: autoConfirm)
             }
         )

@@ -18,6 +18,8 @@ final class InjectionEventLog {
         case captureTarget
         /// 注入先がまだ有効か確かめた（TargetGuardFake.logsChecks のときだけ記録する）
         case targetCheck
+        /// 注入先のフォーカス中のウィンドウが移動先シートか確かめた（TargetGuardFake.logsChecks のときだけ記録する）
+        case goToSheetFocusCheck
         /// 副方式: 移動先シートの入力欄を探した
         case lookUpGoToField
         /// auto_confirm: 「開く」ボタンを探した

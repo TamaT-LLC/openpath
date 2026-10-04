@@ -44,4 +44,55 @@ public enum GoToSheetIdentity {
         }
         return false
     }
+
+    /// フォーカス中のウィンドウが、注入先として記録したウィンドウに付いた移動先シートか（Issue #95、PR #118 のレビュー）。
+    /// Return を送る直前の最後の確認に使う。移動先シートであること（`isGoToSheet`）に加え、注入先のウィンドウとの対応を
+    /// 注入先の確認（`InjectionTargetGuard.currentStatus`）と同じ `InjectionWindowRelation` で確かめ、同じアプリの別のパネルに
+    /// 付いた移動先シートを除く。対応を読めなければ（AXParent が無い）false。
+    /// - Parameters:
+    ///   - isSameElement: 同じ要素か（AX の往復を伴わない比較）。
+    ///   - parent: AXParent。focusedWindow が注入先のウィンドウそのものでないときだけ呼ぶ。
+    /// - Throws: 打ち切り条件に達したら、それ以降の AX 操作をせずに `ScanCutoff.Reached`。
+    public static func isGoToSheet<Node>(
+        _ focusedWindow: Node,
+        attachedTo targetWindow: Node,
+        cutoff: ScanCutoff = .never,
+        isSameElement: (Node, Node) -> Bool,
+        parent: (Node) -> Node?,
+        role: (Node) -> String?,
+        identifier: (Node) -> String?,
+        children: (Node) -> [Node]
+    ) throws -> Bool {
+        let isAttached = try InjectionWindowRelation.isTargetOrAttached(
+            focusedWindow, to: targetWindow, cutoff: cutoff, isSameElement: isSameElement, parent: parent
+        )
+        guard isAttached else { return false }
+        return try isGoToSheet(focusedWindow, cutoff: cutoff, role: role, identifier: identifier, children: children)
+    }
+}
+
+/// フォーカス中のウィンドウと、注入先として記録したウィンドウの対応（PR #54・#118）。
+/// キー入力はフォーカス中のウィンドウに届くため、それが記録したウィンドウそのものか、そのウィンドウに付いたシート
+/// （AXParent が記録したウィンドウ。移動先シート・シートとして付いたパネル等）のときだけ、注入先にキーが届くとみなす。
+/// 注入先の確認（`PanelControlAX.hasFocus`）と、Return の直前の移動先シートの確認（`GoToSheetIdentity.isGoToSheet(_:attachedTo:)`）で
+/// 同じ対応づけを使い、注入先の確認が通るのに移動先シートの確認だけが通らない環境を作らない。
+public enum InjectionWindowRelation {
+    /// - Parameters:
+    ///   - isSameElement: 同じ要素か（AX の往復を伴わない比較）。
+    ///   - parent: AXParent。window が記録したウィンドウそのものでないときだけ呼ぶ。読めなければ nil（対応しないものとする）。
+    /// - Throws: 打ち切り条件に達したら、AXParent を読まずに `ScanCutoff.Reached`。
+    public static func isTargetOrAttached<Node>(
+        _ window: Node,
+        to targetWindow: Node,
+        cutoff: ScanCutoff = .never,
+        isSameElement: (Node, Node) -> Bool,
+        parent: (Node) -> Node?
+    ) throws -> Bool {
+        if isSameElement(window, targetWindow) {
+            return true
+        }
+        try cutoff.throwIfReached()
+        guard let windowParent = parent(window) else { return false }
+        return isSameElement(windowParent, targetWindow)
+    }
 }

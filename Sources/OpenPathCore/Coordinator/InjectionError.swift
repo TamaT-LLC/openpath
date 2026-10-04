@@ -23,6 +23,9 @@ public enum InjectionStep: String, Sendable {
     case waitSheet
     /// ペーストの反映待ち
     case waitPaste
+    /// 確定（Return・「移動」の押下）した移動先シートが閉じるのを待つ（Issue #95）。
+    /// 期限までに閉じなければ、確定が届いておらずパネルは移動していない。
+    case waitSheetClose
     /// AppCoordinator の全体タイムアウト。どのステップで止まったかは分からない。
     case overall
 }
@@ -35,6 +38,8 @@ extension InjectionError {
             PaletteMessage.injectionFailed(reason: "⌘⇧G が開きません")
         case .timeout(step: .waitPaste):
             PaletteMessage.injectionFailed(reason: "パスの貼り付けに失敗")
+        case .timeout(step: .waitSheetClose):
+            PaletteMessage.injectionFailed(reason: "「フォルダへ移動」を確定できません")
         case .timeout(step: .overall):
             PaletteMessage.injectionTimedOut
         case .axError(let code):

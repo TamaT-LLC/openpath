@@ -43,6 +43,23 @@ final class TargetGuardFake: InjectionTargetGuarding {
         guard let invalidation, checkIndex >= invalidation.fromCheck else { return .available }
         return invalidation.status
     }
+
+    /// 注入先のフォーカス中のウィンドウが移動先シートか（`isGoToSheetFocused`）。nil なら確かめられない（AX の失敗を投げる）。
+    var goToSheetFocus: Bool? = true
+    /// `isGoToSheetFocused` を呼ばれた回数。
+    private(set) var goToSheetFocusCheckCount = 0
+
+    func isGoToSheetFocused(cutoff: ScanCutoff) async throws -> Bool {
+        goToSheetFocusCheckCount += 1
+        if logsChecks {
+            log.record(.goToSheetFocusCheck)
+        }
+        try cutoff.throwIfReached()
+        guard let goToSheetFocus else {
+            throw InjectionError.axError(code: InjectionAXErrorCode.failure)
+        }
+        return goToSheetFocus
+    }
 }
 
 /// パネル内の要素（入力欄・ボタン）。AX 操作を記録する。
@@ -55,8 +72,12 @@ final class PanelElementFake: PanelElementOperating {
     var confirmError: (any Error)?
     /// 押下・確定で要素が消えるか（シートやパネルが閉じる）。
     var disappearsWhenActivated = false
-    /// 要素が消えているか。
+    /// 要素が消えているか。`isGoneProvider` があればそちらを使う。
     var isGone = false
+    /// 設定すると、要素が消えたかの読み取り（`hasDisappeared()`）はこれの結果を返す（遅れて閉じるシートを再現する）。
+    var isGoneProvider: (@MainActor () -> Bool)?
+    /// 押下・確定（AXPress / kAXConfirmAction）の直後に呼ばれる（「移動」の押下でシートが閉じるのを再現するため）。
+    var onActivate: (@MainActor () -> Void)?
     /// 入力欄に入っている値。setValue と `simulateTyping(_:)` で変わる。
     private(set) var currentValue: String?
     /// 設定すると、値の読み取り（`value()`）はこれの結果を返す（時間とともに変わる値を再現する）。
@@ -120,7 +141,7 @@ final class PanelElementFake: PanelElementOperating {
     }
 
     func hasDisappeared() async -> Bool {
-        isGone
+        isGoneProvider.map { $0() } ?? isGone
     }
 
     func value() async throws -> String? {
@@ -161,6 +182,7 @@ final class PanelElementFake: PanelElementOperating {
         if disappearsWhenActivated {
             isGone = true
         }
+        onActivate?()
         if let error {
             throw error
         }
@@ -204,6 +226,8 @@ final class GoToFieldLocatorFake: GoToFieldLocating {
     private let clock: VirtualClock
     private let log: InjectionEventLog
     var field: PanelElementFake?
+    /// 設定すると、探したときに見つかる入力欄はこれの結果になる（閉じて見つからなくなるシートを再現する）。
+    var fieldProvider: (@MainActor () -> PanelElementFake?)?
     var goButton: PanelElementFake?
     var suggestionList: SuggestionListFake?
     /// 入力欄を選んだ手掛かり。既定は macOS 13 以降の移動先シート（AXIdentifier）。
@@ -214,6 +238,8 @@ final class GoToFieldLocatorFake: GoToFieldLocating {
     /// 1 回の走査にかかる時間。
     var lookupLatency: Duration = .zero
     var error: (any Error)?
+    /// 設定すると、探したときに投げるエラーはこれの結果になる（途中から探せなくなるアプリを再現する）。
+    var errorProvider: (@MainActor () -> (any Error)?)?
     /// 設定すると、走査の途中でテストから再開されるまで止まる。
     var suspension: Suspension?
 
@@ -230,11 +256,11 @@ final class GoToFieldLocatorFake: GoToFieldLocating {
         if let suspension {
             await suspension.suspend()
         }
-        if let error {
+        if let error = errorProvider.map({ $0() }) ?? error {
             throw error
         }
         try simulateAXScan(clock: clock, log: log, taking: lookupLatency, cutoff: cutoff)
-        guard let field else { return nil }
+        guard let field = fieldProvider.map({ $0() }) ?? field else { return nil }
         return GoToFieldControls(field: field, goButton: goButton, suggestionList: suggestionList, evidence: evidence)
     }
 }

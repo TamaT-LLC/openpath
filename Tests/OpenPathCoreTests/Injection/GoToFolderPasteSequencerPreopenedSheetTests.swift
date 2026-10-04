@@ -85,7 +85,10 @@ struct GoToFolderPasteSequencerPreopenedSheetTests {
         harness.goToFieldLocator.field = nil
         harness.sheetDetector.appearsAt = .milliseconds(150)
 
-        try await harness.run(path: Self.path)
+        // 入力欄が見つからないままでは、Return の後にシートが閉じたことも確かめられないため、成功にはしない（Issue #95）
+        await #expect(throws: InjectionError.timeout(step: .waitSheetClose)) {
+            try await harness.run(path: Self.path)
+        }
 
         #expect(harness.log.keyStrokes.first == .goToFolder)
     }
@@ -96,7 +99,10 @@ struct GoToFolderPasteSequencerPreopenedSheetTests {
         harness.goToFieldLocator.error = InjectionError.axError(code: -25_204)
         harness.sheetDetector.appearsAt = .milliseconds(150)
 
-        try await harness.run(path: Self.path)
+        // 探せないままでは、Return の後にシートが閉じたことも確かめられないため、成功にはしない（Issue #95）
+        await #expect(throws: InjectionError.timeout(step: .waitSheetClose)) {
+            try await harness.run(path: Self.path)
+        }
 
         #expect(harness.log.keyStrokes.first == .goToFolder)
     }

@@ -39,6 +39,23 @@ enum InjectionTargetCheck {
         }
     }
 
+    /// 注入先のフォーカス中のウィンドウが移動先シートか（`InjectionTargetGuarding.isGoToSheetFocused`、Issue #95）。
+    /// - Returns: 確かめられなければ（AX の失敗・期限切れ）nil。
+    /// - Throws: キャンセル時は `CancellationError`。
+    static func goToSheetHasFocus(_ targetGuard: any InjectionTargetGuarding, on timeline: ElapsedTimeline) async throws -> Bool? {
+        try Task.checkCancellation()
+        do {
+            return try await withScanCutoff(at: timeline.elapsed + timeLimit, on: timeline) { cutoff in
+                try await targetGuard.isGoToSheetFocused(cutoff: cutoff)
+            }
+        } catch {
+            if error is CancellationError || Task.isCancelled {
+                throw CancellationError()
+            }
+            return nil
+        }
+    }
+
     /// 確かめられなかった場合は、別のアプリへ送ってしまうおそれがあるため、送らずに AX の失敗として扱う。
     private static func injectionError(from error: any Error) -> any Error {
         if error is InjectionError || error is CancellationError {

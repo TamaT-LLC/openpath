@@ -120,7 +120,10 @@ struct GoToFolderPasteSequencerFocusTests {
         let harness = Self.makeHarness(focusArrivesAt: nil)
         harness.goToFieldLocator.field = nil
 
-        try await harness.run(path: Self.path)
+        // 入力欄が見つからないままでは、Return の後にシートが閉じたことも確かめられないため、成功にはしない（Issue #95）
+        await #expect(throws: InjectionError.timeout(step: .waitSheetClose)) {
+            try await harness.run(path: Self.path)
+        }
 
         let pasteTime = try #require(harness.log.entries.first { $0.event == .key(.paste) }?.time)
         #expect(pasteTime == .milliseconds(150))

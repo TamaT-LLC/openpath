@@ -14,8 +14,10 @@
 /// 6. 100ms 待って（6）、移動先シートの入力欄の値と候補の選択が移動先になったかを確かめてから（`GoToSheetSubmitGate`、Issue #74）
 ///    Return を送る（7）。入力欄の値が移動先にならなければ Return を送らず `timeout(.waitPaste)` を投げる（副方式へ）。
 ///    送る直前にも、確かめた入力欄がまだフォーカスを持つかを確かめ、持たなければ同じく副方式へ回す
-/// 7. `hooks.didSubmitGoToSheet`（8: auto_confirm の差し込み口）
-/// 8. Return から 200ms 後にペーストボードを戻す（9）。ただし確定前の確認で、貼り付けで入力欄が別の値から移動先に変わったことを
+/// 7. 移動先シートが閉じるまで最大 600ms 待つ（8、`GoToSheetCloseWait`、Issue #95）。閉じなければ Return が届いておらず
+///    パネルは移動していないため、成功とせずに `timeout(.waitSheetClose)` を投げる（副方式へ）。閉じたことを確かめられない場合も同じ
+/// 8. `hooks.didSubmitGoToSheet`（9: auto_confirm の差し込み口）
+/// 9. Return から 200ms 後にペーストボードを戻す（10）。ただし確定前の確認で、貼り付けで入力欄が別の値から移動先に変わったことを
 ///    確かめられたら、⌘V は処理済みのため Return の前に戻して待たない（Issue #74）
 ///
 /// - ペーストボードは差し替えた後なら、成功・失敗・キャンセルのどの経路でも戻す。
@@ -24,6 +26,9 @@
 /// - キーは注入先のプロセスへ直接送る（`InjectionKeyRoute.targetProcess`）。他アプリのグローバルホットキー（Raycast の ⌘⇧G 等）に
 ///   横取りされないため。シートが出ず代替で送り直した後と、開いていたシートで ⌘A / ⌘V が入力欄に届かなかった後は、
 ///   システム経由で送る（副方式の Return も `lastKeyRoute` で引き継ぐ）。
+///   開いていたシート（Issue #95）では、確定の Return だけはシステム経由で送る。注入先のプロセスへ送ったキーのうち、
+///   ⌘A / ⌘V はリモートのパネルの入力欄に届いても、Return は届かないことがあるため（`useSystemRouteForPreopenedSheetReturn`）。
+///   注入先のプロセスへ送った Return でシートが閉じなかった後も、副方式の Return はシステム経由で送る。
 /// - キーを送る直前ごとに注入先がまだ有効か（アプリが最前面で、ウィンドウが残っているか）を確かめ、
 ///   無効なら送らずに `.targetNotFrontmost` / `.panelGone` を投げる。注入先の記録は呼び出し元（`PathInjectionFlow`）が行う。
 /// - キャンセルには各ステップの間と待機中に応じ、以降のキー操作は送らない。
@@ -39,6 +44,7 @@ public final class GoToFolderPasteSequencer {
     private let targetGuard: any InjectionTargetGuarding
     private let fieldFocus: GoToFieldFocusWait?
     private let submitGate: GoToSheetSubmitGate?
+    private let sheetCloseWait: GoToSheetCloseWait?
     private let hooks: PathInjectionHooks
     private let timing: PathInjectionTiming
     private let clock: any Clock<Duration>
@@ -52,6 +58,7 @@ public final class GoToFolderPasteSequencer {
     ///   - targetGuard: キーを送る直前ごとに注入先を確かめる。配線漏れで誤送出を防げなくならないよう、既定値を持たせない。
     ///   - fieldFocus: ⌘A / ⌘V の前に、移動先シートの入力欄がフォーカスを持つまで待つ。nil なら待たずに送る。
     ///   - submitGate: Return の前に移動先シートの入力欄と候補の選択を確かめる。nil なら確かめずに Return を送る。
+    ///   - sheetCloseWait: Return の後に移動先シートが閉じるのを待つ。nil なら確かめずに、Return を送ったら成功とする。
     ///   - sheetFallback: 注入先のプロセスへ送った ⌘⇧G でシートが出なかったときの代替。nil なら代替を試さずに `timeout(.waitSheet)` を投げる。
     ///     注入をまたいで経路を覚える `GoToSheetRouteMemory` もここで渡す。
     ///   - clock: 待機に使う。テストでは実時間を待たない Clock を渡す。
@@ -62,6 +69,7 @@ public final class GoToFolderPasteSequencer {
         targetGuard: any InjectionTargetGuarding,
         fieldFocus: GoToFieldFocusWait? = nil,
         submitGate: GoToSheetSubmitGate? = nil,
+        sheetCloseWait: GoToSheetCloseWait? = nil,
         sheetFallback: GoToSheetFallback? = nil,
         hooks: PathInjectionHooks = .none,
         timing: PathInjectionTiming = .standard,
@@ -75,6 +83,7 @@ public final class GoToFolderPasteSequencer {
         self.targetGuard = targetGuard
         self.fieldFocus = fieldFocus
         self.submitGate = submitGate
+        self.sheetCloseWait = sheetCloseWait
         self.hooks = hooks
         self.timing = timing
         self.clock = clock
@@ -192,7 +201,7 @@ public final class GoToFolderPasteSequencer {
         }
     }
 
-    /// ステップ 5〜9。ペーストボードは、貼り付けを確かめられたら Return の前にここで戻し、それ以外は呼び出し元が戻す。
+    /// ステップ 5〜10。ペーストボードは、貼り付けを確かめられたら Return の前にここで戻し、それ以外は呼び出し元が戻す。
     private func pasteAndSubmit(
         path: String,
         controls: GoToFieldControls?,
@@ -219,13 +228,46 @@ public final class GoToFolderPasteSequencer {
             Self.logStep("貼り付けたパスが入力欄に入ったため、Return の前にペーストボードを戻しました", on: timeline)
         }
         try await ensureFieldStillFocused(controls, on: timeline)
+        if isKeyRouteUnverified {
+            useSystemRouteForPreopenedSheetReturn(on: timeline)
+        }
         try await sender.post(.returnKey, via: lastKeyRoute, failingAs: .waitPaste, on: timeline)
-        Self.logStep("Return を送りました", on: timeline)
+        Self.logStep("Return を送りました（経路: \(lastKeyRoute.rawValue)）", on: timeline)
 
         let submittedAt = timeline.elapsed
-        try await hooks.didSubmitGoToSheet(autoConfirm)
+        try await ensureSheetClosed(controls, on: timeline)
+        try await hooks.didSubmitGoToSheet(autoConfirm, timeline.elapsed - submittedAt)
         guard !restoration.isDone else { return }
         try await timeline.sleep(untilElapsed: submittedAt + timing.restoreDelay)
+    }
+
+    /// 注入の前から開いていた移動先シート（Issue #95）では、確定の Return をシステム経由で送る。
+    /// macOS 26.6.2 の VS Code（openAndSavePanelService が描くリモートのパネル）では、フォーカス中の要素の pid がホストと同じになり、
+    /// ホストへ送った ⌘A / ⌘V は入力欄に入ったが、Return は届かずシートが残った（#110 では、ホストへ送った / と ⌘⇧G も届かなかった）。
+    /// ⌘A / ⌘V はホストの「編集」メニューのキー等価からアクションとしてパネルへ渡り、メニューに無いキーはホストで止まるとみられる（推定）。
+    /// ⌘⇧G を送らないこの経路では、注入先のプロセスへ送るキーが届くかを確かめていない。修飾キーの無い Return は
+    /// 他アプリのグローバルホットキーになりにくいため、システム経由で送っても横取りされにくい（#107 の ⌘⇧G とは違う）。
+    private func useSystemRouteForPreopenedSheetReturn(on timeline: ElapsedTimeline) {
+        guard lastKeyRoute == .targetProcess else { return }
+        lastKeyRoute = .systemWide
+        Self.logStep("開いていたシートでは、注入先のプロセスへ送った Return が届かないことがあるため、Return はシステム経由で送ります", on: timeline)
+    }
+
+    /// Return を送れても、移動先シートに届かなければシートは残り、パネルは移動しない（Issue #95）。閉じたのを確かめてから成功とし、
+    /// 閉じなければ `timeout(.waitSheetClose)` を投げて、値をセットし直して確定し直す副方式に任せる。
+    /// 閉じたかを確かめられない（入力欄が一度も見つからない・探せない）場合も、誤った成功を避けるため同じく副方式へ回す。
+    /// 注入先のプロセスへ送った Return で閉じたことを確かめられなかったなら、副方式の Return はシステム経由で送るよう切り替える。
+    private func ensureSheetClosed(_ controls: GoToFieldControls?, on timeline: ElapsedTimeline) async throws {
+        guard let sheetCloseWait else { return }
+        let closure = try await sheetCloseWait.waitUntilClosed(controls: controls)
+        Self.logStep("移動先シートが閉じたかを確かめました（\(closure.rawValue)）", on: timeline)
+        guard closure != .closed else { return }
+        if lastKeyRoute == .targetProcess {
+            lastKeyRoute = .systemWide
+            Self.logStep("注入先のプロセスへ送った Return で移動先シートが閉じたことを確かめられないため、副方式の Return はシステム経由で送ります", on: timeline)
+        }
+        Log.warning("Return を送っても移動先シートが閉じたことを確かめられない（\(closure.rawValue)）ため、副方式へ切り替えます")
+        throw InjectionError.timeout(step: .waitSheetClose)
     }
 
     /// 入力欄の値が移動先でないまま Return を送ると、移動先シートに残っていた前回の場所へ移動してしまう（Issue #74）。
