@@ -283,7 +283,7 @@ export OPENPATH_NOTARY_PROFILE=<profile>
 
 tag は `main` に含まれる commit に付け、バージョンを `Resources/Info.plist` と一致させます。
 すべての経路で `SHA256SUMS` を生成し、Stable にだけ Homebrew cask を添付します。
-Homebrew tap には、正式 Release に添付された `openpath.rb` を反映します。
+Stable の公開に成功すると、添付した `openpath.rb` で [Homebrew tap](https://github.com/TamaT-LLC/homebrew-tap) に更新の Pull Request を自動で出します。
 公開手順と失敗時の復旧は [リリース運用](docs/40_arch_design/guide-release-distribution.md) を参照してください。
 
 リポジトリの Settings → Secrets and variables → Actions に、次の値を登録します。
@@ -293,15 +293,22 @@ Homebrew tap には、正式 Release に添付された `openpath.rb` を反映�
 | Secret | `APPLE_CERTIFICATE_BASE64` | 秘密鍵付き Developer ID Application 証明書（P12）の Base64 |
 | Secret | `APPLE_CERTIFICATE_PASSWORD` | P12 の書き出しパスワード |
 | Secret | `APPLE_NOTARY_PRIVATE_KEY_BASE64` | openpath 専用の Team API キー（P8）の Base64 |
+| Secret | `HOMEBREW_TAP_APP_PRIVATE_KEY` | Homebrew tap を更新する GitHub App の秘密鍵（ダウンロードした `.pem` の内容） |
 | Variable | `APPLE_SIGNING_IDENTITY` | `Developer ID Application: 組織名 (TEAMID)` |
 | Variable | `APPLE_TEAM_ID` | 証明書の Team ID |
 | Variable | `APPLE_NOTARY_KEY_ID` | Team API キーの Key ID |
 | Variable | `APPLE_NOTARY_ISSUER_ID` | App Store Connect の Issuer ID |
+| Variable | `HOMEBREW_TAP_APP_CLIENT_ID` | 同じ GitHub App の Client ID（App ID ではない） |
 
 公証用の Team API キーは Developer 権限で作成します。
 プロジェクトごとに別のキーを作ると、個別に失効と交換ができます。
 同じ組織の署名証明書は共用できます。
 workflow は一時キーチェーンに認証情報を保存し、終了時に削除します。
+
+`HOMEBREW_TAP_*` の 2 つは、Stable の公開後に `TamaT-LLC/homebrew-tap` へ cask の更新 Pull Request を出すために使います。
+GitHub App は tap（`TamaT-LLC/homebrew-tap`）だけにインストールし、Repository permissions の Contents と Pull requests を Read and write にします。
+ほかの権限は付けません。
+`actions/create-github-app-token` は v3 で App ID の入力を非推奨にしたため、App ID ではなく Client ID を登録します。
 
 CI では `OPENPATH_NOTARY_KEYCHAIN` に一時キーチェーンのパスを指定します。
 ローカルで省略した場合は、従来どおり標準のキーチェーンからプロファイルを探します。

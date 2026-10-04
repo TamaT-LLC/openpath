@@ -1,0 +1,106 @@
+name: Homebrew tap
+
+# Stable の公開後に、Release に添付された cask で TamaT-LLC/homebrew-tap へ更新 PR を出す。
+# Release macOS から呼ばれるほか、App を設定した直後の確認や再実行のために手動でも起動できる。
+# 手順は docs/40_arch_design/guide-release-distribution.md を参照。
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Stable tag (vX.Y.Z) whose published release is reflected in the tap
+        type: string
+        required: true
+      dry_run:
+        description: Stop after issuing the token, cloning the tap, and showing the difference
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      HOMEBREW_TAP_APP_PRIVATE_KEY:
+        # 未設定でも Release の公開は止めず、この job の最初で設定不足として失敗させる
+        required: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Stable tag (vX.Y.Z) whose published release is reflected in the tap
+        type: string
+        required: true
+      dry_run:
+        description: Stop after issuing the token, cloning the tap, and showing the difference
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  update-cask:
+    name: update cask
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    # 同じ tag の Release と手動実行が重なっても、tap のブランチを同時に更新しない
+    concurrency:
+      group: homebrew-tap-${{ inputs.tag }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # App のトークンを作る前に、公開済みの Stable と添付ファイルの整合を確かめる
+      - name: Verify the published Stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          python3 scripts/update_homebrew_tap.py verify --repo "${GITHUB_REPOSITORY}" \
+            --tag "${RELEASE_TAG}" --directory "${RUNNER_TEMP}/homebrew-tap-release"
+
+      # 秘密鍵の値は run の環境に渡さず、設定の有無だけを確かめる
+      - name: Check the GitHub App configuration
+        env:
+          APP_CLIENT_ID: ${{ vars.HOMEBREW_TAP_APP_CLIENT_ID }}
+          HAS_PRIVATE_KEY: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY != '' }}
+        run: |
+          status=0
+          if [[ -z "${APP_CLIENT_ID}" ]]; then
+            echo "::error::Variable HOMEBREW_TAP_APP_CLIENT_ID is not configured"
+            status=1
+          fi
+          if [[ "${HAS_PRIVATE_KEY}" != "true" ]]; then
+            echo "::error::Secret HOMEBREW_TAP_APP_PRIVATE_KEY is not configured"
+            status=1
+          fi
+          exit "${status}"
+
+      # トークンは tap だけに絞り、push と PR に要る権限だけを要求する。job の終了時に失効する
+      - name: Issue a token for the tap
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.HOMEBREW_TAP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
+          owner: TamaT-LLC
+          repositories: homebrew-tap
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Update the cask in the tap
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=(update --tag "${RELEASE_TAG}" --directory "${RUNNER_TEMP}/homebrew-tap-release" --app-slug "${APP_SLUG}")
+          if [[ "${DRY_RUN}" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+          python3 scripts/update_homebrew_tap.py "${args[@]}"

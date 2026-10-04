@@ -8,4 +8,4 @@ Stable を公開するときは、このファイルを `vX.Y.Z.md` に改め、
 
 ## 変更
 
-まだ変更はない。
+- Stable の公開後に、GitHub App で Homebrew tap（`TamaT-LLC/homebrew-tap`）へ cask の更新 Pull Request を自動で出し、auto-merge を要求するようにした。

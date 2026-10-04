@@ -186,3 +186,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/publish_release.py --repo "${GITHUB_REPOSITORY}" --tag "${GITHUB_REF_NAME}" --directory dist
+
+  # Stable の公開に成功したときだけ、tap へ cask の更新 PR を出す。成果物は作らないため、
+  # この job だけが失敗した場合は、この job だけを再実行してよい（リリース運用のガイドを参照）。
+  # App の秘密鍵は、署名・公証の Secrets と同じく、使う job にだけ明示して渡す。
+  homebrew-tap:
+    needs: [prepare, publish]
+    if: needs.prepare.outputs.channel == 'stable' && needs.publish.result == 'success'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/homebrew-tap.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets:
+      HOMEBREW_TAP_APP_PRIVATE_KEY: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
