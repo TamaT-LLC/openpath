@@ -18,12 +18,12 @@ struct AppCoordinatorCancellationTests {
         return harness
     }
 
-    @Test("注入のタイムアウトは 1.5 秒")
-    func injectionTimeoutIsOneAndAHalfSeconds() {
-        #expect(AppCoordinator.injectionTimeout == .milliseconds(1500))
+    @Test("注入のタイムアウトは 2.5 秒（Issue #29）")
+    func injectionTimeoutIsTwoAndAHalfSeconds() {
+        #expect(AppCoordinator.injectionTimeout == .milliseconds(2500))
     }
 
-    @Test("注入が 1.5 秒以内に終わらなければ Idle に戻り、エラーをパレットに渡して注入を止める")
+    @Test("注入が 2.5 秒以内に終わらなければ Idle に戻り、エラーをパレットに渡して注入を止める")
     func injectionTimesOut() async throws {
         let expectedMessage = try #require(InjectionError.timeout(step: .overall).userMessage)
         let harness = await Self.makeInjectingHarness()
@@ -39,7 +39,7 @@ struct AppCoordinatorCancellationTests {
         #expect(harness.injector.isCancelled)
     }
 
-    @Test("1.5 秒に達するまではタイムアウトしない")
+    @Test("2.5 秒に達するまではタイムアウトしない")
     func doesNotTimeOutBeforeDeadline() async {
         let harness = await Self.makeInjectingHarness()
 

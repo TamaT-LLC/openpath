@@ -25,8 +25,8 @@ public struct GoToFieldFocusTiming: Equatable, Sendable {
         self.pollInterval = pollInterval
     }
 
-    /// シート待ち（最大 600ms）・確定前の確認（最大 350ms）・「開く」の待機（300ms）と合わせても、
-    /// AppCoordinator の全体タイムアウト（1.5 秒）を大きく超えない長さにする。
+    /// シート待ち（最大 600ms）・確定前の確認（最大 350ms）・「開く」の待機（300ms）と合わせても約 1.5 秒で、
+    /// AppCoordinator の全体タイムアウト（2.5 秒）に収まる長さにする。
     public static let standard = GoToFieldFocusTiming(
         lookupLimit: .milliseconds(150),
         waitLimit: .milliseconds(250),

@@ -2,7 +2,7 @@ import Testing
 
 import OpenPathCore
 
-/// パレットの表示中に注入が 1.5 秒でタイムアウトすると、パネルの状態が分からないため Idle に戻り（PR #39）、
+/// パレットの表示中に注入が全体タイムアウト（2.5 秒）に達すると、パネルの状態が分からないため Idle に戻り（PR #39）、
 /// エラーを出したパレットは残す。PanelWatcher は Idle に戻ると開いたままのパネルを再通知する（PR #46）。
 /// 再通知でパレットを出し直してもタイムアウトのエラーを付け直し、検索語と選択を残したまま
 /// Enter で再試行・Esc で閉じられるようにする（#101）。
@@ -18,7 +18,7 @@ struct AppCoordinatorTimeoutReshowTests {
         get throws { try #require(InjectionError.timeout(step: .overall).userMessage) }
     }
 
-    /// パレットから confirm して注入を始め、パネルが開いたまま 1.5 秒でタイムアウトさせて Idle に戻すまで進める。
+    /// パレットから confirm して注入を始め、パネルが開いたまま全体タイムアウトに達させて Idle に戻すまで進める。
     /// PanelWatcher の再通知（同じ id の panelAppeared）はまだ届いていない。
     private static func makeTimedOutHarness(
         isAutoConfirmEnabled: Bool = false,

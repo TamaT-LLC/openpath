@@ -119,7 +119,7 @@ struct PathInjectionFlowTests {
         #expect(harness.log.events.last == .didSubmitGoToSheet(autoConfirm: false))
     }
 
-    @Test("副方式でも auto_confirm なら「移動」の 300ms 後に「開く」を押す。全体は 1.5 秒の全体タイムアウトに収まる")
+    @Test("副方式でも auto_confirm なら「移動」の 300ms 後に「開く」を押す。全体は 2.5 秒の全体タイムアウトに収まる")
     func directEntryWithAutoConfirmTimeline() async throws {
         let harness = FlowHarness(sheetAppearsAt: nil)
 

@@ -54,7 +54,7 @@ public struct GoToSheetSubmitTiming: Equatable, Sendable {
 
     /// macOS 27 では、貼り付けから候補リストの出し直しまで 200〜300ms かかった（Issue #74）。
     /// 主方式の貼り付け後の待機（100ms）と合わせて貼り付けから約 350ms まで待つ。
-    /// シート待ち（最大 600ms）と「開く」の待機（300ms）を足しても、AppCoordinator の全体タイムアウト（1.5 秒）に収まる長さにする。
+    /// シート待ち（最大 600ms）と「開く」の待機（300ms）を足しても、AppCoordinator の全体タイムアウト（2.5 秒）に収まる長さにする。
     public static let standard = GoToSheetSubmitTiming(
         lookupLimit: .milliseconds(150),
         settleLimit: .milliseconds(250),

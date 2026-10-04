@@ -6,7 +6,10 @@
 @MainActor
 public final class AppCoordinator {
     /// 注入の全体タイムアウト。超えたらパネルの状態が不明とみなして Idle に戻す。
-    public static let injectionTimeout: Duration = .milliseconds(1500)
+    /// macOS 26 の VS Code の初回の注入（移動先シートが ③ で約 900ms に開く）が、ペーストと確定までに 1.5 秒を超えたため、
+    /// 2.5 秒にしている（Issue #29）。失敗する注入は injector の各段の待ち（`PathInjectionTiming` など）で先に打ち切られるため、
+    /// 延ばしても待たされるのは遅いが成功する注入だけになる。
+    public static let injectionTimeout: Duration = .milliseconds(2500)
 
     public private(set) var state: CoordinatorState = .idle {
         didSet {
@@ -49,7 +52,7 @@ public final class AppCoordinator {
     /// パネルを見失ったためにパレットで見せられなかった（または見せていたパレットを閉じた）注入の失敗。Idle 中だけ持つ。
     /// PanelWatcher はアプリを切り替えると panelGone を送り、元のアプリに戻ると開いたままのパネルを再通知する（PR #46）。
     /// 切り替えている間は他のアプリの上にパレットを出さず、同じパネルの再通知でパレットにこの失敗を付けて出す（#94）。
-    /// パレットの表示中に 1.5 秒でタイムアウトして Idle に戻ったときも、エラーを出したパレットを残したまま持つ。
+    /// パレットの表示中に全体タイムアウト（2.5 秒）で Idle に戻ったときも、エラーを出したパレットを残したまま持つ。
     /// PanelWatcher は Idle に戻ると開いたままのパネルを再通知するため、パレットを出し直すときに付け直す（#101）。
     /// 別のパネルのパレットを出したら忘れる。Idle で残ったパレットを Esc で閉じたら、見たものとして忘れる。
     /// パネルの id は使い回されない（OpenPanelLocator の連番）ため期限は設けない。
@@ -309,7 +312,7 @@ public final class AppCoordinator {
         }
     }
 
-    /// 期限は呼び出し時点で確定させる。Task の開始が遅れても 1.5 秒の起点がずれないようにするため。
+    /// 期限は呼び出し時点で確定させる。Task の開始が遅れても全体タイムアウトの起点がずれないようにするため。
     private static func makeTimeoutTask<C: Clock<Duration>>(
         on clock: C,
         onTimeout: @escaping @MainActor () -> Void
