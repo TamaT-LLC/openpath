@@ -239,6 +239,8 @@ enum PanelControlAX {
 
     /// window（またはそのシート）が、processID のアプリのフォーカス中のウィンドウか。
     /// キー入力はフォーカス中のウィンドウに届くため、同じアプリの別のウィンドウに移っていれば false。
+    /// 移動先シートがウィンドウとしてフォーカスを持つ場合も、記録したウィンドウに付いたものなら注入先とみなす
+    /// （対応づけは OpenPathCore の `InjectionWindowRelation`。Return の直前の移動先シートの確認と共有する）。
     static func hasFocus(_ window: AXUIElement, inProcess processID: pid_t, cutoff: ScanCutoff) throws -> Bool {
         let focusedWindow: AXUIElement
         do {
@@ -246,13 +248,13 @@ enum PanelControlAX {
         } catch InjectionError.panelGone {
             return false
         }
-        if CFEqual(focusedWindow, window) {
-            return true
-        }
-        try cutoff.throwIfReached()
-        // 移動先シートがウィンドウとしてフォーカスを持つ場合も、記録したウィンドウに付いたものなら注入先とみなす
-        guard let parent: AXUIElement = focusedWindow.attr(kAXParentAttribute) else { return false }
-        return CFEqual(parent, window)
+        return try InjectionWindowRelation.isTargetOrAttached(
+            focusedWindow,
+            to: window,
+            cutoff: cutoff,
+            isSameElement: { CFEqual($0, $1) },
+            parent: { element -> AXUIElement? in element.attr(kAXParentAttribute) }
+        )
     }
 
     /// 移動先シートの親として受け入れるロール（パネルのウィンドウ、またはシートとして付いたパネル）。
