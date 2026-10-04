@@ -11,7 +11,7 @@ upstream:
 downstream:
 - PROJ-TST-001
 owner: TakehiroT
-updated: 2026-10-02
+updated: 2026-10-04
 ---
 
 # 詳細設計: パネル検知とパス注入（PanelWatcher / PanelInjector）
@@ -149,13 +149,14 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
   - ② ファイル一覧にフォーカスがあれば（AXFocusedUIElement のロールが AXList / AXOutline / AXTable / AXBrowser）、`/` を送る。NSOpenPanel はファイル一覧で `/` を打つと移動先シートを開き、入力欄に `/` が入る（macOS 27 の自プロセスのパネルで確認。開いた直後のフォーカスはカラム表示の列の AXList）。入力欄の `/` は 6. の ⌘A → ⌘V で置き換わる。`/` は他アプリのグローバルホットキーにならないため横取りされない。フォーカスは ② の前に 1 回だけ読む（上限 100ms）。
   - ③ ② を飛ばした（入力欄・検索欄にフォーカスがある・フォーカスを読めない）か、② でもシートが出なければ、HID の ⌘⇧G を送る。#107 より前の送り方で、macOS 26 の VS Code（openAndSavePanelService が描くリモートのパネル）では、①（`postToPid`）の ⌘⇧G も ② の `/` もシートを開かなかったが、HID の ⌘⇧G では移動まで成功していた（#89 の QA と #29 の QA）。**③ は他アプリのグローバルホットキーに横取りされうる**（Raycast の ⌘⇧G 等。#104）。② が使えない状態で ① が届かず ③ が横取りされる環境は既知の制約とし、副方式（§3.2）に任せる。
   - どの段でも出なければ timeout(.waitSheet)（副方式へ）。ペーストボードには触れない。② に進んだ後は、副方式の Return も HID で送る。判定そのものが失敗した（AX の失敗）場合は、続く段を試さずに従来どおり副方式へ回す。
-  - **時間配分**: ① 200ms・② 300ms・③ 500ms（`PathInjectionTiming` の `targetProcessSheetWaitLimit` / `slashSheetWaitLimit` / `systemGoToSheetWaitLimit`）。各段の最後の確認は期限の 1 間隔（50ms）前のため、① は 150ms、② は送ってから 250ms で見切る。① を 600ms から縮めたのは、① が届かない注入先でも ③ まで進み、AppCoordinator の全体タイムアウト（1.5 秒）に収めるため。② を経て ③ で開く最も遅い経路（③ を 400ms に送り、シートが 150ms 後に出る）でも、auto_confirm の「開く」の押下まで約 950ms で終わる（`PathInjectionFlowKeyRouteTests`）。シートが出ない場合の主方式の失敗は約 850ms（② を経る場合。経ない場合は約 600ms）。③ の上限近くでシートが出た場合に auto_confirm まで行うと 1.5 秒を超えることがあるが、その場合も全体タイムアウトで打ち切られるだけで、別のアプリへキーを送ることはないため、全体タイムアウトは延ばさない。
+  - **時間配分**: ① 200ms・② 300ms・③ 500ms（`PathInjectionTiming` の `targetProcessSheetWaitLimit` / `slashSheetWaitLimit` / `systemGoToSheetWaitLimit`）。各段の最後の確認は期限の 1 間隔（50ms）前のため、① は 150ms、② は送ってから 250ms で見切る。① を 600ms から縮めたのは、① が届かない注入先でも ③ まで進み、当時の全体タイムアウト（1.5 秒）に収めるため。② を経て ③ で開く最も遅い経路（③ を 400ms に送り、シートが 150ms 後に出る）でも、auto_confirm の「開く」の押下まで約 950ms で終わる（`PathInjectionFlowKeyRouteTests`）。シートが出ない場合の主方式の失敗は約 850ms（② を経る場合。経ない場合は約 600ms）。
+  - **全体タイムアウト**（Issue #29）: AppCoordinator の全体タイムアウトは 2.5 秒。PR #110 の実機 QA（macOS 26 の VS Code）では、初回の注入で ③ の移動先シートが +887ms に開いたが、その後のペーストと確定が間に合わず、当時の 1.5 秒で `timeout(overall)` になった。経路の記憶でシステム経由から始めた 2 回目以降は約 1,010ms、Cmd+Enter（主方式の fieldMismatch から副方式）は 1,383ms で成功した。そこで、各段の待ちは変えずに全体タイムアウトだけを延ばした（オーナー決定）。シートが出ない・貼り付けが効かないといった失敗は各段の待ちで先に打ち切られるため、延ばしても待たされるのは遅いが成功する注入だけになる。QA に近い条件（③ でシートを 900ms に見つけ、入力欄のフォーカスがその 100ms 後、候補の更新がさらに 250ms 後）では、auto_confirm の「開く」の押下まで主方式で約 1,550ms、⌘V が届かず副方式へ回ると約 1,650ms かかり、1.5 秒は超えるが 2.5 秒に収まる（`PathInjectionFlowSlowSheetTests`、`AppCoordinatorSlowInjectionTests`）。
   - **① の期限の後に出るシート**: ① が届いていても、シートが AX に現れるまで 200ms より長くかかるアプリ（macOS 26.6.2 の QA で約 400ms の例がある。Issue #74）では、① の期限の後に ②・③ を送ることになる。開いた移動先シートに ⌘⇧G を送っても新しいシートは出ず（Issue #95）、`/` はシートの入力欄に入っても 6. で置き換わるため、遅れて出たシートを ②・③ の待ちで拾って続ける（`picksUpLateSheetFromTargetProcessRoute`）。
   - **経路の記憶**（`GoToSheetRouteMemory`）: ① でシートが出なかった注入先（bundle id、無ければ pid。`InjectionTargetGuard` が注入の最初に記録する）をプロセスの中で覚え、次の注入では ① を飛ばして ②・③ から始める（① の待ちを払わない）。別の注入先は ① から試す。覚えた注入先で ②・③ でもシートが出なければ忘れ、次の注入はまた ① から試す（① の期限の後に出たシートで誤って覚えた場合に、③ が横取りされる環境で失敗し続けないため）。永続化はしない（アプリやパネルの更新で振る舞いが変わりうるため、起動のたびに ① から確かめ直す）。`PanelInjector` が注入をまたいで 1 つ持つ。
   - 注入の前から開いていた移動先シート（Issue #95）では ⌘⇧G を送らないため、注入先のプロセスへ送るキーが届くかを確かめていない。7. で入力欄が移動先にならなければ（fieldMismatch）、届かなかったとみて副方式の Return を HID で送る。
   - **診断ログ**（Issue #29）: `キーを送りました` の debug ログに、`postToPid` の送り先の pid の決め方（フォーカス中の要素の pid が別のプロセス／注入先のアプリと同じ／読めないため注入先のアプリ／openpath 自身のため注入先のアプリ。`InjectionKeyDestination.Reason`）と、フォーカス中の要素のロール・サブロールを出す。② の判断に使ったフォーカス中の要素も、ロール・サブロール・pid が注入先と同じかを debug ログに出す。ロールとサブロールは debug ログが有効なときだけ読む（AX の往復を増やさないため）。パスは含めない。
 - **キー配列**（Issue #68）: 仮想キーコードは物理キーの位置を表すため、Dvorak 等では kVK_ANSI_G が「g」にならず ⌘⇧G が別のショートカットになる。現在の入力ソース（`TISCopyCurrentKeyboardLayoutInputSource`、キー配列のデータが無ければ `TISCopyCurrentASCIICapableKeyboardLayoutInputSource`）のキー配列を `UCKeyTranslate` で引き、目的の文字を入力するキーを選ぶ（`InjectionKeyCodeResolver`）。⌘A / ⌘V / ⌘⇧G は ⌘ を押したときの配列で「a」「v」「g」を引く（「Dvorak - QWERTY ⌘」は ⌘ の間 QWERTY になるため）。物理位置のキーが目的の文字を入力するなら物理位置を使い（US / JIS は従来どおり）、テンキーは使わない。`/` は Shift なしで入力できるキーが無ければ Shift 付きのキーも探す（Shift+7 の配列）。見つからなければ従来どおり QWERTY の物理位置で送る。Return は配列に依らない。
-- 各ステップは `Task` で実行し、全体タイムアウト 1.5 秒（AppCoordinator 側）。Injector 内部にも基準走査 600ms、シート待ちは段ごと（①〜③、上記「代替」の時間配分）の上限があり、超えたら ⌘⇧G を送らず／それ以上進まず `timeout(step: .waitSheet)` を返す。
+- 各ステップは `Task` で実行し、全体タイムアウト 2.5 秒（AppCoordinator 側。上記「全体タイムアウト」、#29 で 1.5 秒から延ばした）。Injector 内部にも基準走査 600ms、シート待ちは段ごと（①〜③、上記「代替」の時間配分）の上限があり、超えたら ⌘⇧G を送らず／それ以上進まず `timeout(step: .waitSheet)` を返す。
 - AX の走査には打ち切り条件（期限到来 or キャンセル）を渡し、`axQueue` 上で進む走査もキャンセルに応じて途中で打ち切る（応答しないアプリの走査が `InjectionSerialGate` を塞いで次の注入を待たせ続けないため、PR #45）。
 - AX の要素参照には 1 回 0.25 秒のメッセージングタイムアウトを設定する（既定の約 6 秒のままだと `axQueue` 全体が止まるため）。
 - 注入は `InjectionSerialGate` で 1 件ずつ直列に実行する（キャンセル済みの注入が後始末を待つ間に次の注入が始まると、前のパスを「元の内容」として退避してしまい、ユーザーのクリップボードを失うため、PR #45）。

@@ -12,7 +12,7 @@ upstream:
 downstream:
 - PROJ-TST-002
 owner: TakehiroT
-updated: 2026-09-28
+updated: 2026-10-04
 ---
 
 # テスト計画: openpath
@@ -73,7 +73,7 @@ updated: 2026-09-28
 | --- | --- |
 | Idle → PanelShown | `panelAppeared` でパレット表示が呼ばれる |
 | PanelShown → Injecting → Idle | `confirm(path)` で注入が呼ばれ、成功後 Idle |
-| 注入タイムアウト | 1.5 秒で Idle に戻り、エラーがパレットに渡る |
+| 注入タイムアウト | 2.5 秒で Idle に戻り、エラーがパレットに渡る。1.5 秒を超えても 2.5 秒の前に終わる注入は成功として履歴に残る（#29） |
 | 注入失敗（タイムアウト・`panelGone` 以外） | `PanelShown` に戻り、パレットにエラー表示が残る。Esc または `panelGone` で閉じる（PR #39） |
 | パネル消滅 | `PanelShown` では Idle に戻る。`Injecting` でも基本は Idle に戻るが、auto_confirm 開始後は例外的に注入の結果を待ってから Idle に戻る（ARCH-001 §5、PR #52） |
 | 注入成功後の再通知 | 成功したパネルの再検知（`panelAppeared`）ではパレットを出し直さない。成功後のホットキーでは再表示する（PR #52） |
