@@ -19,7 +19,7 @@ updated: 2026-10-04
 
 ## 1. 方針
 
-- `OpenPathCore`（ファジーマッチ、frecency、設定パース、状態機械）は Swift Testing によるユニットテストで網羅する。XCTest と違い Xcode を必要とせず Command Line Tools だけで実行できるため、Swift Testing を採用する。ローカルでは `./scripts/test.sh` を使う（Command Line Tools のみの環境では素の `swift test` が `no such module 'Testing'` で失敗するためのラッパー。CLT が選択されているときだけ `-F`・rpath・cross-import overlay の無効化を足し、Xcode 環境では素の `swift test` と同じ、PR #32）。
+- `OpenPathCore`（ファジーマッチ、frecency、設定パース、状態機械）は Swift Testing によるユニットテストで網羅する。XCTest と違い Xcode を必要とせず Command Line Tools だけで実行できるため、Swift Testing を採用する。ローカルでは `./scripts/test.sh` を使う（Command Line Tools のみの環境では素の `swift test` が `no such module 'Testing'` で失敗するためのラッパー。CLT が選択されているときだけ `-F`・rpath・cross-import overlay の無効化を足し、Swift 6.3 以降の CLT では Testing.framework が依存する `lib_TestingInterop.dylib` のある `usr/lib` も rpath に足す。Xcode 環境では素の `swift test` と同じ、PR #32）。
 - `OpenPathMac`（AX 観測、注入）は自動化が困難なため、手動シナリオテストと、Finder の「開く」ダイアログを使ったスモークスクリプト（AppleScript で `choose folder` を出す）で確認する。
 - CI（GitHub Actions）は `macos-15` ランナー、Xcode 16.4（`DEVELOPER_DIR` で明示）でユニットテスト、`swift build`、リリース条件のテストを実行する。`macos-14` は既定の Xcode が 15.4（Swift 5.10）で swift-tools-version 6.0 のマニフェストを扱えず、2026-11-02 にサポートも終了するため採用しない（PR #33）。AX を要するテストはローカル限定。
 
@@ -179,6 +179,7 @@ open build/openpath.app          # アクセシビリティ権限を付与して
 - チェックサム不一致、成果物不足、余分なファイル、既存 Release の拒否。
 - キーチェーン復元・削除・ファイル削除の失敗を注入し、後続の削除を試みたうえで失敗を返すこと。
 - アップロード不足時に Draft を維持し、Preview は prerelease / 非 Latest、Stable は正式版 / Latest とすること。
+- `scripts/test.sh` が `swift test` へ渡す引数。`swift` をスタブに差し替え、CLT に `lib_TestingInterop.dylib` が「ある」「無い」場合と Xcode の場合を確かめる（release workflow がこのスクリプトを使うため）。
 
 ローカルの Smoke は `./scripts/package_release.sh smoke <X.Y.Z>` で Universal ZIP と SHA256SUMS を確認する。
 Apple への公証提出、staple、配布後の Gatekeeper 評価は最初の Stable 実行で確認する。
