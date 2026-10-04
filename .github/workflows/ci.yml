@@ -69,6 +69,11 @@ jobs:
       - name: Test release gates
         run: python3 scripts/release_ci_test.py
 
+      # Stable に添付する cask が Homebrew tap の brew audit で落ちないよう、scripts/cask.sh の生成物に
+      # brew style をかける（tap はしない）。所要は数十秒なので、macOS の job は増やさずこの job で行う
+      - name: Check the generated cask with brew style
+        run: ./scripts/cask_style.sh
+
       - name: Build
         run: swift build
 

@@ -9,7 +9,7 @@ upstream:
 downstream:
 - PROJ-TST-001
 owner: TakehiroT
-updated: 2026-09-28
+updated: 2026-10-04
 ---
 
 # openpath のリリース運用
@@ -35,7 +35,7 @@ Smoke と Preview は Apple の公証を受けていないため、通常の配�
 検証者に用途を伝え、正式配布には Stable を使う。
 
 openpath には自動更新機能がないため、Fern の updater manifest や R2 公開処理は導入しない。
-Homebrew tap への反映は、Stable に添付された cask を使って別途行う。
+Stable の公開に成功すると、添付した cask で Homebrew tap に更新の Pull Request を自動で出す（[Homebrew tap への反映](#homebrew-tap-への反映)）。
 
 ## バージョンとタグ
 
@@ -75,9 +75,60 @@ ZIP をダウンロードしたら `shasum -a 256 --check SHA256SUMS` で確認�
 Stable では `openpath.rb` も検証対象なので、添付ファイルをすべて同じディレクトリに保存する。
 ZIP を展開して Applications に移し、起動とアクセシビリティ許可後の動作を確認する。
 
-Homebrew tap は、公開された `openpath.rb` を `Casks/openpath.rb` に反映する。
+Stable の公開後は、`Release macOS` が Homebrew tap に `Casks/openpath.rb` の更新 Pull Request を出す。
 この cask の URL と SHA256 は、その Stable の ZIP に対応する。
 Preview の ZIP を Stable 用 cask に差し替えない。
+
+## Homebrew tap への反映
+
+Stable の publish job が成功すると、`Release macOS` は `Homebrew tap`（`.github/workflows/homebrew-tap.yml`）を呼ぶ。
+Smoke と Preview では呼ばない。
+この workflow は GitHub App のトークンで、[TamaT-LLC/homebrew-tap](https://github.com/TamaT-LLC/homebrew-tap) に cask の更新 Pull Request を出す。
+処理は `scripts/update_homebrew_tap.py` にまとめてあり、次の順に進む。
+
+1. 公開済みの Release が、Draft でも prerelease でもない Stable で、tag が `vX.Y.Z` の形であることを確かめる。
+2. Release から `openpath-X.Y.Z.zip`、`openpath.rb`、`SHA256SUMS` を取得する。添付ファイルに過不足があれば失敗にする。
+3. `SHA256SUMS` と ZIP・cask の SHA256、cask の `version` と tag、cask の `sha256` と ZIP、`url` の形を照合する。どれかが合わなければ失敗にする。
+4. 照合が通ってから App のトークンを発行する。トークンの対象は `homebrew-tap` だけで、Contents と Pull requests の書き込みだけを要求する。
+5. tap を clone して `Casks/openpath.rb` と比べる。反映済みなら、何もせずに成功で終わる。
+6. 反映されていなければ、`openpath-vX.Y.Z` ブランチに cask を commit して push し、Pull Request を出して auto-merge（squash）を要求する。
+
+tap 側とは、次のように取り決めている。
+
+- ブランチ名は `openpath-vX.Y.Z`、Pull Request のタイトルは `openpath X.Y.Z` とする。tap はタイトルで自動処理を分けることがあるため、形を変えない。
+- 変更するのは `Casks/openpath.rb` だけで、中身は Release に添付した `openpath.rb` をそのまま使う。ほかのファイルを変えるブランチは、push せずに失敗にする。
+- tap の必須チェックは `brew audit` と `release check` で、auto-merge はこれらの成功を待ってマージする。
+- tap で auto-merge を要求できない場合は、警告を出して Pull Request を残す。job は失敗にしない。
+- commit の作者は App の bot（`<app-slug>[bot]`）とする。名前は固定で書かず、トークンを発行した action の出力から組み立てる。
+
+tap の `release check` は、tap の cask と Release 添付の cask の `version`・`sha256`・`url` を照合する。
+それ以外の行は、Homebrew の変更に合わせて tap 側で直すことがある（`v0.1.0` の `depends_on` など）。
+このため、`version`・`sha256`・`url` が Release と同じなら反映済みとみなし、ほかの行の違いはログに出すだけで戻さない。
+既存の `openpath-vX.Y.Z` ブランチに tap 側の修正が入っている場合も、同じ基準で上書きしない。
+同じ版なのに `sha256` か `url` が違う場合は、tap を手で確かめる必要があるため失敗にする。
+tap の版のほうが新しい場合は、警告を出して変更しない。
+
+同じブランチや開いた Pull Request がすでにあれば、作り直さずにそのブランチへ commit を足す。
+App のトークンで作った Pull Request では、tap の必須チェックの workflow が動く（`GITHUB_TOKEN` で作った Pull Request では動かない）。
+
+### cask の最小 macOS の書き方
+
+`scripts/cask.sh` は、最小の macOS を `depends_on macos: :sonoma` と書く。
+Homebrew 6.0.0（2026-06-11）から、記号だけの `:sonoma` は「Sonoma 以降」を意味するようになり、それまでの `">= :sonoma"` は非推奨になった。
+`">= :sonoma"` のままでは `brew style` が失敗して tap の `brew audit` を通らず、Pull Request は auto-merge されない。
+Homebrew 5.x 以前は `:sonoma` を「Sonoma のみ」と解釈するため、古い Homebrew では Sonoma 以外の macOS にインストールできない。
+`v0.1.0` の添付は `">= :sonoma"` のままで、tap 側で `:sonoma` に直してある。
+CI は、生成した cask に `brew style` をかける（`scripts/cask_style.sh`）。
+
+### App を設定した直後の確認
+
+App を作成し、[README の一覧](../../README.md#github-actions-でリリースする)の Variable と Secret を登録したら、公開済みの `v0.1.0` で dry run を実行する。
+dry run は、トークンの発行、tap の clone、差分の確認までで止まり、push も Pull Request の作成もしない。
+
+1. Actions → `Homebrew tap` → `Run workflow` で、branch に `main`、`tag` に `v0.1.0` を指定し、`dry_run` をチェックしたまま実行する。CLI では `gh workflow run homebrew-tap.yml --ref main -f tag=v0.1.0 -f dry_run=true` を使う。
+2. `Issue a token for the tap` が成功すれば、トークンを発行できている。App が tap にインストールされ、Contents と Pull requests の書き込み権限を持つことも、この step で確かめられる。
+3. `Update the cask in the tap` のログに `Cloned TamaT-LLC/homebrew-tap (main).` が出れば、tap を clone できている。
+4. 同じログで差分の有無を確かめる。tap 側で `depends_on` を直した `v0.1.0` の cask なら、`already has the version, sha256, and url of v0.1.0` と、ほかの行の差分が出て、何もせずに終わる。
 
 ## 認証情報と実行時の扱い
 
@@ -88,6 +139,13 @@ Preview の ZIP を Stable 用 cask に差し替えない。
 一時キーチェーンへ P12 と公証プロファイルを取り込み、終了時には検索リストを復元してキーチェーンを削除する。
 復元や削除が失敗しても残りの削除を試み、いずれかが失敗した場合は job を失敗にする。
 publish job に Apple の秘密鍵は渡さず、GitHub の `contents: write` はその job だけに付与する。
+
+Homebrew tap を更新する GitHub App の秘密鍵は、`Release macOS` の `homebrew-tap` job にだけ渡す。
+`secrets: inherit` は使わず、`HOMEBREW_TAP_APP_PRIVATE_KEY` だけを明示して渡す。
+秘密鍵は `actions/create-github-app-token` の入力にだけ使い、run の環境変数には入れない。設定の確認では、値ではなく有無だけを見る。
+発行するトークンは `TamaT-LLC/homebrew-tap` だけを対象にし、権限を Contents と Pull requests の書き込みに絞る。job の終了時に、action がトークンを失効させる。
+`scripts/update_homebrew_tap.py` は、トークンを引数にもログにも出さない。`gh` は `GH_TOKEN` から読み、git は push のときだけ `gh auth git-credential` を通して受け取る。
+この job の `GITHUB_TOKEN` は `contents: read` だけで、Release の取得に使う。
 
 ## 失敗と再実行
 
@@ -105,11 +163,27 @@ Draft が残った場合は、添付ファイルとログを確認してから�
 添付ファイル・SHA256SUMS・prerelease / Latest の状態を確認し、問題がなければ公開済みとして扱う。
 公開済みの成果物やタグは差し替えず、新しい Preview 番号または Stable バージョンで修正する。
 
+Homebrew tap の job（`homebrew-tap / update cask`）は、公開済みの Release から添付ファイルを取得し直し、Actions の artifact を使わない。
+このため、Release の公開後にこの job だけが失敗した場合は、`Re-run failed jobs` でこの job だけを再実行してよい。
+上の「失敗した job だけの再実行は使わない」は、実行番号付きの artifact を受け渡す package と publish の job についての方針で、この job には当てはまらない。
+逆に、この場合に `Re-run all jobs` は使わない。公開済みの Release は上書きしないため、publish job が失敗する。
+`Release macOS` を再実行する代わりに、`Homebrew tap` を手動実行してもよい。`tag` に対象の版を指定し、`dry_run` を外す。
+公開直後の状態確認で publish job が失敗し、Release を公開済みとして扱う場合は、tap の job が動かないため、同じ手動実行で反映する。
+App の設定不足で失敗した場合は、README の一覧の Variable と Secret を直してから再実行する。
+どの方法で再実行しても、反映済みなら何もせず、既存のブランチと Pull Request は作り直さない。
+
 ## 自動検証と残る実機確認
 
 `python3 scripts/release_ci_test.py` は、隔離した Git リポジトリでタグとバージョンの条件を検証する。
 公開処理は GitHub CLI をモックし、チェックサム不一致・余分なファイル・公開済みタグを拒否することを確かめる。
 アップロード不足時に Draft のまま止まることと、Preview / Stable の公開フラグも対象にする。
 
+Homebrew tap への反映は、隔離した bare リポジトリを tap に見立て、GitHub CLI をモックして確かめる。
+照合の失敗、Preview の拒否、反映済みなら何もしないこと（tap 側で直した行を含む）、既存のブランチと Pull Request の扱い、auto-merge を要求できないときの警告、dry run が対象である。
+`Release macOS` が Stable の publish の後にだけ tap の workflow を呼ぶことと、App の秘密鍵の渡し方も、workflow の定義から確かめる。
+`scripts/cask.sh` の生成物は、`depends_on macos: :sonoma` であることと、tap と同じ照合に通ることをテストで確かめる。
+CI では、生成物に `brew style` もかける。
+
 これらのテストは Apple の公証審査や配布先 Mac の動作を代替しない。
 最初の Stable では、Actions の公証結果、ダウンロード後の Gatekeeper 評価、Apple Silicon / Intel の実機起動を確認する。
+tap の必須チェックと auto-merge の実際の動作は、App を設定した後の最初の Stable で確認する。

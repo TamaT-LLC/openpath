@@ -59,6 +59,9 @@ python3 scripts/github_policy_test.py
 python3 scripts/github_policy_check.py
 ```
 
+Homebrew cask（`scripts/cask.sh`）を変えた場合は、`./scripts/cask_style.sh` で生成物に `brew style` をかけてください（Homebrew が必要です。tap はしません）。
+CI の `swift build / swift test` も同じ確認をします。
+
 `github_policy_check.py` は、workflow が使う Actions が [.github/actions-policy.json](./.github/actions-policy.json) の commit SHA に固定されていることと、[.github/settings-desired-v1.json](./.github/settings-desired-v1.json) の必須チェックが CI の job 名と一致することを確かめます。
 Pull Request の CI は、Swift のビルドとテストに加えて、この検証も実行します。
 

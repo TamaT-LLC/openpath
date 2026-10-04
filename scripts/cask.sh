@@ -12,7 +12,9 @@ set -euo pipefail
 source "$(dirname "$0")/lib/common.sh"
 
 readonly HOMEPAGE_URL="https://github.com/TamaT-LLC/openpath"
-# Info.plist の LSMinimumSystemVersion（14.0 = Sonoma）と揃える
+# Info.plist の LSMinimumSystemVersion（14.0 = Sonoma）と揃える。
+# Homebrew 6.0 以降は `depends_on macos: :sonoma` を「Sonoma 以降」と解釈し、
+# 以前の `">= :sonoma"` は非推奨（brew style が失敗する）になったため、記号だけで書く。
 readonly CASK_MIN_MACOS=":sonoma"
 readonly CASK_MIN_MACOS_MAJOR="14"
 readonly SHA256_PATTERN='^[0-9a-f]{64}$'
@@ -46,7 +48,7 @@ cask "${APP_NAME}" do
     strategy :github_latest
   end
 
-  depends_on macos: ">= ${CASK_MIN_MACOS}"
+  depends_on macos: ${CASK_MIN_MACOS}
 
   app "${APP_NAME}.app"
 
