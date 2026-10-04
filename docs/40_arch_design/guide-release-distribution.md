@@ -111,6 +111,15 @@ tap の版のほうが新しい場合は、警告を出して変更しない。
 同じブランチや開いた Pull Request がすでにあれば、作り直さずにそのブランチへ commit を足す。
 App のトークンで作った Pull Request では、tap の必須チェックの workflow が動く（`GITHUB_TOKEN` で作った Pull Request では動かない）。
 
+### cask の最小 macOS の書き方
+
+`scripts/cask.sh` は、最小の macOS を `depends_on macos: :sonoma` と書く。
+Homebrew 6.0.0（2026-06-11）から、記号だけの `:sonoma` は「Sonoma 以降」を意味するようになり、それまでの `">= :sonoma"` は非推奨になった。
+`">= :sonoma"` のままでは `brew style` が失敗して tap の `brew audit` を通らず、Pull Request は auto-merge されない。
+Homebrew 5.x 以前は `:sonoma` を「Sonoma のみ」と解釈するため、古い Homebrew では Sonoma 以外の macOS にインストールできない。
+`v0.1.0` の添付は `">= :sonoma"` のままで、tap 側で `:sonoma` に直してある。
+CI は、生成した cask に `brew style` をかける（`scripts/cask_style.sh`）。
+
 ### App を設定した直後の確認
 
 App を作成し、[README の一覧](../../README.md#github-actions-でリリースする)の Variable と Secret を登録したら、公開済みの `v0.1.0` で dry run を実行する。
@@ -172,6 +181,8 @@ App の設定不足で失敗した場合は、README の一覧の Variable と S
 Homebrew tap への反映は、隔離した bare リポジトリを tap に見立て、GitHub CLI をモックして確かめる。
 照合の失敗、Preview の拒否、反映済みなら何もしないこと（tap 側で直した行を含む）、既存のブランチと Pull Request の扱い、auto-merge を要求できないときの警告、dry run が対象である。
 `Release macOS` が Stable の publish の後にだけ tap の workflow を呼ぶことと、App の秘密鍵の渡し方も、workflow の定義から確かめる。
+`scripts/cask.sh` の生成物は、`depends_on macos: :sonoma` であることと、tap と同じ照合に通ることをテストで確かめる。
+CI では、生成物に `brew style` もかける。
 
 これらのテストは Apple の公証審査や配布先 Mac の動作を代替しない。
 最初の Stable では、Actions の公証結果、ダウンロード後の Gatekeeper 評価、Apple Silicon / Intel の実機起動を確認する。

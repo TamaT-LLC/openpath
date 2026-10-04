@@ -230,7 +230,7 @@ swift run openpath   # 起動。Dock には出ず、メニューバーにアイ�
 
 `swift build` の成果物は実行ファイル単体です。
 常用や配布には、`scripts/` のスクリプトで `.app` バンドルを組み立てて署名します。
-どのスクリプトも Command Line Tools だけで動きます。
+Homebrew を使う `cask_style.sh` を除き、どのスクリプトも Command Line Tools だけで動きます。
 
 | スクリプト | 内容 | 環境変数 |
 | --- | --- | --- |
@@ -238,6 +238,7 @@ swift run openpath   # 起動。Dock には出ず、メニューバーにアイ�
 | `sign.sh` | Hardened Runtime と `Resources/openpath.entitlements` を付けて署名し、`codesign --verify --deep --strict` で検証する | `OPENPATH_SIGN_IDENTITY`（任意） |
 | `notarize.sh` | zip にして `notarytool submit --wait`、`stapler staple`、`spctl -a -vv` を行い、staple 済みの `build/openpath-<version>.zip` を作る | `OPENPATH_NOTARY_PROFILE`（必須） |
 | `cask.sh [--version X.Y.Z] [--zip PATH] [--output FILE]` | 配布用 zip の sha256 から Homebrew cask 定義を生成する（既定は標準出力） | なし |
+| `cask_style.sh [CASK]` | cask に `brew style` をかける。省略時は `Resources/Info.plist` から生成した cask を確かめる。Homebrew が必要で、tap はしない | なし |
 | `release.sh [--version X.Y.Z]` | build、sign、notarize、cask を順に実行し、`build/openpath-<version>.zip` と `build/Casks/openpath.rb` を作る | 上の 2 つとも必須 |
 
 - Universal 2: Command Line Tools だけの環境では `swift build --arch arm64 --arch x86_64` が XCBuild（Xcode 同梱）を要求して失敗します。そのため `build.sh` はアーキテクチャごとにビルドしてから lipo で結合します。

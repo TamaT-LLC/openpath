@@ -18,6 +18,7 @@ import subprocess
 import tempfile
 import textwrap
 import unittest
+import zipfile
 from unittest.mock import patch
 
 SCRIPTS = pathlib.Path(__file__).resolve().parent
@@ -228,6 +229,29 @@ def tap_cask(version, sha256, url=TAP_CASK_URL):
 def tap_side_fix(cask):
     """The cask after a tap-side edit outside version, sha256, and url, which the tap's release check allows."""
     return cask.replace('  app "openpath.app"\n', '  depends_on macos: :sonoma\n\n  app "openpath.app"\n')
+
+
+@unittest.skipUnless(shutil.which('plutil'), 'scripts/cask.sh reads Info.plist with the macOS plutil')
+class CaskScriptTests(unittest.TestCase):
+    def test_generated_cask_requires_sonoma_or_later_and_matches_its_zip(self):
+        with tempfile.TemporaryDirectory() as temp:
+            assets = pathlib.Path(temp)
+            archive = assets / 'openpath-1.2.3.zip'
+            info = {'CFBundleShortVersionString': '1.2.3', 'CFBundleIdentifier': 'jp.tamat.openpath',
+                    'LSMinimumSystemVersion': '14.0'}
+            with zipfile.ZipFile(archive, 'w') as bundle:
+                bundle.writestr('openpath.app/Contents/Info.plist', plistlib.dumps(info))
+            result = subprocess.run([str(SCRIPTS / 'cask.sh'), '--version', '1.2.3', '--zip', str(archive),
+                                     '--output', str(assets / 'openpath.rb')], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            text = (assets / 'openpath.rb').read_text()
+            # Homebrew 6.0 deprecates `">= :sonoma"`; a bare symbol now means "Sonoma or later".
+            self.assertIn('\n  depends_on macos: :sonoma\n', text)
+            self.assertNotIn('>=', text)
+            (assets / 'SHA256SUMS').write_text(''.join(
+                hashlib.sha256((assets / name).read_bytes()).hexdigest() + '  ' + name + '\n'
+                for name in ['openpath-1.2.3.zip', 'openpath.rb']))
+            self.assertEqual(load('update_homebrew_tap').verify_assets(assets, 'v1.2.3'), '1.2.3')
 
 
 class HomebrewTapFixture(unittest.TestCase):
