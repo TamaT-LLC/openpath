@@ -10,8 +10,10 @@ on top of the system file dialog (NSOpenPanel). In any app's "Open Folder" or
 "Attach File" dialog, including Claude Desktop, Cursor, VS Code, and browsers,
 you type a few characters and press Return instead of walking the Finder tree.
 
-The first stable release, `v0.1.0`, is in preparation and has not been
-published on GitHub Releases yet. Until then, [build it from source](#build-from-source).
+The first stable release,
+[`v0.1.0`](https://github.com/TamaT-LLC/openpath/releases/tag/v0.1.0), was
+published on GitHub Releases on 2026-10-04. [Install the ZIP](#install), or
+[build it from source](#build-from-source).
 openpath asks only for the Accessibility permission and never uses the network.
 
 The user interface is Japanese only. The design documents under `docs/` and the
@@ -64,8 +66,11 @@ openpath runs on macOS 14 (Sonoma) or later, on Apple Silicon and Intel.
 ### ZIP from GitHub Releases
 
 Builds are published on [GitHub Releases](https://github.com/TamaT-LLC/openpath/releases).
-The first preview, `preview-v0.1.0-1`, and the first stable release, `v0.1.0`,
-are not published yet.
+The latest stable release is [v0.1.0](https://github.com/TamaT-LLC/openpath/releases/tag/v0.1.0),
+with `openpath-0.1.0.zip`, `SHA256SUMS`, and the Homebrew cask `openpath.rb`
+attached. The previews `preview-v0.1.0-1` and `preview-v0.1.0-2` are
+pre-releases for evaluation and are not supported. Use the stable release for
+everyday use.
 
 | Channel | Tag | Signing | Intended use |
 | --- | --- | --- | --- |
@@ -79,15 +84,19 @@ release in one directory, verify the checksums, then extract the ZIP:
 shasum -a 256 --check SHA256SUMS
 ```
 
-Move `openpath.app` to Applications and open it. Previews are not notarized,
-so Gatekeeper blocks the first launch; allow it from System Settings > Privacy &
-Security only if you intend to evaluate the preview.
+Move `openpath.app` to Applications and open it. Follow the guide shown on the
+first launch and grant openpath in System Settings > Privacy & Security >
+Accessibility. Until you do, openpath does not detect file dialogs (see
+[Permissions](#permissions)).
+
+Previews are not notarized, so Gatekeeper blocks the first launch; allow it from
+System Settings > Privacy & Security only if you intend to evaluate the preview.
 
 ### Homebrew cask
 
 Each stable release includes a Homebrew cask (`openpath.rb`) for that exact
-ZIP. Installation from a Homebrew tap will be documented here after the first
-stable release.
+ZIP. Installation from a Homebrew tap is not available yet; use the ZIP or build
+from source.
 
 ### Build from source
 

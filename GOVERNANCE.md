@@ -65,7 +65,7 @@ Stable は、同じ version の Preview を実機で確かめた後に、Develop
 公開した tag と Release の成果物は、差し替えも削除もしません。
 修正が必要な場合は、新しい Preview 番号または新しい Stable の version で公開します。
 サポート対象は最新の Stable だけで、保守用の branch は持ちません。
-現在は公開済みの Stable が無く、最初の Stable は `v0.1.0` の予定です。
+最初の Stable `v0.1.0` を 2026-10-04 に公開しました。
 
 リリースのサポートは best effort で、SLA はありません。
 security の修正は [SECURITY.md](./SECURITY.md)、その他のサポートは [SUPPORT.md](./SUPPORT.md) に従います。

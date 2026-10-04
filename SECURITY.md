@@ -14,12 +14,12 @@ private vulnerability report のフォームが使えない場合も、内容を
 
 ## Supported versions
 
-現在、公開済みの Stable はありません。
-最初の Stable `v0.1.0` を公開した後は、最新の Stable だけを security update の対象にします。
+最初の Stable `v0.1.0` を 2026-10-04 に公開しました。
+security update の対象は、最新の Stable だけです。
 
 | Version | Security update |
 | --- | --- |
-| 最新の Stable（`vX.Y.Z`） | 対象。最初の Stable は `v0.1.0` の予定です |
+| 最新の Stable（現在は `0.1.x`。公開済みは `v0.1.0`） | 対象 |
 | Preview（`preview-vX.Y.Z-N`） | 対象外。ad-hoc 署名で公証していない評価用のビルドです |
 | `main` とソースからのビルド | best effort。修正は `main` に先に入れます |
 | 古い Stable | 対象外。最新の Stable へ更新してください |
