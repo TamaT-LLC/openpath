@@ -151,9 +151,6 @@ public final class GoToFieldDirectEntry {
         try await waitForFieldFocus(controls: controls, on: timeline)
         // 送り先を決める（AX の読み取りを伴う）準備は確認の前に済ませ、確認の後は待ちを挟まずに送る
         let prepared = try await prepareReturnKey(via: route)
-        if prepared != nil, requiresSheetKeyFocus {
-            try await ensureSheetHasKeyFocus(on: timeline)
-        }
         // パレットにキーを手放させている間に切り替わっていないか、送る直前に確かめ直す
         try await InjectionTargetCheck.ensureAvailable(targetGuard, on: timeline)
         guard let prepared else {
@@ -161,13 +158,18 @@ public final class GoToFieldDirectEntry {
             try await PanelControlOperation.activate(controls.field, by: .confirm)
             return
         }
+        // 注入先の確認はパネル自体にフォーカスがあっても通るため、移動先シートの確認は最後に行い、その後は待たずに送る
+        if requiresSheetKeyFocus {
+            try await ensureSheetHasKeyFocus(on: timeline)
+        }
         try Task.checkCancellation()
         prepared.post()
         Log.debug("副方式: Return を送りました（経路: \(route.rawValue)、+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
     }
 
-    /// 主方式の Return の後にシートが閉じなかった（`timeout(.waitSheetClose)`）ため Return を送り直すときは、送る直前に、
-    /// 注入先のフォーカス中のウィンドウが移動先シートかを確かめる。入力欄の kAXFocused は、シートがキーウィンドウかを反映しない。
+    /// 主方式の Return の後にシートが閉じなかった（`timeout(.waitSheetClose)`）ため Return を送り直すときは、注入先の確認の後、
+    /// 送る直前に（間に待ちを挟まずに）、注入先のフォーカス中のウィンドウが移動先シートかを確かめる。
+    /// 入力欄の kAXFocused はシートがキーウィンドウかを反映せず、注入先の確認はパネル自体にフォーカスがあっても通る。
     /// 主方式の Return が遅れて届いてシートが閉じかけている・キーウィンドウでなくなっていると、システム経由の Return が
     /// 後ろのパネルの「開く」に届き、移動していない元の場所で開いてしまうため（PR #118 のレビュー）。
     /// 移動先シートでない・確かめられなければ、Return を送らずに `timeout(.waitSheetClose)` を投げる。

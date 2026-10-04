@@ -73,6 +73,22 @@ struct PathInjectionFlowSheetCloseTests {
         #expect(!harness.log.events.contains(.lookUpOpenButton))
     }
 
+    @Test("送り直す Return の直前の確認は、注入先の確認の後に行い、その後は待たずに Return を送る（注入先の確認の間にシートが閉じても、後ろのパネルへ送らない）")
+    func checksSheetKeyFocusLastBeforeReturn() async throws {
+        let harness = Self.makePreopenedHarness()
+        Self.closeOnSecondReturn(harness)
+        harness.targetGuard.logsChecks = true
+
+        try await harness.run(path: Self.path)
+
+        let secondReturnIndex = try #require(harness.log.events.lastIndex(of: .key(.returnKey)))
+        #expect(Array(harness.log.events[(secondReturnIndex - 2)...secondReturnIndex]) == [
+            .targetCheck,
+            .goToSheetFocusCheck,
+            .key(.returnKey),
+        ])
+    }
+
     @Test("主方式が Return を送る前に失敗した（waitPaste）副方式では、従来どおり移動先シートのキーウィンドウを確かめずに Return を送る")
     func doesNotCheckSheetKeyFocusBeforeFirstReturn() async throws {
         let harness = Self.makePreopenedHarness()

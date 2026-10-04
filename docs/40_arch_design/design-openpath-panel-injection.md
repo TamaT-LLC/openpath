@@ -186,7 +186,7 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
 3. AXUIElementSetAttributeValue(field, kAXValueAttribute, path as CFString)
 4. 確定前の確認（主方式の 7. と同じ）。入力欄の値が移動先にならなければ確定せず timeout(.waitPaste)（「パスの貼り付けに失敗」）を返す
 5. シート内 AXButton(title: "移動" / "Go") を AXPress。無ければ、パレットにキーを手放させ、入力欄が kAXFocused を持つまで最大 250ms 待ってから Return を送る（Issue #74）。来なければ kAXFocused に true をセットし、入力欄が持ったことを確かめてから送る（持たなければ 50ms 後に 1 回確かめ直す）。Return は主方式が最後に使った経路（注入先のプロセス、代替の後は HID）で送る。与えても持たない場合と、待つ間に入力欄が消えた場合は、Return がパネルの「開く」など別の要素に届かないよう、送らずに timeout(.waitPaste) を返す。フォーカスを読めない場合は、確かめられないため従来どおり送る。Return を送れなければ field に kAXConfirmAction（macOS 27 の入力欄は kAXConfirmAction に成功を返すが移動しないため、PR #79）
-   - 主方式が timeout(.waitSheetClose) で回ってきた場合の Return は、送る直前（注入先の確認の前）に、注入先のアプリのフォーカス中のウィンドウが移動先シート（ロール AXSheet で、AXIdentifier が `GoToWindow` か直下に `PathTextField` を持つ）かを確かめる。そうでない・確かめられなければ、Return を送らずに timeout(.waitSheetClose) を返す（閉じかけのシートの後ろのパネルの「開く」に Return を届かせないため。Issue #95、PR #118 のレビュー）。kAXConfirmAction で確定する場合は入力欄へ直接送るため確かめない
+   - 主方式が timeout(.waitSheetClose) で回ってきた場合の Return は、注入先の確認の後、送る直前に（間に待ちを挟まずに）、注入先のアプリのフォーカス中のウィンドウが移動先シート（ロール AXSheet で、AXIdentifier が `GoToWindow` か直下に `PathTextField` を持つ）かを確かめる。注入先の確認はパネル自体にフォーカスがあっても通るため、この確認を最後に行う。AX の往復の後に注入先のアプリがまだ最前面かも確かめ直す。そうでない・確かめられなければ、Return を送らずに timeout(.waitSheetClose) を返す（閉じかけのシートの後ろのパネルの「開く」に Return を届かせないため。Issue #95、PR #118 のレビュー）。kAXConfirmAction で確定する場合は入力欄へ直接送るため確かめない
    - 確定の後、主方式の 8. と同じく、移動先シートが閉じるまで最大 600ms、50ms 間隔で待つ（Issue #95）。閉じなければ確定が届いていないため、成功とせずに timeout(.waitSheetClose)（「「フォルダへ移動」を確定できません」）を返す。kAXConfirmAction で確定した場合も、閉じなければ同じく失敗にする。閉じたことを確かめられない場合（探索が失敗し続けた）も失敗にする
 6. 以降は主方式のステップ 9〜10 と同じ（副方式はペーストボードを使わないため、timeout(.waitPaste)・timeout(.waitSheetClose) 経由のフォールバックでも退避・復元は発生しない）
 ```

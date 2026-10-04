@@ -96,11 +96,12 @@ public final class InjectionTargetGuard: InjectionTargetGuarding {
     }
 
     /// 注入先のアプリのフォーカス中のウィンドウが移動先シートか（Issue #95）。フォーカス中のウィンドウが無ければ false。
-    /// 移動先シートがキーウィンドウなら、フォーカス中のウィンドウは移動先シートそのものになる（macOS 27 の自プロセスのパネルと、
-    /// 注入の前から移動先シートが開いていた macOS 26 の VS Code で確認）。
+    /// 移動先シートがキーウィンドウなら、フォーカス中のウィンドウは移動先シートそのものになる（macOS 27 の自プロセスのパネルで確認。
+    /// 注入先の記録（`captureTarget`）と同じ前提。リモートのパネルでは実機で確かめる）。
+    /// キーを送る直前の最後の確認として使うため、AX の往復の後に注入先のアプリがまだ最前面かも確かめ直す。
     public func isGoToSheetFocused(cutoff: ScanCutoff) async throws -> Bool {
-        guard let target else { return false }
-        return try await onAXQueue { () throws -> Bool in
+        guard let target, frontmostProcessID() == target.processID else { return false }
+        let isGoToSheet = try await onAXQueue { () throws -> Bool in
             try cutoff.throwIfReached()
             let focusedWindow: AXUIElement
             do {
@@ -116,5 +117,7 @@ public final class InjectionTargetGuard: InjectionTargetGuarding {
                 children: PanelControlAX.children(of:)
             )
         }
+        // AX の往復（最大でメッセージングタイムアウトまで）の間に別のアプリへ切り替わっていれば、Return はそのアプリに届く
+        return isGoToSheet && frontmostProcessID() == target.processID
     }
 }

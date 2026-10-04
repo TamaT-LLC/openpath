@@ -51,6 +51,9 @@ final class TargetGuardFake: InjectionTargetGuarding {
 
     func isGoToSheetFocused(cutoff: ScanCutoff) async throws -> Bool {
         goToSheetFocusCheckCount += 1
+        if logsChecks {
+            log.record(.goToSheetFocusCheck)
+        }
         try cutoff.throwIfReached()
         guard let goToSheetFocus else {
             throw InjectionError.axError(code: InjectionAXErrorCode.failure)
