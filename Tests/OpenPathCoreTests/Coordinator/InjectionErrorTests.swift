@@ -12,6 +12,8 @@ struct InjectionErrorTests {
         arguments: [
             (InjectionError.timeout(step: .waitSheet), "移動できませんでした（⌘⇧G が開きません）"),
             (InjectionError.timeout(step: .waitPaste), "移動できませんでした（パスの貼り付けに失敗）"),
+            // 確定しても移動先シートが閉じない（Issue #95）
+            (InjectionError.timeout(step: .waitSheetClose), "移動できませんでした（「フォルダへ移動」を確定できません）"),
             (InjectionError.timeout(step: .overall), "移動できませんでした（タイムアウト）"),
             (InjectionError.axError(code: axCannotCompleteCode), "移動できませんでした（アクセシビリティ操作に失敗 (-25204)）"),
             // パネルの移動は済んでいる場合があるため「移動できませんでした」とは言わない

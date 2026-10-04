@@ -1,6 +1,7 @@
 /// auto_confirm または Cmd+Enter のとき、移動後にパネルの「開く」ボタンを押す（DSN-001 §3.1 ステップ 8、FR-INJECT-03）。
 ///
-/// 主方式では Return（移動先シートの確定）の後、副方式では「移動」の押下の後に呼ぶ（`PathInjectionHooks.didSubmitGoToSheet`）。
+/// 主方式では Return（移動先シートの確定）の後、副方式では「移動」の押下・Return の後に、移動先シートが閉じたのを確かめてから呼ぶ
+/// （`PathInjectionHooks.didSubmitGoToSheet`、Issue #95）。
 /// 「開く」の押下でパネルが閉じるのは正常なので、押した後にパネルが消えたことは成功として扱い、`.panelGone` は投げない
 /// （AppCoordinator は自動確定中のパネルの消滅で注入を止めず、この結果を待って履歴に残す）。
 ///
@@ -41,20 +42,23 @@ public final class OpenButtonAutoConfirm {
 
     /// `PathInjectionHooks.didSubmitGoToSheet` として渡す形。
     public var hook: PathInjectionHooks.DidSubmitGoToSheet {
-        { [self] autoConfirm in
-            try await confirm(autoConfirm: autoConfirm)
+        { [self] autoConfirm, elapsedSinceSubmit in
+            try await confirm(autoConfirm: autoConfirm, elapsedSinceSubmit: elapsedSinceSubmit)
         }
     }
 
-    /// autoConfirm なら 300ms 待ってから「開く」を探し、押せる状態になってから押す。autoConfirm でなければ何もしない（既定は自動で開かない）。
+    /// autoConfirm なら、確定から 300ms 経つまで待ってから「開く」を探し、押せる状態になってから押す。
+    /// autoConfirm でなければ何もしない（既定は自動で開かない）。
+    /// - Parameter elapsedSinceSubmit: 確定（Return・「移動」の押下）から呼ばれるまでに経った時間（移動先シートが閉じるのを確かめた時間）。
+    ///   その分は待たない。閉じるのを確かめた後に 300ms を重ねると、「開く」の押下が閉じるまでの時間（約 400ms）だけ遅れるため（Issue #95）。
     /// - Throws: 期限までにボタンが見つからなければ `InjectionError.axError(failure)`、探すのが期限内に終わらない・
     ///   押せる状態にならなければ `.axError(cannotComplete)`、押せなければ `.axError`、
     ///   押す前に注入先が無効になっていれば `.panelGone` / `.targetNotFrontmost`、キャンセル時は `CancellationError`。
-    public func confirm(autoConfirm: Bool) async throws {
+    public func confirm(autoConfirm: Bool, elapsedSinceSubmit: Duration = .zero) async throws {
         guard autoConfirm else { return }
         let timeline = ElapsedTimeline(clock: clock)
         // 移動先シートが閉じ、パネルの移動が反映されてから押す
-        try await timeline.sleep(untilElapsed: timing.openButtonDelay)
+        try await timeline.sleep(untilElapsed: max(.zero, timing.openButtonDelay - elapsedSinceSubmit))
 
         let button = try await waitForPressableButton(on: timeline)
         try await InjectionTargetCheck.ensureAvailable(targetGuard, on: timeline)

@@ -13,6 +13,7 @@ import OpenPathCore
 ///   注入先のプロセスへの ⌘⇧G でシートが出なかった注入先は、注入をまたいで覚えておき（`GoToSheetRouteMemory`）、次はシステム経由から始める
 /// - キー入力（⌘A / ⌘V / Return）の前の、移動先シートの入力欄のフォーカスの待ち合わせ（`GoToFieldFocusWait`、Issue #74）
 /// - 確定（Return・「移動」）の前の、移動先シートの入力欄と候補の選択の確認（`GoToSheetSubmitGate`、Issue #74）
+/// - 確定の後の、移動先シートが閉じたことの確認（`GoToSheetCloseWait`、Issue #95）。閉じなければ成功とせず副方式かエラーへ
 /// - auto_confirm / Cmd+Enter の「開く」の押下（§3.1 ステップ 8）
 /// - キー操作・AX 操作の直前ごとの注入先の確認（別のアプリへの誤送出の防止）
 ///
@@ -47,6 +48,7 @@ public final class PanelInjector: PathInjecting {
         let goToFieldLocator = GoToFieldLocator(targetWindow: targetWindow)
         let submitGate = GoToSheetSubmitGate(locator: goToFieldLocator, clock: clock)
         let fieldFocus = GoToFieldFocusWait(locator: goToFieldLocator, clock: clock)
+        let sheetCloseWait = GoToSheetCloseWait(locator: goToFieldLocator, clock: clock)
         let autoConfirm = OpenButtonAutoConfirm(
             locator: OpenButtonLocator(targetWindow: targetWindow),
             targetGuard: targetGuard,
@@ -61,6 +63,7 @@ public final class PanelInjector: PathInjecting {
                 targetGuard: targetGuard,
                 fieldFocus: fieldFocus,
                 submitGate: submitGate,
+                sheetCloseWait: sheetCloseWait,
                 sheetFallback: GoToSheetFallback(
                     focusReader: InjectionFocusReader(targetProcessID: targetProcessID),
                     routeMemory: routeMemory,
@@ -76,6 +79,7 @@ public final class PanelInjector: PathInjecting {
                 prepareForKeyEvents: prepareForKeyEvents,
                 submitGate: submitGate,
                 fieldFocus: fieldFocus,
+                sheetCloseWait: sheetCloseWait,
                 didSubmit: autoConfirm.hook,
                 clock: clock
             ),

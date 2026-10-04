@@ -65,13 +65,39 @@ struct OpenButtonAutoConfirmTests {
         #expect(harness.log.entries == expected)
     }
 
+    @Test(
+        "300ms は確定（Return）から数える。シートが閉じるのを確かめる間に過ぎた分は待たない（Issue #95）",
+        arguments: [
+            (Duration.milliseconds(100), Duration.milliseconds(200)),
+            (.milliseconds(300), .zero),
+            (.milliseconds(400), .zero),
+        ]
+    )
+    func countsDelayFromSubmit(elapsedSinceSubmit: Duration, expectedWait: Duration) async throws {
+        let harness = Harness()
+
+        try await harness.autoConfirm.confirm(autoConfirm: true, elapsedSinceSubmit: elapsedSinceSubmit)
+
+        #expect(harness.log.entries.first == .init(time: expectedWait, event: .lookUpOpenButton))
+        #expect(harness.log.events.last == .press(element: "open"))
+    }
+
+    @Test("hook に渡された、確定からの経過時間も同じように差し引く")
+    func hookCountsDelayFromSubmit() async throws {
+        let harness = Harness()
+
+        try await harness.autoConfirm.hook(true, .milliseconds(250))
+
+        #expect(harness.log.entries.first == .init(time: .milliseconds(50), event: .lookUpOpenButton))
+    }
+
     @Test("PathInjectionHooks に渡す hook も同じように振る舞う")
     func hookBehavesLikeConfirm() async throws {
         let enabled = Harness()
         let disabled = Harness()
 
-        try await enabled.autoConfirm.hook(true)
-        try await disabled.autoConfirm.hook(false)
+        try await enabled.autoConfirm.hook(true, .zero)
+        try await disabled.autoConfirm.hook(false, .zero)
 
         #expect(enabled.log.events.last == .press(element: "open"))
         #expect(disabled.log.events.isEmpty)

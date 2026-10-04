@@ -7,6 +7,10 @@
 /// （PathInjectionFlowKeyRouteTests）。③ の上限近くでシートが出て、入力欄のフォーカスと候補の更新を待つと 1.5 秒を超えるため
 /// （Issue #29 の QA の初回の注入、PathInjectionFlowSlowSheetTests）、AppCoordinator の全体タイムアウトは 2.5 秒にしている。
 /// シートが出なければ各段の待ちで打ち切って副方式へ回るため、全体タイムアウトを延ばしても失敗が遅れることはない。
+/// 確定（Return）の後は、移動先シートが閉じるまで最大 600ms 待つ（`GoToSheetCloseTiming`、Issue #95）。閉じなければ副方式で
+/// 確定し直してもう一度待つため、③ の上限近くで出たシートでどちらの確定でも閉じない最も遅い失敗でも、約 2,450ms で
+/// 全体タイムアウトの前に返る。auto_confirm の「開く」の待機（300ms）は確定から数え、閉じるのを待った時間と重ねない
+/// （PathInjectionFlowSheetCloseTests）。
 public struct PathInjectionTiming: Equatable, Sendable {
     /// 代替（`GoToSheetFallback`）の無い構成で、⌘⇧G から移動先シートの出現を待つ上限（ステップ 4）。
     /// 基準の走査（ステップ 2）の上限にも使う。
@@ -58,19 +62,22 @@ public struct PathInjectionTiming: Equatable, Sendable {
 /// 主方式の手順に外から差し込む処理。
 public struct PathInjectionHooks: Sendable {
     public typealias PrepareForKeyEvents = @MainActor @Sendable () async -> Void
-    public typealias DidSubmitGoToSheet = @MainActor @Sendable (_ autoConfirm: Bool) async throws -> Void
+    /// - Parameters:
+    ///   - autoConfirm: auto_confirm / Cmd+Enter の注入か。
+    ///   - elapsedSinceSubmit: 確定（Return・「移動」の押下）から呼ぶまでに経った時間。移動先シートが閉じるのを確かめた時間（Issue #95）。
+    public typealias DidSubmitGoToSheet = @MainActor @Sendable (_ autoConfirm: Bool, _ elapsedSinceSubmit: Duration) async throws -> Void
 
     /// キー操作を送る前に 1 回呼ぶ。
     /// パレットにキーウィンドウを手放させ、キー入力が NSOpenPanel に届く状態にしてから戻ること。
     /// パレットがキーのままだと ⌘⇧G などがパレットに届いてしまう。
     public var prepareForKeyEvents: PrepareForKeyEvents
-    /// Return（移動先シートの確定）を送った後、ペーストボードを戻す前に呼ぶ（DSN-001 §3.1 ステップ 8）。
+    /// Return（移動先シートの確定）を送り、移動先シートが閉じたのを確かめた後、ペーストボードを戻す前に呼ぶ（DSN-001 §3.1 ステップ 9）。
     /// auto_confirm 時の「開く」の押下を差し込むためのもの。投げたエラーは注入の失敗としてそのまま伝える。
     public var didSubmitGoToSheet: DidSubmitGoToSheet
 
     public init(
         prepareForKeyEvents: @escaping PrepareForKeyEvents = {},
-        didSubmitGoToSheet: @escaping DidSubmitGoToSheet = { _ in }
+        didSubmitGoToSheet: @escaping DidSubmitGoToSheet = { _, _ in }
     ) {
         self.prepareForKeyEvents = prepareForKeyEvents
         self.didSubmitGoToSheet = didSubmitGoToSheet

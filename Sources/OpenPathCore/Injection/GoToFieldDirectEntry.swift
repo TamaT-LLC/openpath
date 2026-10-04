@@ -1,8 +1,9 @@
 /// パス注入の副方式（AX 直接セット、DSN-001 §3.2）。
 ///
 /// 主方式が移動先シートを見つけられなかった（`timeout(.waitSheet)`）か、シートは出たが貼り付けの操作に失敗した・
-/// 貼り付けたパスが入力欄に入らなかった（`timeout(.waitPaste)`）ときに使う。移動先シートの入力欄を AX で探し直し、
-/// 値を直接セットしてから確定する。その後はステップ 8（auto_confirm）へ進む。
+/// 貼り付けたパスが入力欄に入らなかった（`timeout(.waitPaste)`）か、Return を送っても移動先シートが閉じなかった
+/// （`timeout(.waitSheetClose)`、Issue #95）ときに使う。移動先シートの入力欄を AX で探し直し、
+/// 値を直接セットしてから確定し、シートが閉じたのを確かめてからステップ 9（auto_confirm）へ進む。
 ///
 /// - ペーストボードは使わない。
 /// - 確定は「移動」/「Go」ボタンがあれば押し、無ければ Return を送る（macOS 13 以降の移動先シート）。
@@ -13,7 +14,11 @@
 /// - Return は入力欄に届いて初めて移動先への確定になるため、送る前に入力欄がフォーカスを持つまで待つ（`GoToFieldFocusWait`、Issue #74）。
 ///   来なければ AX でフォーカスを与えてから送る（与えられなくても送る）。待っている間に入力欄が消えたら（シートが閉じた）、
 ///   Return がパネルの「開く」に届かないよう送らずに `timeout(.waitPaste)` を投げる。
+/// - 確定の後、移動先シートが閉じるまで最大 600ms 待つ（`GoToSheetCloseWait`、Issue #95）。閉じなければ確定が届いていないため、
+///   成功とせずに `timeout(.waitSheetClose)` を投げる（パレットに「「フォルダへ移動」を確定できません」と出る）。
 /// - 入力欄が見つからなければ、主方式の失敗をそのまま投げる。パレットの文言を主方式の失敗理由（⌘⇧G が開かない等）にするため。
+///   ただし主方式の失敗が `timeout(.waitSheetClose)` なら、主方式が諦めた後にシートが閉じた（主方式の Return は届いていた）とみなし、
+///   確定し直さずに成功とする。
 /// - 値のセットと確定の直前ごとに注入先を確かめる。
 @MainActor
 public final class GoToFieldDirectEntry {
@@ -23,6 +28,7 @@ public final class GoToFieldDirectEntry {
     private let prepareForKeyEvents: PathInjectionHooks.PrepareForKeyEvents
     private let submitGate: GoToSheetSubmitGate?
     private let fieldFocus: GoToFieldFocusWait?
+    private let sheetCloseWait: GoToSheetCloseWait?
     private let didSubmit: PathInjectionHooks.DidSubmitGoToSheet
     private let timing: PanelControlTiming
     private let clock: any Clock<Duration>
@@ -33,6 +39,7 @@ public final class GoToFieldDirectEntry {
     ///     主方式が ⌘⇧G を送る前に失敗した場合、パレットがまだキーを持っているため。
     ///   - submitGate: 確定の前に入力欄の値と候補の選択を確かめる。nil なら確かめない。
     ///   - fieldFocus: Return の前に入力欄がフォーカスを持つまで待つ。nil なら待たない。
+    ///   - sheetCloseWait: 確定の後に移動先シートが閉じるのを待つ。nil なら確かめずに、確定したら成功とする。
     ///   - didSubmit: 確定した後に呼ぶ（主方式の `PathInjectionHooks.didSubmitGoToSheet` と同じもの）。
     ///   - clock: 走査の期限の計測に使う。テストでは実時間を待たない Clock を渡す。
     public init(
@@ -42,7 +49,8 @@ public final class GoToFieldDirectEntry {
         prepareForKeyEvents: @escaping PathInjectionHooks.PrepareForKeyEvents = {},
         submitGate: GoToSheetSubmitGate? = nil,
         fieldFocus: GoToFieldFocusWait? = nil,
-        didSubmit: @escaping PathInjectionHooks.DidSubmitGoToSheet = { _ in },
+        sheetCloseWait: GoToSheetCloseWait? = nil,
+        didSubmit: @escaping PathInjectionHooks.DidSubmitGoToSheet = { _, _ in },
         timing: PanelControlTiming = .standard,
         clock: any Clock<Duration> = ContinuousClock()
     ) {
@@ -52,6 +60,7 @@ public final class GoToFieldDirectEntry {
         self.prepareForKeyEvents = prepareForKeyEvents
         self.submitGate = submitGate
         self.fieldFocus = fieldFocus
+        self.sheetCloseWait = sheetCloseWait
         self.didSubmit = didSubmit
         self.timing = timing
         self.clock = clock
@@ -77,6 +86,10 @@ public final class GoToFieldDirectEntry {
             try await locator.locateGoToField(cutoff: cutoff)
         }
         guard let controls = foundControls else {
+            if primaryError == .timeout(step: .waitSheetClose) {
+                try await finishAfterLateClose(autoConfirm: autoConfirm, on: timeline)
+                return
+            }
             Log.debug("副方式: 移動先シートの入力欄が見つかりません（+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
             throw primaryError
         }
@@ -92,7 +105,31 @@ public final class GoToFieldDirectEntry {
         } else {
             try await submitByReturnKey(controls: controls, via: keyRoute, on: timeline)
         }
-        try await didSubmit(autoConfirm)
+        let submittedAt = timeline.elapsed
+        try await ensureSheetClosed(controls, on: timeline)
+        try await didSubmit(autoConfirm, timeline.elapsed - submittedAt)
+    }
+
+    /// 主方式が Return の後に移動先シートが閉じるのを待ちきれずに諦めた（`timeout(.waitSheetClose)`）が、副方式が探すまでに閉じていた。
+    /// 主方式の Return は届いていたため、値をセットし直して確定し直すことはせず（閉じたシートの後ろのパネルに Return を送らない）、
+    /// 確定した後の処理（auto_confirm）へ進む。パネルごと閉じていれば `.panelGone` / `.targetNotFrontmost` を投げる。
+    private func finishAfterLateClose(autoConfirm: Bool, on timeline: ElapsedTimeline) async throws {
+        try await InjectionTargetCheck.ensureAvailable(targetGuard, on: timeline)
+        Log.info("主方式の Return の後に移動先シートが閉じていたため、確定し直さずに注入を終えます（+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
+        // 主方式の Return からの時間はここでは分からないため、「開く」の待機は短くしない（遅れて閉じたパネルの移動の反映を待つ）
+        try await didSubmit(autoConfirm, .zero)
+    }
+
+    /// 「移動」の押下・Return が移動先シートに届かなければ、シートは残りパネルは移動しない（Issue #95）。
+    /// 閉じたのを確かめてから成功とし、閉じなければ `timeout(.waitSheetClose)` を投げる（パレットに出す）。
+    /// 閉じたかを確かめられない場合は、従来どおり成功とする。
+    private func ensureSheetClosed(_ controls: GoToFieldControls, on timeline: ElapsedTimeline) async throws {
+        guard let sheetCloseWait else { return }
+        let closure = try await sheetCloseWait.waitUntilClosed(controls: controls)
+        Log.debug("副方式: 移動先シートが閉じたかを確かめました（\(closure.rawValue)、+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
+        guard closure == .stillOpen else { return }
+        Log.warning("副方式で確定しても移動先シートが閉じないため、移動できませんでした")
+        throw InjectionError.timeout(step: .waitSheetClose)
     }
 
     private func ensureReadyToSubmit(path: String, controls: GoToFieldControls) async throws {
