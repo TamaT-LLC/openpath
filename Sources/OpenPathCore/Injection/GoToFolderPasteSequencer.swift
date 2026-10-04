@@ -15,7 +15,7 @@
 ///    Return を送る（7）。入力欄の値が移動先にならなければ Return を送らず `timeout(.waitPaste)` を投げる（副方式へ）。
 ///    送る直前にも、確かめた入力欄がまだフォーカスを持つかを確かめ、持たなければ同じく副方式へ回す
 /// 7. 移動先シートが閉じるまで最大 600ms 待つ（8、`GoToSheetCloseWait`、Issue #95）。閉じなければ Return が届いておらず
-///    パネルは移動していないため、成功とせずに `timeout(.waitSheetClose)` を投げる（副方式へ）
+///    パネルは移動していないため、成功とせずに `timeout(.waitSheetClose)` を投げる（副方式へ）。閉じたことを確かめられない場合も同じ
 /// 8. `hooks.didSubmitGoToSheet`（9: auto_confirm の差し込み口）
 /// 9. Return から 200ms 後にペーストボードを戻す（10）。ただし確定前の確認で、貼り付けで入力欄が別の値から移動先に変わったことを
 ///    確かめられたら、⌘V は処理済みのため Return の前に戻して待たない（Issue #74）
@@ -255,26 +255,19 @@ public final class GoToFolderPasteSequencer {
 
     /// Return を送れても、移動先シートに届かなければシートは残り、パネルは移動しない（Issue #95）。閉じたのを確かめてから成功とし、
     /// 閉じなければ `timeout(.waitSheetClose)` を投げて、値をセットし直して確定し直す副方式に任せる。
-    /// 注入先のプロセスへ送った Return で閉じなかったなら、副方式の Return はシステム経由で送るよう切り替える。
-    /// 閉じたかを確かめられない（入力欄を見つけていない・探せない）場合は、従来どおり成功とする。
+    /// 閉じたかを確かめられない（入力欄が一度も見つからない・探せない）場合も、誤った成功を避けるため同じく副方式へ回す。
+    /// 注入先のプロセスへ送った Return で閉じたことを確かめられなかったなら、副方式の Return はシステム経由で送るよう切り替える。
     private func ensureSheetClosed(_ controls: GoToFieldControls?, on timeline: ElapsedTimeline) async throws {
         guard let sheetCloseWait else { return }
         let closure = try await sheetCloseWait.waitUntilClosed(controls: controls)
         Self.logStep("移動先シートが閉じたかを確かめました（\(closure.rawValue)）", on: timeline)
-        switch closure {
-        case .closed:
-            return
-        case .unavailable:
-            Log.info("移動先シートが閉じたかを確かめられないため、Return を送ったことで確定したとみなします")
-            return
-        case .stillOpen:
-            if lastKeyRoute == .targetProcess {
-                lastKeyRoute = .systemWide
-                Self.logStep("注入先のプロセスへ送った Return で移動先シートが閉じなかったため、副方式の Return はシステム経由で送ります", on: timeline)
-            }
-            Log.warning("Return を送っても移動先シートが閉じない（確定が届いていない）ため、副方式へ切り替えます")
-            throw InjectionError.timeout(step: .waitSheetClose)
+        guard closure != .closed else { return }
+        if lastKeyRoute == .targetProcess {
+            lastKeyRoute = .systemWide
+            Self.logStep("注入先のプロセスへ送った Return で移動先シートが閉じたことを確かめられないため、副方式の Return はシステム経由で送ります", on: timeline)
         }
+        Log.warning("Return を送っても移動先シートが閉じたことを確かめられない（\(closure.rawValue)）ため、副方式へ切り替えます")
+        throw InjectionError.timeout(step: .waitSheetClose)
     }
 
     /// 入力欄の値が移動先でないまま Return を送ると、移動先シートに残っていた前回の場所へ移動してしまう（Issue #74）。

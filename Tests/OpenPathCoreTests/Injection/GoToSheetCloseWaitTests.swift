@@ -88,13 +88,23 @@ struct GoToSheetCloseWaitTests {
         #expect(harness.clock.elapsed == .zero)
     }
 
-    @Test("確定した入力欄を見つけていなければ、確かめずに unavailable を返す")
-    func unavailableWithoutControls() async throws {
+    @Test("確定した入力欄を見つけていなければ、最初に見つけた入力欄を基準に確かめる。見つけた後に見つからなくなれば closed")
+    func usesFirstLocatedFieldWithoutControls() async throws {
         let harness = Harness()
+        harness.detachSheet(at: .milliseconds(200))
+
+        #expect(try await harness.wait.waitUntilClosed(controls: nil) == .closed)
+        #expect(harness.clock.elapsed == .milliseconds(200))
+    }
+
+    @Test("確定した入力欄を見つけておらず、待っても一度も見つからなければ、閉じたとは言えないため unavailable を返す")
+    func unavailableWhenFieldIsNeverFound() async throws {
+        let harness = Harness()
+        harness.locator.field = nil
 
         #expect(try await harness.wait.waitUntilClosed(controls: nil) == .unavailable)
-        #expect(harness.clock.elapsed == .zero)
-        #expect(harness.locator.lookupCount == 0)
+        #expect(harness.clock.elapsed == .milliseconds(600))
+        #expect(harness.locator.lookupCount == 13)
     }
 
     @Test("探せない（AX の失敗）ままなら、閉じたとも開いたままとも分からないため unavailable を返す")

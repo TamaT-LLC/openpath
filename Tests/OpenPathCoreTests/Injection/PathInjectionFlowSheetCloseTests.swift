@@ -73,6 +73,25 @@ struct PathInjectionFlowSheetCloseTests {
         #expect(harness.clock.elapsed == .milliseconds(1_300))
     }
 
+    @Test("副方式で確定し直した後に移動先シートを探せず（AX の失敗）、閉じたことを確かめられなければ、成功にせずエラーにする。「開く」は押さない")
+    func reportsErrorWhenSecondaryCannotConfirmClose() async {
+        let harness = Self.makePreopenedHarness()
+        harness.returnClosesSheet = { _ in false }
+        // 副方式の Return の後は、移動先シートを探せない
+        harness.submitCheckLocator.errorProvider = { [keyboard = harness.keyboard] in
+            let returnCount = keyboard.routedKeyStrokes.filter { $0.keyStroke == .returnKey }.count
+            return returnCount >= 2 ? InjectionError.axError(code: -25_204) : nil
+        }
+
+        let thrown = await #expect(throws: InjectionError.self) {
+            try await harness.run(path: Self.path, autoConfirm: true)
+        }
+
+        #expect(thrown == .timeout(step: .waitSheetClose))
+        #expect(harness.log.keyStrokes == [.selectAll, .paste, .returnKey, .returnKey])
+        #expect(!harness.log.events.contains(.lookUpOpenButton))
+    }
+
     @Test("注入先のプロセスへ送った Return でシートが閉じなければ、副方式の Return はシステム経由で送り直す")
     func secondaryReturnUsesSystemRouteAfterTargetProcessReturnFails() async throws {
         let harness = FlowHarness(sheetAppearsAt: .milliseconds(150), fallsBackWhenSheetMissing: true)

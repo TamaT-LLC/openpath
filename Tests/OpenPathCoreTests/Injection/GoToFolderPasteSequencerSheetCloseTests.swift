@@ -126,14 +126,45 @@ struct GoToFolderPasteSequencerSheetCloseTests {
         #expect(returnEntry?.time == .milliseconds(350))
     }
 
-    @Test("閉じたかを確かめられない（入力欄を見つけていない）構成では、従来どおり Return を送ったら成功とする")
-    func succeedsWithoutVerificationWhenFieldIsUnknown() async throws {
+    @Test("閉じたかを確かめない構成（GoToSheetCloseWait を渡さない）では、従来どおり Return を送ったら成功とする")
+    func succeedsWithoutSheetCloseWait() async throws {
         let harness = SequencerHarness(sheetAppearsAt: .milliseconds(150))
         harness.returnClosesSheet = { _ in false }
 
         try await harness.run(path: Self.path)
 
         #expect(Self.didSubmit(harness))
+    }
+
+    @Test("Return の後に移動先シートを探せない（AX の失敗）まま閉じたことを確かめられなければ、成功にせず timeout(waitSheetClose) を投げる")
+    func unconfirmedCloseIsNotSuccess() async {
+        let harness = Self.makePreopenedHarness()
+        harness.returnClosesSheet = { _ in false }
+        harness.goToFieldLocator.errorProvider = { [keyboard = harness.keyboard] in
+            keyboard.routedKeyStrokes.contains { $0.keyStroke == .returnKey } ? InjectionError.axError(code: -25_204) : nil
+        }
+
+        await #expect(throws: InjectionError.timeout(step: .waitSheetClose)) {
+            try await harness.run(path: Self.path, autoConfirm: true)
+        }
+
+        #expect(!Self.didSubmit(harness))
+        #expect(harness.pasteboard.contents == .userClipboard)
+    }
+
+    @Test("移動先シートの入力欄を一度も見つけられなければ、閉じたことも確かめられないため、600ms 探してから timeout(waitSheetClose) を投げる")
+    func neverFoundFieldIsNotSuccess() async {
+        let harness = SequencerHarness(sheetAppearsAt: .milliseconds(150), waitsForFieldFocus: true)
+        harness.goToFieldLocator.field = nil
+
+        await #expect(throws: InjectionError.timeout(step: .waitSheetClose)) {
+            try await harness.run(path: Self.path)
+        }
+
+        // 150ms にシートが出て貼り付け、250ms に Return を送り、そこから 600ms 探しても見つからない
+        #expect(harness.log.keyStrokes == [.goToFolder, .selectAll, .paste, .returnKey])
+        #expect(harness.clock.elapsed == .milliseconds(850))
+        #expect(!Self.didSubmit(harness))
     }
 
     @Test("シートが閉じるのを待っている間にキャンセルされたら、CancellationError を投げてペーストボードを戻す")

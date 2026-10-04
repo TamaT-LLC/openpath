@@ -82,8 +82,8 @@ final class SequencerHarness {
                     clock: clock
                 )
                 : nil,
-            // 入力欄を見つける構成（waitsForFieldFocus）でだけ、閉じたかを確かめられる（見つけていなければ確かめない）
-            sheetCloseWait: GoToSheetCloseWait(locator: goToFieldLocator, clock: clock),
+            // PanelInjector と同じく、入力欄のフォーカスを待つ構成でだけ、確定の後にシートが閉じたかを確かめる
+            sheetCloseWait: waitsForFieldFocus ? GoToSheetCloseWait(locator: goToFieldLocator, clock: clock) : nil,
             sheetFallback: fallsBackWhenSheetMissing
                 ? GoToSheetFallback(
                     focusReader: readsFocusForFallback ? focusReader : nil,

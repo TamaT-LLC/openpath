@@ -4,7 +4,7 @@ public enum GoToSheetClosure: String, Equatable, Sendable {
     case closed
     /// 期限までに閉じなかった。確定（Return・「移動」の押下）が届いておらず、パネルは移動していない。
     case stillOpen
-    /// 閉じたかを確かめられない（確定した入力欄を見つけていない・探せない）。
+    /// 閉じたかを確かめられない（入力欄が一度も見つからない・探せない）。閉じたとは言えないため、成功とはしない。
     case unavailable
 }
 
@@ -43,16 +43,18 @@ public struct GoToSheetCloseTiming: Equatable, Sendable {
 ///   確定した入力欄を AXIdentifier で特定していたのに、手掛かりの弱い入力欄（placeholder 等）しか見つからない場合も、
 ///   パネルの別の入力欄と取り違えないよう `.closed` とする。
 /// - 期限までに閉じなければ `.stillOpen`。呼び出し側は成功とせず、副方式へ回すかエラーにする。
-/// - 確定した入力欄を見つけていない・一度も確かめられなかった（探すのに失敗し続けた）場合は `.unavailable`。
-///   呼び出し側は確かめられないため、従来どおり成功とする。
+/// - 確定の前に入力欄を見つけられなかった場合は、最初に見つけた入力欄を基準に確かめる。
+/// - 一度も確かめられなかった（入力欄が一度も見つからない・探すのに失敗し続けた）場合は `.unavailable`。
+///   呼び出し側は、閉じたことを確かめられないため成功とはしない（誤った成功を避ける。PR #118 のレビュー）。
 /// - 判定と待った時間を debug ログに残す（パスは含まない）。
 @MainActor
 public final class GoToSheetCloseWait {
     /// 1 回の確認の結果。
     private enum Observation {
         case closed
-        case open
-        /// 探せなかった（走査の期限切れ・AX の失敗）。
+        /// 開いている（見つけた入力欄）。
+        case open(GoToFieldControls)
+        /// 探せなかった（走査の期限切れ・AX の失敗）か、まだ一度も見つけていない入力欄が見つからない。
         case unknown
     }
 
@@ -74,26 +76,29 @@ public final class GoToSheetCloseWait {
     }
 
     /// 確定の直後に呼び、移動先シートが閉じるまで待って判定を返す。最初の確認は待たずに行う。
-    /// - Parameter controls: 確定した入力欄。nil なら確かめずに `.unavailable` を返す。
+    /// - Parameter controls: 確定した入力欄。nil（確定の前に見つけられなかった）なら、最初に見つけた入力欄を基準に確かめる。
+    ///   一度も見つからなければ、閉じたとは言えないため `.unavailable` を返す。
     /// - Throws: キャンセル時は `CancellationError`。AX の失敗は投げずに、その回は分からないものとして確かめ続ける。
     public func waitUntilClosed(controls: GoToFieldControls?) async throws -> GoToSheetClosure {
         try Task.checkCancellation()
-        guard let controls else {
-            Log.debug("確定後の移動先シート: 確定した入力欄を見つけていないため、閉じたかを確かめません")
-            return .unavailable
-        }
         let timeline = ElapsedTimeline(clock: clock)
+        var reference = controls
         var hasSeenOpen = false
         var checkCount = 0
         while true {
-            let observation = try await observe(controls, on: timeline)
+            let observation = try await observe(reference, on: timeline)
             checkCount += 1
-            if case .closed = observation {
+            switch observation {
+            case .closed:
                 log(.closed, elapsed: timeline.elapsed, checkCount: checkCount)
                 return .closed
-            }
-            if case .open = observation {
+            case .open(let located):
                 hasSeenOpen = true
+                if reference == nil {
+                    reference = located
+                }
+            case .unknown:
+                break
             }
             if timeline.elapsed + timing.pollInterval > timing.waitLimit {
                 let closure: GoToSheetClosure = hasSeenOpen ? .stillOpen : .unavailable
@@ -105,11 +110,14 @@ public final class GoToSheetCloseWait {
     }
 
     /// 要素が消えたかの読み取り（AX 1 回）で分かれば、探し直さない。
-    private func observe(_ controls: GoToFieldControls, on timeline: ElapsedTimeline) async throws -> Observation {
-        let hasDisappeared = await controls.field.hasDisappeared()
-        try Task.checkCancellation()
-        if hasDisappeared {
-            return .closed
+    /// - Parameter reference: 確かめる入力欄。nil（まだ一度も見つけていない）なら、見つからないことを閉じたとはみなさない。
+    private func observe(_ reference: GoToFieldControls?, on timeline: ElapsedTimeline) async throws -> Observation {
+        if let reference {
+            let hasDisappeared = await reference.field.hasDisappeared()
+            try Task.checkCancellation()
+            if hasDisappeared {
+                return .closed
+            }
         }
         let located: GoToFieldControls?
         do {
@@ -122,11 +130,13 @@ public final class GoToSheetCloseWait {
             }
             return .unknown
         }
-        guard let located else { return .closed }
-        if controls.evidence == .pathFieldIdentifier, located.evidence != .pathFieldIdentifier {
+        guard let located else {
+            return reference == nil ? .unknown : .closed
+        }
+        if reference?.evidence == .pathFieldIdentifier, located.evidence != .pathFieldIdentifier {
             return .closed
         }
-        return .open
+        return .open(located)
     }
 
     private func log(_ closure: GoToSheetClosure, elapsed: Duration, checkCount: Int) {

@@ -113,14 +113,13 @@ public final class GoToFieldDirectEntry {
     }
 
     /// 「移動」の押下・Return が移動先シートに届かなければ、シートは残りパネルは移動しない（Issue #95）。
-    /// 閉じたのを確かめてから成功とし、閉じなければ `timeout(.waitSheetClose)` を投げる（パレットに出す）。
-    /// 閉じたかを確かめられない場合は、従来どおり成功とする。
+    /// 閉じたのを確かめてから成功とし、閉じない・閉じたことを確かめられなければ `timeout(.waitSheetClose)` を投げる（パレットに出す）。
     private func ensureSheetClosed(_ controls: GoToFieldControls, on timeline: ElapsedTimeline) async throws {
         guard let sheetCloseWait else { return }
         let closure = try await sheetCloseWait.waitUntilClosed(controls: controls)
         Log.debug("副方式: 移動先シートが閉じたかを確かめました（\(closure.rawValue)、+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
-        guard closure == .stillOpen else { return }
-        Log.warning("副方式で確定しても移動先シートが閉じないため、移動できませんでした")
+        guard closure != .closed else { return }
+        Log.warning("副方式で確定しても移動先シートが閉じたことを確かめられない（\(closure.rawValue)）ため、移動できませんでした")
         throw InjectionError.timeout(step: .waitSheetClose)
     }
 

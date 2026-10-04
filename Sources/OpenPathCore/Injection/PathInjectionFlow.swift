@@ -11,8 +11,9 @@
 /// 注入するパス（正規化の前後）・使った方式・結果を debug ログに残す（Issue #74 の切り分け用。パスは `Log.debugPath`）。
 @MainActor
 public final class PathInjectionFlow {
-    /// 副方式へ切り替える主方式の失敗。いずれもパネルはまだ移動していない。waitSheet と waitPaste はシートの確定（Return）を
-    /// 送る前の失敗で、waitSheetClose は Return を送ったがシートが閉じなかった（確定が届いていない）失敗（Issue #95）。
+    /// 副方式へ切り替える主方式の失敗。waitSheet と waitPaste はシートの確定（Return）を送る前の失敗で、パネルはまだ移動していない。
+    /// waitSheetClose は Return を送ったがシートが閉じなかった・閉じたことを確かめられなかった失敗で（Issue #95）、
+    /// シートが残っていればパネルは移動していない（副方式は、シートが見つからなければ確定し直さない）。
     /// ペーストボードも、waitSheet では触れておらず、waitPaste と waitSheetClose では主方式が戻し終えている。
     static let fallbackSteps: Set<InjectionStep> = [.waitSheet, .waitPaste, .waitSheetClose]
 
