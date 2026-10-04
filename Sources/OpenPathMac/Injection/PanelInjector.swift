@@ -16,7 +16,7 @@ import OpenPathCore
 /// - auto_confirm / Cmd+Enter の「開く」の押下（§3.1 ステップ 8）
 /// - キー操作・AX 操作の直前ごとの注入先の確認（別のアプリへの誤送出の防止）
 ///
-/// 全体のタイムアウト（1.5 秒）は AppCoordinator が持ち、超えたら注入の Task をキャンセルする。
+/// 全体のタイムアウト（2.5 秒）は AppCoordinator が持ち、超えたら注入の Task をキャンセルする。
 /// ここではキャンセルに応じてキー操作を止め、ペーストボードを戻して `CancellationError` で戻る。
 @MainActor
 public final class PanelInjector: PathInjecting {

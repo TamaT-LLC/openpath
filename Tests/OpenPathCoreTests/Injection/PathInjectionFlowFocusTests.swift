@@ -44,7 +44,7 @@ struct PathInjectionFlowFocusTests {
         #expect(harness.clock.elapsed < .milliseconds(1000))
     }
 
-    @Test("QA の条件で auto_confirm でも、「開く」を押して 1.5 秒の全体タイムアウトに 400ms 以上の余裕を残して終わる")
+    @Test("QA の条件で auto_confirm でも、「開く」を押して 2.5 秒の全体タイムアウトに 400ms 以上の余裕を残して終わる")
     func primaryWithAutoConfirmFitsTimeoutUnderQACondition() async throws {
         let harness = Self.makeQAConditionHarness()
 

@@ -12,7 +12,7 @@ downstream:
 - PROJ-DSN-002
 - PROJ-TST-001
 owner: TakehiroT
-updated: 2026-10-01
+updated: 2026-10-04
 ---
 
 # アーキテクチャ設計: openpath
@@ -81,7 +81,7 @@ NSOpenPanel の出現を検知し、ファジー検索パレットを重ね、�
 ## 5. 状態機械
 
 ```
-        パネル検知              Enter 確定        1.5秒タイムアウト / panelGone
+        パネル検知              Enter 確定        2.5秒タイムアウト / panelGone
 Idle ─────────────▶ PanelShown ─────────────▶ Injecting ─────────────▶ Idle
   ▲                    │  ▲                        │
   │   パネル消滅 / Esc  │  └── 注入失敗（panelGone   └── 注入成功 → Idle（成功パネルを記憶）
@@ -90,11 +90,11 @@ Idle ─────────────▶ PanelShown ───────
 ```
 
 - `PanelShown` では PaletteWindow を表示し、CandidateIndex に問い合わせる。
-- `Injecting` 中はパレット入力をロックする。`Idle` に戻すのは 1.5 秒のタイムアウトと `panelGone` のみ。`panelGone` ではパレットも閉じ、タイムアウトではエラーを出したパレットを残す。injector が投げたそれ以外のエラー（timeout / axError 等）は `PanelShown` に戻し、パレットにエラー表示を残したままその場で再試行できるようにする（Esc または `panelGone` で閉じる、PR #39）。
+- `Injecting` 中はパレット入力をロックする。`Idle` に戻すのは 2.5 秒の全体タイムアウトと `panelGone` のみ。全体タイムアウトは、macOS 26 の VS Code の初回の注入（移動先シートが 3 段目で約 900ms に開く）がペーストと確定までに 1.5 秒を超えたため、1.5 秒から延ばした。失敗する注入は injector の各段の待ちで先に打ち切られるため、延ばしても待たされるのは遅いが成功する注入だけになる（#29）。`panelGone` ではパレットも閉じ、タイムアウトではエラーを出したパレットを残す。injector が投げたそれ以外のエラー（timeout / axError 等）は `PanelShown` に戻し、パレットにエラー表示を残したままその場で再試行できるようにする（Esc または `panelGone` で閉じる、PR #39）。
 - 注入に成功したパネルは `Idle` の間だけ内部で記憶し、同じ id の `panelAppeared` によるパレットの再通知を抑止する。`Idle` 中のホットキーは通常無視するが、成功パネルを記憶している間だけは例外的にパレットを再表示できる（PR #52）。
 - `auto_confirm` が有効な場合、`Injecting` の最後に「開く」ボタンの AXPress を行う。自動確定の注入を開始した後に `panelGone` を受けても注入はキャンセルせず結果を待つ（パレットはその場で閉じる）。injector が `panelGone` または `pasteboardRestoreFailed` で終えた場合も、確定操作まで進んだとみなして成功扱いにし履歴へ記録する（PR #52）。自動確定でパネルが消えた後に `pasteboardRestoreFailed` で終えた場合は、パレットではなくメニューバーの通知で伝える（`AppCoordinator.onErrorOutsidePalette`。パレット表示中の失敗は従来どおりパレットに赤字で出す、PR #65）。
 - 注入中に `panelGone` を受けて注入を打ち切ったとき（アプリの切り替え等。PanelWatcher は切り替えで `panelGone` を送り、元のアプリに戻ると開いたままのパネルを再通知する）は、失敗（`targetNotFrontmost` の文言「移動できませんでした（パネルが最前面でなくなりました）」）をパネルの id とともに `Idle` の間だけ記憶する。同じ id の `panelAppeared` で `PanelShown`（表示）にし、パレットに赤字で出す。切り替えている間はパレットを出さない（`Idle` 中のホットキーも従来どおり無視する）。自動確定でパネルが消えた後に「開く」まで進まなかった失敗・タイムアウト（成功・`panelGone`・`pasteboardRestoreFailed`・`panelGoneBeforeConfirm` を除く）と、失敗を表示中のパレットが `panelGone` で閉じた場合も同様に記憶する。別のパネルのパレットを出したら忘れる。表示中の失敗は Esc・再試行・再表示で忘れる。パネルの id は使い回されないため期限は設けない（#94）。
-- パレットの表示中に 1.5 秒でタイムアウトしたときも、失敗（「移動できませんでした（タイムアウト）」）をパネルの id とともに `Idle` の間だけ記憶する。PanelWatcher は `Idle` に戻ると開いたままのパネルを再通知するため、同じ id の `panelAppeared` で `PanelShown`（表示）にしてパレットを出し直し、赤字を付け直す。検索語と選択は残り、Enter で再試行・Esc で閉じられる。再通知の前に `Idle` で残ったパレットを Esc で閉じたら忘れる。`panelGone` でパレットを閉じたときは忘れず、同じパネルが戻ってきたら出す（#101）。
+- パレットの表示中に全体タイムアウト（2.5 秒）に達したときも、失敗（「移動できませんでした（タイムアウト）」）をパネルの id とともに `Idle` の間だけ記憶する。PanelWatcher は `Idle` に戻ると開いたままのパネルを再通知するため、同じ id の `panelAppeared` で `PanelShown`（表示）にしてパレットを出し直し、赤字を付け直す。検索語と選択は残り、Enter で再試行・Esc で閉じられる。再通知の前に `Idle` で残ったパレットを Esc で閉じたら忘れる。`panelGone` でパレットを閉じたときは忘れず、同じパネルが戻ってきたら出す（#101）。
 - 追跡中のパネルの選択モードの推定し直しや位置の変化は `panelContextChanged` で届く（DSN-001 §2.3）。`PanelShown` では表示中のパレットに `PaletteDisplaying.update(context:)` で反映し、`Injecting` 中も同様に反映して失敗時に新しい情報で候補を引けるようにする。`Idle`（Esc で閉じた間・注入成功後）では状態だけ差し替え、次にパレットを出すときに使う（PR #65）。
 
 ## 6. 検知方式の選定

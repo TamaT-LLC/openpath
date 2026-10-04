@@ -112,7 +112,7 @@ struct AppCoordinatorAutoConfirmTests {
         #expect(!Self.containsError(harness.palette.calls))
     }
 
-    @Test("パネルが消えた後も 1.5 秒のタイムアウトは維持し、エラーを出さずに注入を止める", arguments: AutoConfirmTrigger.allCases)
+    @Test("パネルが消えた後も 2.5 秒の全体タイムアウトは維持し、エラーを出さずに注入を止める", arguments: AutoConfirmTrigger.allCases)
     func timeoutIsKeptAfterPanelGone(_ trigger: AutoConfirmTrigger) async {
         let harness = await Self.makeInjectingHarness(trigger)
         harness.coordinator.handle(.panelGone)

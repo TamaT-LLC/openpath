@@ -139,7 +139,7 @@ public struct PanelControlTiming: Equatable, Sendable {
     }
 
     /// 走査の上限は、主方式のシート待ち（600ms）と「開く」の待機（300ms）を足しても
-    /// AppCoordinator の全体タイムアウト（1.5 秒）に収まりやすい長さにする。
+    /// AppCoordinator の全体タイムアウト（2.5 秒）に収まりやすい長さにする。
     /// 「開く」が押せる状態になるのを待つのも、探す上限（300ms）の中に収め、全体の最悪の時間を延ばさない。
     public static let standard = PanelControlTiming(
         openButtonDelay: .milliseconds(300),

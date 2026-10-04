@@ -77,7 +77,7 @@ struct PathInjectionFlowKeyRouteTests {
         #expect(harness.pasteboard.writes.isEmpty)
     }
 
-    @Test("① が届かず ③ で開いた移動先シートでも（② の / を経る最も遅い経路）、auto_confirm の「開く」まで 1.5 秒の全体タイムアウトに収まる")
+    @Test("① が届かず ③ で開いた移動先シートでも（② の / を経る最も遅い経路）、auto_confirm の「開く」まで 950ms で終わり、2.5 秒の全体タイムアウトに収まる")
     func systemGoToWithAutoConfirmFitsOverallTimeout() async throws {
         let harness = FlowHarness(sheetAppearsAt: nil, fallsBackWhenSheetMissing: true)
         harness.keyboard.onRoutedPost = { [harness] keyStroke, route in
