@@ -1,6 +1,8 @@
-# 未リリース
+# 未リリース（`v0.1.1` に向けた変更）
 
-次の版（`v0.1.1` 以降）に入る変更を記録する。
+次の版 `v0.1.1` に入る変更を記録する。
+版は `0.1.1` に上げてあり、Preview `preview-v0.1.1-1` で実機を確かめる途中である。確かめ終えるまで Stable `v0.1.1` は公開しない。
+Preview の結果次第で、この記録の内容は変わることがある。
 最初の Stable `v0.1.0` の内容は、[v0.1.0 のリリースノート](./v0.1.0.md) にある。
 このファイルを追加しただけでは公開にならない。
 Stable の tag、GitHub Release、添付の `SHA256SUMS` がそろったときに、正式版として扱う。
@@ -12,6 +14,22 @@ Stable を公開するときは、このファイルを `vX.Y.Z.md` に改め、
 - 先に開いた「フォルダへ移動」シートでは、確定の Return をシステム経由で送るようにした（#95）。macOS 26 の VS Code のパネルでは、アプリへ直接送った Return がシートに届かなかったため。⌘⇧G は送らないため、Raycast などの ⌘⇧G のホットキーには影響しない。
 - `/tmp` の下のフォルダへ移動するとき、「フォルダへ移動」シートの候補が実体の `/private/tmp` を示しても、同じ場所として扱うようにした（#95）。`/var`・`/etc` も同じ。確定前に候補を待つ時間（最大 250ms）が減る。
 
-- Homebrew tap から `v0.1.0` をインストールできることを確認し、README にインストール手順を追加した。
-- Stable の公開後に、GitHub App で Homebrew tap（`TamaT-LLC/homebrew-tap`）へ cask の更新 Pull Request を自動で出し、auto-merge を要求するようにした。
-- cask の最小 macOS を `depends_on macos: ">= :sonoma"` から `depends_on macos: :sonoma` に改めた。Homebrew 6.0.0 から記号だけで「Sonoma 以降」を表し、`">= :sonoma"` は非推奨で `brew style` が失敗するためである。Homebrew 5.x 以前はこの書き方を「Sonoma のみ」と解釈する。
+## 配布と開発環境の変更
+
+- Homebrew tap から `v0.1.0` をインストールできることを確認し、README にインストール手順を追加した（#117）。
+- Stable の公開後に、GitHub App で Homebrew tap（`TamaT-LLC/homebrew-tap`）へ cask の更新 Pull Request を自動で出し、auto-merge を要求するようにした（#116）。
+- cask の最小 macOS を `depends_on macos: ">= :sonoma"` から `depends_on macos: :sonoma` に改めた（#116）。Homebrew 6.0.0 から記号だけで「Sonoma 以降」を表し、`">= :sonoma"` は非推奨で `brew style` が失敗するためである。Homebrew 5.x 以前はこの書き方を「Sonoma のみ」と解釈する。
+- Swift 6.3 の Command Line Tools だけの環境で、`./scripts/test.sh` がテストを 1 件も実行できずに異常終了する問題を直した（#113・#114）。Swift Testing が依存する `lib_TestingInterop.dylib` の置き場所を rpath に加える。この dylib が無い CLT（Swift 6.2 以前）と Xcode では、渡す引数は変わらない。アプリの動作には影響しない。
+
+## Preview で確かめる項目
+
+Preview `preview-v0.1.1-1` を実機で確かめている途中で、結果は確認が済んだ項目から追記する。
+手順は [手動シナリオテスト](../50_test/test-openpath-manual-scenarios.md) の ID にある。
+
+| 項目 | シナリオ | 結果 |
+| --- | --- | --- |
+| #95: 先に開いた「フォルダへ移動」シートからの注入。VS Code（macOS 26）と TextEdit（⌘O）で移動できること、シートが閉じないときはエラーが出ること、Cmd+Enter で移動先のフォルダで開くこと、`/tmp` の下のパスで候補を待たないこと | INJ-02 | 未確認 |
+| #95: 先に開いたシートの確定の Return が、Raycast（⌘⇧G をホットキーに設定）に横取りされないこと | INJ-06 | 未確認 |
+| VS Code の通常の注入が、従来どおり移動すること | INJ-07 | 未確認 |
+| `v0.1.0` で確かめていなかった項目: キー配列の自動判定（#68・#107）と、Raycast との競合（#107） | INJ-05、INJ-06 | 未確認 |
+| `v0.1.0` で確かめていなかった項目: #90（Return のリピート）、#91（候補なしの一瞬の表示）、#92（構築中の履歴クリア）、#94（注入中のアプリ切り替え） | PAL-08、FLOW-01、MENU-05、INJ-01 | 未確認 |

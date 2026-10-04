@@ -101,7 +101,7 @@ debug ログは注入したパスなどを含む。実施が終わったら open
 
 | ID | 手順 | 期待 | 結果 | 備考 |
 | --- | --- | --- | --- | --- |
-| ONB-01 | `open build/openpath.app` | `lsappinfo info -app jp.tamat.openpath` の type が `UIElement`（Dock に出ない。macOS 27 では `type="UIElement"`、26 までは `"type"="UIElement"` と出る）。ログに `openpath 0.1.0 を起動します` → `起動処理を終えました（アクセシビリティ権限: なし、有効: はい）` → `ホットキー ctrl+shift+o を登録しました` → `初回起動の案内: notShown → explainingPermission` |  |  |
+| ONB-01 | `open build/openpath.app` | `lsappinfo info -app jp.tamat.openpath` の type が `UIElement`（Dock に出ない。macOS 27 では `type="UIElement"`、26 までは `"type"="UIElement"` と出る）。ログに `openpath X.Y.Z を起動します`（`X.Y.Z` は `Resources/Info.plist` の `CFBundleShortVersionString` と同じ） → `起動処理を終えました（アクセシビリティ権限: なし、有効: はい）` → `ホットキー ctrl+shift+o を登録しました` → `初回起動の案内: notShown → explainingPermission` |  |  |
 | ONB-02 | 案内を見る | 「openpath へようこそ」が画面中央に前面で出る。本文が 3 行（用途 / キー操作とパスを送る / アクセシビリティだけ・通信しない・保存しない） |  |  |
 | ONB-03 | `~/.config/openpath/config.toml` を見る | 起動時に既定値で作られている（ghq があれば `roots` に ghq root。ghq の root が取れなければ `roots = ["~"]`）。`roots` の上のコメントが、どちらを検索対象にしたかに合っている。`roots = ["~"]` の場合は、起動直後にデスクトップ・書類・ダウンロードのアクセス確認が出ることがある（ONB-20） |  |  |
 | PERM-01 | 案内を出したまま、メニューバーのフォルダアイコンを開く | アイコンにバッジ。先頭に通知「アクセシビリティ権限がありません」。項目が「有効 / 候補を再構築 / 設定ファイルを開く… / 履歴をクリア…」「ログイン時に起動 / アクセシビリティ設定を開く… / はじめに…」「終了」の 3 グループで、どれも選べる |  |  |
