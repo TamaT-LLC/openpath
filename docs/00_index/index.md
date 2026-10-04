@@ -21,7 +21,8 @@
 
 ## リリースノート
 
-- [未リリースの変更（最初の Stable `v0.1.0` に向けて）](../releases/unreleased.md)
+- [v0.1.0 のリリースノート（最初の Stable）](../releases/v0.1.0.md)
+- [未リリースの変更（`v0.1.1` 以降）](../releases/unreleased.md)
 
 ## プロジェクトの運用
 
