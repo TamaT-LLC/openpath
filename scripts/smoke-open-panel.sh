@@ -41,7 +41,7 @@ readonly LATENCY_BUDGET_MS=300
 readonly USER_CANCELED_ERROR_NUMBER="-128"
 readonly DIALOG_PROMPT="openpath のスモークテストです。パレットが出ないときはこのダイアログをクリックしてください（自動で閉じます）"
 
-# ログの文言（Sources の Log.info と一致させる）。起動の行は「[INFO] openpath 0.1.0 を起動します」
+# ログの文言（Sources の Log.info と一致させる）。起動の行は「[INFO] openpath X.Y.Z を起動します」
 readonly LAUNCH_PREFIX="] ${APP_NAME} "
 readonly LAUNCH_SUFFIX=" を起動します"
 readonly TERMINATED_MESSAGE="] ${APP_NAME} を終了します"
