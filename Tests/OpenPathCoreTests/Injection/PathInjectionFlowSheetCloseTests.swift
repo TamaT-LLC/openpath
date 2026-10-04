@@ -50,6 +50,39 @@ struct PathInjectionFlowSheetCloseTests {
         #expect(harness.pasteboard.contents == .userClipboard)
         // 主方式: 100ms に Return → 700ms まで閉じない。副方式: 700ms に Return → すぐ閉じ、auto_confirm なら 300ms 後に「開く」
         #expect(harness.clock.elapsed == .milliseconds(autoConfirm ? 1_000 : 700))
+        // 副方式の Return の直前に、移動先シートがキーウィンドウかを確かめた
+        #expect(harness.targetGuard.goToSheetFocusCheckCount == 1)
+    }
+
+    @Test(
+        "主方式の Return で閉じなかった後、副方式の Return の直前に移動先シートがキーウィンドウでない（閉じかけ・フォーカスが外れた）か確かめられなければ、Return を送らずにエラーにする（後ろのパネルの「開く」に届かせない）",
+        arguments: [false, nil] as [Bool?]
+    )
+    func doesNotResendReturnWithoutSheetKeyFocus(goToSheetFocus: Bool?) async {
+        let harness = Self.makePreopenedHarness()
+        harness.returnClosesSheet = { _ in false }
+        harness.targetGuard.goToSheetFocus = goToSheetFocus
+
+        let thrown = await #expect(throws: InjectionError.self) {
+            try await harness.run(path: Self.path, autoConfirm: true)
+        }
+
+        #expect(thrown == .timeout(step: .waitSheetClose))
+        #expect(harness.log.keyStrokes == [.selectAll, .paste, .returnKey])
+        #expect(harness.elementOperations == [.setValue(element: "path", value: Self.path)])
+        #expect(!harness.log.events.contains(.lookUpOpenButton))
+    }
+
+    @Test("主方式が Return を送る前に失敗した（waitPaste）副方式では、従来どおり移動先シートのキーウィンドウを確かめずに Return を送る")
+    func doesNotCheckSheetKeyFocusBeforeFirstReturn() async throws {
+        let harness = Self.makePreopenedHarness()
+        harness.goToField.hasFocus = false
+        harness.targetGuard.goToSheetFocus = false
+
+        try await harness.run(path: Self.path)
+
+        #expect(harness.log.keyStrokes == [.returnKey])
+        #expect(harness.targetGuard.goToSheetFocusCheckCount == 0)
     }
 
     @Test(

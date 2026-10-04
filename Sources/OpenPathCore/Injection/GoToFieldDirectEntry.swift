@@ -16,6 +16,8 @@
 ///   Return がパネルの「開く」に届かないよう送らずに `timeout(.waitPaste)` を投げる。
 /// - 確定の後、移動先シートが閉じるまで最大 600ms 待つ（`GoToSheetCloseWait`、Issue #95）。閉じなければ確定が届いていないため、
 ///   成功とせずに `timeout(.waitSheetClose)` を投げる（パレットに「「フォルダへ移動」を確定できません」と出る）。
+/// - 主方式の Return の後にシートが閉じなかった（`timeout(.waitSheetClose)`）ときの Return は、送る直前に移動先シートが
+///   キーウィンドウかを確かめ、そうでなければ送らない（後ろのパネルの「開く」に届かせない。`ensureSheetHasKeyFocus`）。
 /// - 入力欄が見つからなければ、主方式の失敗をそのまま投げる。パレットの文言を主方式の失敗理由（⌘⇧G が開かない等）にするため。
 ///   主方式の失敗が `timeout(.waitSheetClose)` の場合も同じで、主方式が諦めた後にシートが閉じた可能性があっても成功とはしない
 ///   （一度見つからなかっただけでは閉じたと言い切れず、成功として「開く」を押すと元の場所で開きかねないため）。
@@ -105,7 +107,12 @@ public final class GoToFieldDirectEntry {
             try await PanelControlOperation.activate(goButton, by: .press)
             Log.debug("副方式: 「移動」を押しました（+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
         } else {
-            try await submitByReturnKey(controls: controls, via: keyRoute, on: timeline)
+            try await submitByReturnKey(
+                controls: controls,
+                via: keyRoute,
+                requiresSheetKeyFocus: primaryError == .timeout(step: .waitSheetClose),
+                on: timeline
+            )
         }
         let submittedAt = timeline.elapsed
         try await ensureSheetClosed(controls, on: timeline)
@@ -132,11 +139,21 @@ public final class GoToFieldDirectEntry {
     }
 
     /// キー入力は注入先のキーウィンドウ（移動先シート）に届く。Return を送れなければ入力欄を確定する。
-    private func submitByReturnKey(controls: GoToFieldControls, via route: InjectionKeyRoute, on timeline: ElapsedTimeline) async throws {
+    /// - Parameter requiresSheetKeyFocus: 送る直前に、移動先シートがキーウィンドウかを確かめるか（主方式の Return の後にシートが
+    ///   閉じなかった場合。`ensureSheetHasKeyFocus`）。
+    private func submitByReturnKey(
+        controls: GoToFieldControls,
+        via route: InjectionKeyRoute,
+        requiresSheetKeyFocus: Bool,
+        on timeline: ElapsedTimeline
+    ) async throws {
         await prepareForKeyEvents()
         try await waitForFieldFocus(controls: controls, on: timeline)
         // 送り先を決める（AX の読み取りを伴う）準備は確認の前に済ませ、確認の後は待ちを挟まずに送る
         let prepared = try await prepareReturnKey(via: route)
+        if prepared != nil, requiresSheetKeyFocus {
+            try await ensureSheetHasKeyFocus(on: timeline)
+        }
         // パレットにキーを手放させている間に切り替わっていないか、送る直前に確かめ直す
         try await InjectionTargetCheck.ensureAvailable(targetGuard, on: timeline)
         guard let prepared else {
@@ -147,6 +164,19 @@ public final class GoToFieldDirectEntry {
         try Task.checkCancellation()
         prepared.post()
         Log.debug("副方式: Return を送りました（経路: \(route.rawValue)、+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
+    }
+
+    /// 主方式の Return の後にシートが閉じなかった（`timeout(.waitSheetClose)`）ため Return を送り直すときは、送る直前に、
+    /// 注入先のフォーカス中のウィンドウが移動先シートかを確かめる。入力欄の kAXFocused は、シートがキーウィンドウかを反映しない。
+    /// 主方式の Return が遅れて届いてシートが閉じかけている・キーウィンドウでなくなっていると、システム経由の Return が
+    /// 後ろのパネルの「開く」に届き、移動していない元の場所で開いてしまうため（PR #118 のレビュー）。
+    /// 移動先シートでない・確かめられなければ、Return を送らずに `timeout(.waitSheetClose)` を投げる。
+    private func ensureSheetHasKeyFocus(on timeline: ElapsedTimeline) async throws {
+        let hasKeyFocus = try await InjectionTargetCheck.goToSheetHasFocus(targetGuard, on: timeline)
+        Log.debug("副方式: 移動先シートがキーウィンドウかを確かめました（\(hasKeyFocus.map(String.init) ?? "確かめられない")、+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
+        guard hasKeyFocus != true else { return }
+        Log.warning("副方式: 移動先シートがキーウィンドウでない・確かめられないため、Return を送らずに失敗とします")
+        throw InjectionError.timeout(step: .waitSheetClose)
     }
 
     /// - Returns: Return を送れない（キーイベントを作れない・送り先を決められない）場合は nil。

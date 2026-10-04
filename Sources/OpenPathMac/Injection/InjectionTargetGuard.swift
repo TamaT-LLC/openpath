@@ -94,4 +94,27 @@ public final class InjectionTargetGuard: InjectionTargetGuarding {
         guard frontmostProcessID() == target.processID else { return .notFrontmost }
         return .available
     }
+
+    /// 注入先のアプリのフォーカス中のウィンドウが移動先シートか（Issue #95）。フォーカス中のウィンドウが無ければ false。
+    /// 移動先シートがキーウィンドウなら、フォーカス中のウィンドウは移動先シートそのものになる（macOS 27 の自プロセスのパネルと、
+    /// 注入の前から移動先シートが開いていた macOS 26 の VS Code で確認）。
+    public func isGoToSheetFocused(cutoff: ScanCutoff) async throws -> Bool {
+        guard let target else { return false }
+        return try await onAXQueue { () throws -> Bool in
+            try cutoff.throwIfReached()
+            let focusedWindow: AXUIElement
+            do {
+                focusedWindow = try GoToSheetAX.focusedWindow(ofProcess: target.processID)
+            } catch InjectionError.panelGone {
+                return false
+            }
+            return try GoToSheetIdentity.isGoToSheet(
+                focusedWindow,
+                cutoff: cutoff,
+                role: { $0.role },
+                identifier: { $0.attr(kAXIdentifierAttribute) },
+                children: PanelControlAX.children(of:)
+            )
+        }
+    }
 }

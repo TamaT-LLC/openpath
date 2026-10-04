@@ -111,6 +111,11 @@ public protocol InjectionTargetGuarding {
     /// 記録した注入先の状態。記録していなければ `.gone`。
     /// - Throws: 状態を確かめられなければ `InjectionError.axError`、打ち切ったら `ScanCutoff.Reached`。
     func currentStatus(cutoff: ScanCutoff) async throws -> InjectionTargetStatus
+    /// 記録した注入先のアプリのフォーカス中のウィンドウ（キー入力の宛先）が、移動先シート（「フォルダへ移動」シート）か（Issue #95）。
+    /// 移動先シートがキーウィンドウでなければ、システム経由の Return はシートではなく後ろのパネルに届く。
+    /// どのウィンドウを移動先シートとみなすかは `GoToSheetIdentity` が持つ。記録していなければ false。
+    /// - Throws: 確かめられなければ `InjectionError.axError`、打ち切ったら `ScanCutoff.Reached`。
+    func isGoToSheetFocused(cutoff: ScanCutoff) async throws -> Bool
 }
 
 /// 副方式と auto_confirm の待ち時間（DSN-001 §3.1 ステップ 8, §3.2）。

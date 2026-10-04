@@ -43,6 +43,20 @@ final class TargetGuardFake: InjectionTargetGuarding {
         guard let invalidation, checkIndex >= invalidation.fromCheck else { return .available }
         return invalidation.status
     }
+
+    /// 注入先のフォーカス中のウィンドウが移動先シートか（`isGoToSheetFocused`）。nil なら確かめられない（AX の失敗を投げる）。
+    var goToSheetFocus: Bool? = true
+    /// `isGoToSheetFocused` を呼ばれた回数。
+    private(set) var goToSheetFocusCheckCount = 0
+
+    func isGoToSheetFocused(cutoff: ScanCutoff) async throws -> Bool {
+        goToSheetFocusCheckCount += 1
+        try cutoff.throwIfReached()
+        guard let goToSheetFocus else {
+            throw InjectionError.axError(code: InjectionAXErrorCode.failure)
+        }
+        return goToSheetFocus
+    }
 }
 
 /// パネル内の要素（入力欄・ボタン）。AX 操作を記録する。
