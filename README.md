@@ -78,8 +78,14 @@ Preview は Apple の公証を受けていないため、初回の起動で Gate
 ### Homebrew cask
 
 Stable には、その ZIP に対応する Homebrew cask（`openpath.rb`）を添付しています。
-Homebrew tap からのインストールは、現時点では使えません。
-ZIP かソースからのビルドで入れてください。
+[Homebrew tap](https://github.com/TamaT-LLC/homebrew-tap) からインストールできます。
+
+```bash
+brew install --cask tamat-llc/tap/openpath
+```
+
+インストールした `openpath.app` を「アプリケーション」フォルダから起動します。
+初回の起動で出る案内に従い、「システム設定 > プライバシーとセキュリティ > アクセシビリティ」で openpath を許可してください。
 
 ### ソースからビルドする
 
