@@ -6,7 +6,8 @@ openpath は best effort で保守しています。
 ## サポート対象の version
 
 サポート対象は、GitHub Releases で公開した最新の Stable（`vX.Y.Z`）です。
-現在は公開済みの Stable が無く、最初の Stable は `v0.1.0` の予定です。
+最初の Stable `v0.1.0` を 2026-10-04 に公開しました。
+現在のサポート対象は `0.1.x` で、公開済みの最新は `v0.1.0` です。
 Preview（`preview-vX.Y.Z-N`）は評価用のビルドで、サポート対象外です。
 `main` からのビルドは開発用で、修正は `main` に先に入れます。
 

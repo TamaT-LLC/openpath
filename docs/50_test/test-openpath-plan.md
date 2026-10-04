@@ -181,8 +181,13 @@ open build/openpath.app          # アクセシビリティ権限を付与して
 - アップロード不足時に Draft を維持し、Preview は prerelease / 非 Latest、Stable は正式版 / Latest とすること。
 
 ローカルの Smoke は `./scripts/package_release.sh smoke <X.Y.Z>` で Universal ZIP と SHA256SUMS を確認する。
-Apple への公証提出、staple、配布後の Gatekeeper 評価は最初の Stable 実行で確認する。
+Apple への公証提出、staple、Gatekeeper の評価は、最初の Stable 実行で確認した。結果は下に記録する。
 
 2026-09-28 のローカル検証では、Smoke `0.1.0` と Preview `0.1.0-1` の両方で Universal ZIP を生成できた。
 arm64 / x86_64 の包含、ad-hoc 署名、SHA256SUMS を検証し、Preview の公開前成果物チェックも成功した。
-リリース条件の自動テストは13件成功した。Apple への実際の公証と Release 公開は未実施。
+リリース条件の自動テストは13件成功した。Apple への実際の公証と Release 公開は、この時点では未実施だった。
+
+2026-10-04 に Stable `v0.1.0`（対象は `726dc52`）を公開した。
+Developer ID で署名し、Apple の公証は Accepted だった。
+staple と、`spctl` による Gatekeeper の評価（`source=Notarized Developer ID`）も、Release workflow の中で通った。
+添付ファイルは `openpath-0.1.0.zip`、`openpath.rb`、`SHA256SUMS` で、Release は Latest になっている。

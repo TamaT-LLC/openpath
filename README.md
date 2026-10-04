@@ -8,8 +8,9 @@
 openpath は、macOS のファイル選択ダイアログ（NSOpenPanel）に、`cdr` や `fzf` のようなファジー検索のパレットを重ねるメニューバー常駐アプリです。
 Claude Desktop、Cursor、VS Code、ブラウザなど、どのアプリの「フォルダを開く」や「ファイルを添付」でも、Finder のツリーを辿らずに、数文字を入力して Enter を押すだけで目的の場所へ移動できます。
 
-最初の Stable `v0.1.0` は準備中で、まだ GitHub Releases に公開していません。
-現在は [ソースからビルド](#ソースからビルドする) して使えます。
+最初の Stable [`v0.1.0`](https://github.com/TamaT-LLC/openpath/releases/tag/v0.1.0) を、2026-10-04 に GitHub Releases で公開しました。
+[インストール](#インストール) の手順で、ZIP から入れて使えます。
+[ソースからビルド](#ソースからビルドする) して使うこともできます。
 求める権限はアクセシビリティだけで、ネットワーク通信は行いません。
 
 ## 目的別の案内
@@ -50,8 +51,10 @@ Claude Desktop、Cursor、VS Code、ブラウザなど、どのアプリの「�
 
 ### GitHub Releases の ZIP
 
-配布物は [GitHub Releases](https://github.com/TamaT-LLC/openpath/releases) で公開します。
-最初の Preview `preview-v0.1.0-1` と Stable `v0.1.0` は準備中で、まだ公開していません。
+配布物は [GitHub Releases](https://github.com/TamaT-LLC/openpath/releases) で公開しています。
+最新の Stable は [v0.1.0](https://github.com/TamaT-LLC/openpath/releases/tag/v0.1.0) で、`openpath-0.1.0.zip`、`SHA256SUMS`、Homebrew cask の `openpath.rb` を添付しています。
+Preview の `preview-v0.1.0-1` と `preview-v0.1.0-2` は評価用の prerelease で、サポート対象外です。
+通常の利用には Stable を使ってください。
 
 | 種類 | tag | 署名と公証 | 用途 |
 | --- | --- | --- | --- |
@@ -66,13 +69,17 @@ shasum -a 256 --check SHA256SUMS
 ```
 
 展開した `openpath.app` を「アプリケーション」フォルダへ移して起動します。
+初回の起動で出る案内に従い、「システム設定 > プライバシーとセキュリティ > アクセシビリティ」で openpath を許可してください。
+許可するまでは、ファイル選択パネルの検知が止まります（[権限](#権限)）。
+
 Preview は Apple の公証を受けていないため、初回の起動で Gatekeeper に止められます。
 評価のために開く場合は、システム設定の「プライバシーとセキュリティ」から許可してください。
 
 ### Homebrew cask
 
-Stable には、その ZIP に対応する Homebrew cask（`openpath.rb`）を添付します。
-Homebrew tap からのインストール方法は、最初の Stable を公開した後にここで案内します。
+Stable には、その ZIP に対応する Homebrew cask（`openpath.rb`）を添付しています。
+Homebrew tap からのインストールは、現時点では使えません。
+ZIP かソースからのビルドで入れてください。
 
 ### ソースからビルドする
 
