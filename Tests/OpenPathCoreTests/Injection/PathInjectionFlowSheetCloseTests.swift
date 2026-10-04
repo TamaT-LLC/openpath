@@ -106,18 +106,21 @@ struct PathInjectionFlowSheetCloseTests {
         ])
     }
 
-    @Test("主方式が諦めた直後にシートが閉じていたら（主方式の Return は届いていた）、確定し直さずに成功とし、auto_confirm なら「開く」を押す")
-    func succeedsWhenSheetClosesAfterPrimaryGaveUp() async throws {
+    @Test("主方式が諦めた直後に入力欄が見つからなくなっても、閉じたとは言い切れないため成功にしない。確定し直さず（後ろのパネルへ Return を送らない）、「開く」も押さない")
+    func doesNotSucceedWhenFieldVanishesAfterPrimaryGaveUp() async {
         let harness = Self.makePreopenedHarness()
         // 主方式の Return から 610ms で閉じる。主方式は 600ms（注入の開始から 700ms）の確認で諦め、
         // 副方式が探す走査（10ms）の間に閉じる
         harness.sheetCloseDelay = .milliseconds(610)
         harness.goToFieldLocator.lookupLatency = .milliseconds(10)
 
-        try await harness.run(path: Self.path, autoConfirm: true)
+        await #expect(throws: InjectionError.timeout(step: .waitSheetClose)) {
+            try await harness.run(path: Self.path, autoConfirm: true)
+        }
 
         #expect(harness.log.keyStrokes == [.selectAll, .paste, .returnKey])
-        #expect(harness.elementOperations == [.press(element: "open")])
+        #expect(harness.elementOperations.isEmpty)
+        #expect(!harness.log.events.contains(.lookUpOpenButton))
         #expect(harness.pasteboard.contents == .userClipboard)
     }
 

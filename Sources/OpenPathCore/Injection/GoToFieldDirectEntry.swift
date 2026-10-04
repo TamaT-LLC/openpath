@@ -17,8 +17,8 @@
 /// - 確定の後、移動先シートが閉じるまで最大 600ms 待つ（`GoToSheetCloseWait`、Issue #95）。閉じなければ確定が届いていないため、
 ///   成功とせずに `timeout(.waitSheetClose)` を投げる（パレットに「「フォルダへ移動」を確定できません」と出る）。
 /// - 入力欄が見つからなければ、主方式の失敗をそのまま投げる。パレットの文言を主方式の失敗理由（⌘⇧G が開かない等）にするため。
-///   ただし主方式の失敗が `timeout(.waitSheetClose)` なら、主方式が諦めた後にシートが閉じた（主方式の Return は届いていた）とみなし、
-///   確定し直さずに成功とする。
+///   主方式の失敗が `timeout(.waitSheetClose)` の場合も同じで、主方式が諦めた後にシートが閉じた可能性があっても成功とはしない
+///   （一度見つからなかっただけでは閉じたと言い切れず、成功として「開く」を押すと元の場所で開きかねないため）。
 /// - 値のセットと確定の直前ごとに注入先を確かめる。
 @MainActor
 public final class GoToFieldDirectEntry {
@@ -87,8 +87,10 @@ public final class GoToFieldDirectEntry {
         }
         guard let controls = foundControls else {
             if primaryError == .timeout(step: .waitSheetClose) {
-                try await finishAfterLateClose(autoConfirm: autoConfirm, on: timeline)
-                return
+                // 主方式が諦めた後にシートが閉じた（主方式の Return は届いていた）可能性があるが、一度見つからなかっただけでは
+                // 閉じたと言い切れない。成功とはせず、閉じたシートの後ろのパネルへ Return を送らないよう確定し直しもしない
+                Log.info("副方式: 主方式の Return の後に移動先シートの入力欄が見つからなくなりました。閉じたかを確かめられないため、確定し直さずに失敗とします（+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
+                throw primaryError
             }
             Log.debug("副方式: 移動先シートの入力欄が見つかりません（+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
             throw primaryError
@@ -108,16 +110,6 @@ public final class GoToFieldDirectEntry {
         let submittedAt = timeline.elapsed
         try await ensureSheetClosed(controls, on: timeline)
         try await didSubmit(autoConfirm, timeline.elapsed - submittedAt)
-    }
-
-    /// 主方式が Return の後に移動先シートが閉じるのを待ちきれずに諦めた（`timeout(.waitSheetClose)`）が、副方式が探すまでに閉じていた。
-    /// 主方式の Return は届いていたため、値をセットし直して確定し直すことはせず（閉じたシートの後ろのパネルに Return を送らない）、
-    /// 確定した後の処理（auto_confirm）へ進む。パネルごと閉じていれば `.panelGone` / `.targetNotFrontmost` を投げる。
-    private func finishAfterLateClose(autoConfirm: Bool, on timeline: ElapsedTimeline) async throws {
-        try await InjectionTargetCheck.ensureAvailable(targetGuard, on: timeline)
-        Log.info("主方式の Return の後に移動先シートが閉じていたため、確定し直さずに注入を終えます（+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
-        // 主方式の Return からの時間はここでは分からないため、「開く」の待機は短くしない（遅れて閉じたパネルの移動の反映を待つ）
-        try await didSubmit(autoConfirm, .zero)
     }
 
     /// 「移動」の押下・Return が移動先シートに届かなければ、シートは残りパネルは移動しない（Issue #95）。
