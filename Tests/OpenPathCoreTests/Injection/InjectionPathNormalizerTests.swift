@@ -62,6 +62,44 @@ struct InjectionPathNormalizerTests {
     }
 
     @Test(
+        "比べるときは、/tmp・/var・/etc と、その実体の /private/tmp・/private/var・/private/etc を同じ場所とみなす（Issue #95）",
+        arguments: [
+            ("/tmp/QA 日本語 space", "/private/tmp/QA 日本語 space"),
+            ("/tmp", "/private/tmp/"),
+            ("/var/folders/ab/T", "/private/var/folders/ab/T"),
+            ("/etc/ssh", "/private/etc/ssh"),
+            // 正規化（~ の展開・末尾の /・. と ..）は従来どおり
+            ("~/Library/", "/Users/me/Library"),
+            ("/private/tmp/a/../b", "/tmp/b"),
+        ]
+    )
+    func treatsPrivateAliasesAsSameLocation(lhs: String, rhs: String) {
+        #expect(normalizer.isSameLocation(lhs, rhs))
+        #expect(normalizer.isSameLocation(rhs, lhs))
+    }
+
+    @Test(
+        "別の場所は同じとみなさない（/private の下の別名は /tmp・/var・/etc だけ）",
+        arguments: [
+            ("/tmp/QA", "/private/tmp/QB"),
+            ("/tmpfiles", "/private/tmpfiles"),
+            ("/Users/me", "/private/Users/me"),
+            ("/", "/private"),
+            ("/Users/me/tmp", "/private/Users/me/tmp"),
+        ]
+    )
+    func distinguishesOtherLocations(lhs: String, rhs: String) {
+        #expect(!normalizer.isSameLocation(lhs, rhs))
+        #expect(!normalizer.isSameLocation(rhs, lhs))
+    }
+
+    @Test("同じ場所かの判定は比べるときだけで、注入するパスの /private は付け外ししない")
+    func normalizeKeepsPrivatePrefix() {
+        #expect(normalizer.normalize("/tmp/QA") == "/tmp/QA")
+        #expect(normalizer.normalize("/private/tmp/QA") == "/private/tmp/QA")
+    }
+
+    @Test(
         "絶対パスに解決できないもの（相対パス、`~user` 形式）はそのまま返す",
         arguments: ["relative/path", "./x", "~other/repos", ""]
     )

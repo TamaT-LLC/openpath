@@ -43,6 +43,17 @@ struct GoToSheetStateTests {
         #expect(state.readiness(for: Self.path, normalizer: Self.normalizer) == .ready)
     }
 
+    @Test(
+        "候補リストが /tmp の移動先を実体の /private/tmp で示しても、同じ場所として ready（Issue #95 の QA）",
+        arguments: [
+            GoToSheetState(fieldValue: "/tmp/QA 日本語 space", selectedSuggestion: "/private/tmp/QA 日本語 space"),
+            GoToSheetState(fieldValue: "/private/tmp/QA 日本語 space", selectedSuggestion: "/private/tmp/QA 日本語 space"),
+        ]
+    )
+    func comparesPrivateAliases(state: GoToSheetState) {
+        #expect(state.readiness(for: "/tmp/QA 日本語 space", normalizer: Self.normalizer) == .ready)
+    }
+
     @Test("日本語のパスは NFC と NFD を同じものとして比べる")
     func comparesCanonicallyEquivalentPaths() {
         let nfc = "/Users/me/Documents/資料/ガイド"
@@ -106,6 +117,17 @@ struct GoToSheetSubmitGateTests {
         #expect(harness.clock.elapsed == .zero)
         #expect(harness.locator.lookupCount == 1)
         #expect(harness.field.valueReadCount == 1)
+    }
+
+    @Test("/tmp の移動先で、候補が実体の /private/tmp を選んでいれば、追いつくのを待たずに ready を返す（Issue #95 の QA）")
+    func readyImmediatelyForPrivateAlias() async throws {
+        let harness = Harness()
+        let path = "/tmp/QA 日本語 space"
+        harness.field.simulateTyping(path)
+        harness.suggestions.selectedPathProvider = { "/private" + path }
+
+        #expect(try await harness.gate.waitUntilReady(path: path) == .ready)
+        #expect(harness.clock.elapsed == .zero)
     }
 
     @Test("候補の選択が前の値のままなら 50ms ごとに確かめ直し、追いついた時点で ready を返す")

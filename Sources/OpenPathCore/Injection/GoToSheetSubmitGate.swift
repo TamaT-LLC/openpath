@@ -10,12 +10,12 @@ public struct GoToSheetState: Equatable, Sendable {
         self.selectedSuggestion = selectedSuggestion
     }
 
-    /// 移動先 path へ確定してよいか。パスは normalizer で揃えてから比べる（`~` の展開・末尾の `/`、正準等価）。
+    /// 移動先 path へ確定してよいか。パスは normalizer で同じ場所かを比べる（`~` の展開・末尾の `/`、正準等価、
+    /// `/tmp` と実体の `/private/tmp` 等。`InjectionPathNormalizer.isSameLocation`）。
     public func readiness(for path: String, normalizer: InjectionPathNormalizer) -> GoToSheetReadiness {
         guard let fieldValue else { return .unavailable }
-        let expected = normalizer.normalize(path)
-        guard normalizer.normalize(fieldValue) == expected else { return .fieldMismatch }
-        guard let selectedSuggestion, normalizer.normalize(selectedSuggestion) != expected else { return .ready }
+        guard normalizer.isSameLocation(fieldValue, path) else { return .fieldMismatch }
+        guard let selectedSuggestion, !normalizer.isSameLocation(selectedSuggestion, path) else { return .ready }
         return .suggestionNotUpdated
     }
 }
@@ -125,8 +125,8 @@ public final class GoToSheetSubmitGate {
     public func fieldMatches(path: String, controls: GoToFieldControls?) async -> Bool? {
         guard let controls else { return nil }
         do {
-            let value = try await controls.field.value()
-            return value.map(normalizer.normalize) == normalizer.normalize(path)
+            guard let value = try await controls.field.value() else { return false }
+            return normalizer.isSameLocation(value, path)
         } catch {
             return nil
         }
