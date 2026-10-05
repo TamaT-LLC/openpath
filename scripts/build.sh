@@ -50,8 +50,7 @@ assemble_app() {
   cp "${INFO_PLIST_SOURCE}" "${contents}/Info.plist"
   printf '%s' "${PKG_INFO_CONTENT}" >"${contents}/PkgInfo"
 
-  # アイコン等のリソースは現時点で無い。置かれたら Contents/Resources にコピーする
-  # （表示には Info.plist の CFBundleIconFile も必要）
+  # Info.plist の CFBundleIconFile が参照するアプリアイコンを同梱する。
   local icons=("${REPO_ROOT}"/Resources/*.icns)
   if [[ -e "${icons[0]}" ]]; then
     mkdir -p "${contents}/Resources"
