@@ -255,7 +255,7 @@ Homebrew を使う `cask_style.sh` を除き、どのスクリプトも Command 
 
 リリースは maintainer が [リリース運用](docs/40_arch_design/guide-release-distribution.md) に従って行います。
 変更内容は [リリースノート](docs/releases/) に記録します。
-最初の Stable は [v0.1.0](docs/releases/v0.1.0.md) で、次のリリースに入る変更は [未リリースの変更](docs/releases/unreleased.md) に追記します。
+リリースノートは [v0.1.0](docs/releases/v0.1.0.md)、[v0.1.1](docs/releases/v0.1.1.md) にあり、次のリリースに入る変更は [未リリースの変更](docs/releases/unreleased.md) に追記します。
 
 ### ローカルでの署名と公証
 
