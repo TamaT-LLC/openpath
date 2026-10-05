@@ -95,8 +95,14 @@ System Settings > Privacy & Security only if you intend to evaluate the preview.
 ### Homebrew cask
 
 Each stable release includes a Homebrew cask (`openpath.rb`) for that exact
-ZIP. Installation from a Homebrew tap is not available yet; use the ZIP or build
-from source.
+ZIP. Install openpath from the [Homebrew tap](https://github.com/TamaT-LLC/homebrew-tap):
+
+```bash
+brew install --cask tamat-llc/tap/openpath
+```
+
+Launch `openpath.app` from Applications. On first launch, follow the prompts to
+allow openpath in System Settings > Privacy & Security > Accessibility.
 
 ### Build from source
 
