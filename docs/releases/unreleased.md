@@ -16,6 +16,7 @@ Stable を公開するときは、このファイルを `vX.Y.Z.md` に改め、
 
 ## 配布と開発環境の変更
 
+- 英語 README にも Homebrew tap からのインストールと初回起動の手順を追加した。
 - Homebrew tap から `v0.1.0` をインストールできることを確認し、README にインストール手順を追加した（#117）。
 - Stable の公開後に、GitHub App で Homebrew tap（`TamaT-LLC/homebrew-tap`）へ cask の更新 Pull Request を自動で出し、auto-merge を要求するようにした（#116）。
 - cask の最小 macOS を `depends_on macos: ">= :sonoma"` から `depends_on macos: :sonoma` に改めた（#116）。Homebrew 6.0.0 から記号だけで「Sonoma 以降」を表し、`">= :sonoma"` は非推奨で `brew style` が失敗するためである。Homebrew 5.x 以前はこの書き方を「Sonoma のみ」と解釈する。
