@@ -238,7 +238,7 @@ struct FileListRowSamplerTests {
             ("リスト表示", "AXOutline", 1 + 2 + 10 * 3 + 9 * 4),
             // セクション 1 + セクションの表示中の項目 1、ディレクトリは項目の子と URL の 2、ファイルは AXEnabled を足して 3
             ("アイコン表示", "AXList", 2 + 10 * 2 + 10 * 3),
-        ]
+        ] as [(String, String, Int)]
     )
     func axCallCount(label: String, role: String, expected: Int) throws {
         let tree = StubPanelTree()
