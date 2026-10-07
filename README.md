@@ -5,7 +5,7 @@
 [![CI](https://github.com/TamaT-LLC/openpath/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TamaT-LLC/openpath/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-openpath は、macOS のファイル選択ダイアログ（NSOpenPanel）に、`cdr` や `fzf` のようなファジー検索のパレットを重ねるメニューバー常駐アプリです。
+openpath は、macOS のファイル選択ダイアログ（NSOpenPanel）に、ファジー検索のパレットを重ねるメニューバー常駐アプリです。
 Claude Desktop、Cursor、VS Code、ブラウザなど、どのアプリの「フォルダを開く」や「ファイルを添付」でも、Finder のツリーを辿らずに、数文字を入力して Enter を押すだけで目的の場所へ移動できます。
 
 最初の Stable [`v0.1.0`](https://github.com/TamaT-LLC/openpath/releases/tag/v0.1.0) を、2026-10-04 に GitHub Releases で公開しました。

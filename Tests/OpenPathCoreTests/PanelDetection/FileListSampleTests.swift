@@ -116,7 +116,7 @@ struct FileListSampleTests {
         ("カラム表示", "AXBrowser", 2 + 8 * 2 + 2 * 3),
         // 要素数 1 + 範囲の読み取り 1、ディレクトリはセル・名前の要素・URL の 3、ファイルは文字色を足して 4
         ("リスト表示", "AXOutline", 2 + 8 * 3 + 2 * 4),
-    ])
+    ] as [(String, String, Int)])
     func trailingAXCallCount(label: String, role: String, expected: Int) throws {
         let items = Self.directoriesFirst(directories: 25, files: [.dimmedFile("a.txt"), .dimmedFile("b.txt")])
         let node = role == "AXBrowser"
@@ -142,7 +142,7 @@ struct FileListSampleTests {
         // 文字色を読めないファイルの行は AXEnabled も読み、選べるか分からないまま 10 行すべてを読む（上限）
         ("カラム表示・文字色を読めない", "AXBrowser", false, 4 + 20 * 2 + 2 + 10 * 4),
         ("リスト表示・文字色を読めない", "AXOutline", false, 1 + 2 + 19 * 3 + 2 + 10 * 5),
-    ])
+    ] as [(String, String, Bool, Int)])
     func worstCaseAXCallCount(label: String, role: String, hasTextColor: Bool, expected: Int) throws {
         let files = (1...10).map { index in
             var file = FileListItem.dimmedFile("f\(index).txt")

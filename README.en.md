@@ -5,7 +5,7 @@
 [![CI](https://github.com/TamaT-LLC/openpath/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TamaT-LLC/openpath/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-openpath is a macOS menu bar app that overlays a `cdr`/`fzf`-style fuzzy finder
+openpath is a macOS menu bar app that overlays a fuzzy search palette
 on top of the system file dialog (NSOpenPanel). In any app's "Open Folder" or
 "Attach File" dialog, including Claude Desktop, Cursor, VS Code, and browsers,
 you type a few characters and press Return instead of walking the Finder tree.

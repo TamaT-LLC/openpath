@@ -4,7 +4,7 @@
 | --- | --- | --- | --- | --- | --- |
 | PROJ-BUS-001 | L1 | global | global | [プロダクト概要（openpath / OSS 方針）](../10_business/bus-global-product-overview.md) | Draft |
 | PROJ-REQ-001 | L1 | openpath | global | [openpath 要件（L1 / Draft）](../20_requirements/req-openpath-baseline.md) | Draft |
-| PROJ-UX-001 | L2 | openpath | global | [UX 設計: openpath パレット（cdr 風の使用感）](../30_ux/ux-openpath-palette.md) | Draft |
+| PROJ-UX-001 | L2 | openpath | global | [UX 設計: openpath パレット（ファジー検索とキーボード操作）](../30_ux/ux-openpath-palette.md) | Draft |
 | PROJ-ARCH-001 | L3 | openpath | global | [アーキテクチャ設計: openpath](../40_arch_design/arch-openpath-app.md) | Draft |
 | PROJ-ARCH-002 | L3 | openpath | global | [openpath のリリース運用](../40_arch_design/guide-release-distribution.md) | Active |
 | PROJ-DSN-001 | L4 | openpath | feature | [詳細設計: パネル検知とパス注入（PanelWatcher / PanelInjector）](../40_arch_design/design-openpath-panel-injection.md) | Draft |
