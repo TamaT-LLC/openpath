@@ -9,7 +9,7 @@ upstream:
 downstream:
 - PROJ-TST-001
 owner: TakehiroT
-updated: 2026-10-04
+updated: 2026-10-09
 ---
 
 # openpath のリリース運用
@@ -52,7 +52,14 @@ Smoke は任意の ref で実行できるが、署名・公証の Secrets は渡
 最初に、この workflow を含む変更を main にマージする。
 Actions → `Release macOS` → `Run workflow` で main を選ぶと、公開せずに Smoke を確認できる。
 
-Preview は、最新の main にバージョン更新をマージしてから作る。
+Stable のタグは Preview と同じコミットに付けるので、リリースノートの準備は Preview を作る前に済ませる。
+`docs/releases/unreleased.md` を `docs/releases/vX.Y.Z.md` に改め、新しい `unreleased.md` を作る。
+改めたファイルの 1 行目は `# vX.Y.Z` または `# vX.Y.Z（補足）` にする。括弧の中の補足は、ドキュメントインデックスのリンクにも付く。
+続けて `python3 scripts/release_notes_index.py` で [ドキュメントインデックス](../00_index/index.md) のリリースノート一覧を再生成する。
+CI の `repository policy` が `python3 scripts/release_notes_index.py --check` で一覧と `docs/releases/` の一致を検査する。
+この変更とバージョン更新を Pull Request で main にマージする。
+
+Preview は、上のマージ後の最新の main から作る。
 次は `0.1.0` の最初の Preview の例で、既存タグと重複しない番号を使う。
 
 ```bash

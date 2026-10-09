@@ -8,7 +8,7 @@ upstream:
 - PROJ-TST-001
 downstream: []
 owner: TakehiroT
-updated: 2026-10-04
+updated: 2026-10-09
 ---
 
 # 手動シナリオテスト: openpath（実機確認チェックリスト）
@@ -250,6 +250,7 @@ S-01 の備考（パレットが出ないときの切り分け、Issue #83）: d
 | ONB-18 | 「準備ができました」の表示中に権限を取り消す | 説明のページに戻る |  |  |
 | ONB-19 | `./scripts/cask.sh` の出力を見る | zap に `~/Library/Preferences/jp.tamat.openpath.plist` が入っている |  |  |
 | ONB-20 | 先に確認用のフォルダを作り、できたことを確かめる（`mkdir ~/{Desktop,Documents,Downloads}/openpath-onb20` → `ls -d ~/{Desktop,Documents,Downloads}/openpath-onb20` で 3 つとも出る。ターミナル自身のアクセス確認が出たら許可する）。次に openpath を終了し、保護フォルダの記録を消す（`tccutil reset SystemPolicyDesktopFolder jp.tamat.openpath`。`SystemPolicyDocumentsFolder`・`SystemPolicyDownloadsFolder` も同様）。config.toml の `roots` を `["~"]` にして（ghq の root が取れない環境では ONB-03 の既定のまま）起動し、確認の 1 つで「許可しない」、ほかで「許可」を選ぶ。パレットで `onb20` と打ち、次に拒否したフォルダの名前（`Desktop` など）を打つ。確かめたら確認用のフォルダを消し（`rmdir ~/{Desktop,Documents,Downloads}/openpath-onb20`）、`roots` を戻す | デスクトップ・書類・ダウンロードのアクセス確認が 1 つずつ（最大 3 回）出て、用途の説明（「openpath は、ファイル選択ダイアログで目的の場所へ素早く移動できるよう…」）が表示される。Full Disk Access を求める案内は出ない。どう答えても openpath は落ちず、候補の構築が終わる。`onb20` の候補には、許可したフォルダの `openpath-onb20` だけが出て、許可しなかったフォルダの `openpath-onb20` は出ない。許可しなかったフォルダ自体（`~/Desktop` など）は、その名前で打つと候補に出る。「システム設定 > プライバシーとセキュリティ > ファイルとフォルダ」の openpath が答えたとおりになっている。起動し直しても確認は出ない（ad-hoc 署名は再ビルド後に出直すことがある）。確認に答えるまでの間の挙動（パレットの「候補を構築中…」、ほかのダイアログでの検知）を備考に書く（NFR-02、2026-09-24 オーナー判断） |  |  |
+| ONB-21 | `./scripts/build.sh && ./scripts/sign.sh` でビルドした `build/openpath.app`（配布 ZIP を展開したものでもよい）を Finder で表示する（Dock には出ないため、Finder で確かめる） | 選んだ `.app`（`build/openpath.app` または展開した ZIP の `openpath.app`）の `Contents/Resources/AppIcon.icns` がある。Finder のアイコン表示とプレビュー（スペースキー）に、青いフォルダと白い矢印のアイコンが出て、汎用のアプリアイコンではない（`scripts/build.sh` が `Resources/*.icns` を同梱し、Info.plist の `CFBundleIconFile` が `AppIcon` を指す） |  |  |
 
 ## 12. 権限の取り消しと復帰（S-13）
 
@@ -286,7 +287,7 @@ DEBUG ビルド（`swift run openpath` など）の debug ログや、プロセ�
 | 候補・履歴（`CandidateSources`、`Index`、`History`） | S-05、FLOW-02、FLOW-07、MENU-03〜MENU-06、CFG-03 |
 | 設定（`Config`） | CFG-01〜CFG-03、S-12、SMK-01 |
 | メニューバー（`StatusItem`） | PERM-01、PERM-03、MENU-01〜MENU-09、CLIP-03、S-13 |
-| 権限・起動・初回起動（`Accessibility`、`App`、`Onboarding`） | ONB-01〜ONB-20、PERM-01〜PERM-03、S-13、SMK-02 |
+| 権限・起動・初回起動（`Accessibility`、`App`、`Onboarding`） | ONB-01〜ONB-21、PERM-01〜PERM-03、S-13、SMK-02 |
 | ホットキー（`Hotkey`） | S-08、MENU-01、CFG-02 |
 | ログ（`Logging`） | SMK-02、SMK-03 |
-| 配布スクリプト（`scripts/`） | PRE-01、ONB-19。`scripts/smoke-open-panel.sh` を変えたら SMK-02、SMK-03 |
+| 配布スクリプト（`scripts/`） | PRE-01、ONB-19。`scripts/build.sh` や `Resources/AppIcon.*` を変えたら ONB-21。`scripts/smoke-open-panel.sh` を変えたら SMK-02、SMK-03 |

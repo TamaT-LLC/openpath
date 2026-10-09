@@ -12,7 +12,9 @@ you type a few characters and press Return instead of walking the Finder tree.
 
 The first stable release,
 [`v0.1.0`](https://github.com/TamaT-LLC/openpath/releases/tag/v0.1.0), was
-published on GitHub Releases on 2026-10-04. [Install the ZIP](#install), or
+published on GitHub Releases on 2026-10-04. The latest stable release is the
+one marked Latest on [GitHub Releases](https://github.com/TamaT-LLC/openpath/releases).
+[Install the ZIP](#install), or
 [build it from source](#build-from-source).
 openpath asks only for the Accessibility permission and never uses the network.
 
@@ -20,10 +22,10 @@ The user interface is Japanese only. The design documents under `docs/` and the
 community files are written in Japanese; this English README covers installation
 and everyday use.
 
-[![openpath introduction video (about 34 seconds, with English narration)](assets/openpath-intro-en-poster.png)](assets/openpath-intro-en.mp4)
+Introduction video (about 34 seconds). The narration and on-screen text are in
+English.
 
-Select the image to open the introduction video (about 34 seconds, with English
-narration).
+https://github.com/user-attachments/assets/a81d53cc-956b-448f-a34d-6268721421eb
 
 ## Find what you need
 
@@ -71,9 +73,9 @@ openpath runs on macOS 14 (Sonoma) or later, on Apple Silicon and Intel.
 ### ZIP from GitHub Releases
 
 Builds are published on [GitHub Releases](https://github.com/TamaT-LLC/openpath/releases).
-The latest stable release is [v0.1.0](https://github.com/TamaT-LLC/openpath/releases/tag/v0.1.0),
-with `openpath-0.1.0.zip`, `SHA256SUMS`, and the Homebrew cask `openpath.rb`
-attached. The previews `preview-v0.1.0-1` and `preview-v0.1.0-2` are
+The latest stable release is the one marked Latest on that page.
+Each stable release has `openpath-<version>.zip`, `SHA256SUMS`, and the
+Homebrew cask `openpath.rb` attached. Previews (`preview-vX.Y.Z-N`) are
 pre-releases for evaluation and are not supported. Use the stable release for
 everyday use.
 
@@ -202,6 +204,8 @@ reads item names to offer them as candidates. Denying access only removes those
 folders' contents from the candidates. You can change the decision later in
 System Settings > Privacy & Security > Files and Folders, then choose
 "候補を再構築" (rebuild candidates) from the menu.
+This prompt behavior is expected from the implementation and macOS behavior,
+and has not yet been verified on a real device (manual scenario ONB-20).
 
 ## Privacy
 
@@ -229,8 +233,13 @@ and scope.
   menu, that the Accessibility permission is granted, and that the app is not
   in `disabled_apps`. After closing the palette with Esc, Ctrl+Shift+O brings it
   back.
+- After rebuilding from source, if the permission does not take effect, remove
+  openpath from the Accessibility list and add it again.
 - To restart the first-launch guide, quit openpath and run
   `defaults delete jp.tamat.openpath onboardingFinished`.
+
+Release notes, including known limitations, are in
+[docs/releases/](docs/releases/) (Japanese).
 
 Logs are written to `~/Library/Logs/openpath/openpath.log` (rotated to
 `openpath.log.1` above 5 MiB) and to the unified log (subsystem

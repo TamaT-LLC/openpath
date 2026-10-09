@@ -10,7 +10,7 @@ downstream:
 - PROJ-ARCH-001
 - PROJ-DSN-001
 owner: TakehiroT
-updated: 2026-10-04
+updated: 2026-10-07
 ---
 
 # UX 設計: openpath パレット（ファジー検索とキーボード操作）

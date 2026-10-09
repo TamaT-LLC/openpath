@@ -57,6 +57,8 @@ swift build
 python3 scripts/release_ci_test.py
 python3 scripts/github_policy_test.py
 python3 scripts/github_policy_check.py
+python3 scripts/release_notes_index_test.py
+python3 scripts/release_notes_index.py --check
 ```
 
 Homebrew cask（`scripts/cask.sh`）を変えた場合は、`./scripts/cask_style.sh` で生成物に `brew style` をかけてください（Homebrew が必要です。tap はしません）。
@@ -65,12 +67,23 @@ CI の `swift build / swift test` も同じ確認をします。
 `github_policy_check.py` は、workflow が使う Actions が [.github/actions-policy.json](./.github/actions-policy.json) の commit SHA に固定されていることと、[.github/settings-desired-v1.json](./.github/settings-desired-v1.json) の必須チェックが CI の job 名と一致することを確かめます。
 Pull Request の CI は、Swift のビルドとテストに加えて、この検証も実行します。
 
+`release_notes_index.py --check` は、[ドキュメントインデックス](./docs/00_index/index.md) のリリースノート一覧が `docs/releases/` の `vX.Y.Z.md` と一致することを確かめます。
+一致しない場合は、`python3 scripts/release_notes_index.py` で一覧を作り直してください。
+
 ### 手動シナリオ
 
 検知、パレット、注入、メニュー、設定、権限、初回起動の挙動が変わる Pull Request では、アクセシビリティ権限を付与した `openpath.app` で手動シナリオを確かめます。
 項目と ID は [手動シナリオテスト](./docs/50_test/test-openpath-manual-scenarios.md) にあり、§14 の対応表で影響範囲の項目を選びます。
 結果は Pull Request テンプレートの表に記入してください。
 権限の無い環境で確認できなかった項目は「未確認」とし、maintainer に確認を依頼してください。
+
+### アプリアイコンを変える場合
+
+アプリアイコンの元画像は `Resources/AppIcon.png`（透過 PNG）で、画像生成に使ったプロンプトを `Resources/AppIcon.prompt.txt` に残しています。
+元画像を差し替えたら、リポジトリのルートで `./scripts/build-icon.sh` を実行し、`Resources/AppIcon.icns` を作り直して一緒に commit してください。
+スクリプトは macOS 標準の `sips` と `iconutil` だけを使い、16〜512 ポイントの 1x と 2x（最大 1024 ピクセル）を含む `.icns` を生成します。
+`./scripts/build.sh` が `Resources/*.icns` を `.app` に同梱します。
+Finder で表示されるアイコンは、[手動シナリオテスト](./docs/50_test/test-openpath-manual-scenarios.md) の ONB-21 で確かめます。
 
 ### GitHub Actions を変える場合
 
@@ -109,7 +122,8 @@ Pull Request で提出した変更は、このリポジトリの [MIT License](.
 ## リリース
 
 version tag と GitHub Release は、maintainer が [リリース運用](./docs/40_arch_design/guide-release-distribution.md) に従って作ります。
-Stable を公開するときは、`docs/releases/unreleased.md` を `docs/releases/v<version>.md` に改め、新しい `unreleased.md` を作ります。
+Stable のタグは Preview と同じコミットに付けるので、Preview を作る前に、`docs/releases/unreleased.md` を `docs/releases/v<version>.md` に改め、新しい `unreleased.md` を作ります。
+続けて `python3 scripts/release_notes_index.py` でドキュメントインデックスのリリースノート一覧を作り直します（CI が `--check` で検査します）。
 意思決定とリリースの責任は [GOVERNANCE.md](./GOVERNANCE.md) にまとめています。
 
 ## 行動規範

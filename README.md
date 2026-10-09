@@ -9,13 +9,14 @@ openpath は、macOS のファイル選択ダイアログ（NSOpenPanel）に、
 Claude Desktop、Cursor、VS Code、ブラウザなど、どのアプリの「フォルダを開く」や「ファイルを添付」でも、Finder のツリーを辿らずに、数文字を入力して Enter を押すだけで目的の場所へ移動できます。
 
 最初の Stable [`v0.1.0`](https://github.com/TamaT-LLC/openpath/releases/tag/v0.1.0) を、2026-10-04 に GitHub Releases で公開しました。
+最新の Stable は、[GitHub Releases](https://github.com/TamaT-LLC/openpath/releases) で Latest と表示されているものです。
 [インストール](#インストール) の手順で、ZIP から入れて使えます。
 [ソースからビルド](#ソースからビルドする) して使うこともできます。
 求める権限はアクセシビリティだけで、ネットワーク通信は行いません。
 
-[![openpath の紹介動画（約 35 秒、音声あり）](assets/openpath-intro-poster.png)](assets/openpath-intro.mp4)
+openpath の紹介動画です（約 35 秒、日本語のナレーション付き）。
 
-画像を選ぶと、紹介動画（約 35 秒、日本語のナレーション付き）を開きます。
+https://github.com/user-attachments/assets/ee936bb0-6a86-44e3-a95c-582425cdb283
 
 ## 目的別の案内
 
@@ -56,8 +57,9 @@ Claude Desktop、Cursor、VS Code、ブラウザなど、どのアプリの「�
 ### GitHub Releases の ZIP
 
 配布物は [GitHub Releases](https://github.com/TamaT-LLC/openpath/releases) で公開しています。
-最新の Stable は [v0.1.0](https://github.com/TamaT-LLC/openpath/releases/tag/v0.1.0) で、`openpath-0.1.0.zip`、`SHA256SUMS`、Homebrew cask の `openpath.rb` を添付しています。
-Preview の `preview-v0.1.0-1` と `preview-v0.1.0-2` は評価用の prerelease で、サポート対象外です。
+最新の Stable は、Releases で Latest と表示されているものです。
+どの Stable にも、`openpath-<version>.zip`、`SHA256SUMS`、Homebrew cask の `openpath.rb` を添付しています。
+Preview（`preview-vX.Y.Z-N`）は評価用の prerelease で、サポート対象外です。
 通常の利用には Stable を使ってください。
 
 | 種類 | tag | 署名と公証 | 用途 |
@@ -179,6 +181,7 @@ Full Disk Access は求めません。
 `roots` にホーム（`~`）など、デスクトップ、書類、ダウンロードを含む場所を指定した場合（ghq が無いときの既定を含む）は、その中を初めて読むときに macOS がアクセスの許可を確認することがあります。
 確認には、フォルダ内の項目の名前を候補にするためという用途の説明が出ます。
 許可しなくても openpath は動き、そのフォルダの中が候補に入らないだけです。
+この確認の挙動は実装と macOS の仕様からの想定で、実機では未確認です（手動シナリオの ONB-20 で確認予定）。
 あとから変えるときは「システム設定 > プライバシーとセキュリティ > ファイルとフォルダ」で openpath の項目を切り替え、メニューの「候補を再構築」を選びます。
 
 ## プライバシー
@@ -247,6 +250,7 @@ Homebrew を使う `cask_style.sh` を除き、どのスクリプトも Command 
 | `build.sh [--arch universal\|arm64\|x86_64] [--version X.Y.Z]` | `swift build -c release` をアーキテクチャごとに実行して lipo で結合し、`build/openpath.app` を組み立てる | なし |
 | `sign.sh` | Hardened Runtime と `Resources/openpath.entitlements` を付けて署名し、`codesign --verify --deep --strict` で検証する | `OPENPATH_SIGN_IDENTITY`（任意） |
 | `notarize.sh` | zip にして `notarytool submit --wait`、`stapler staple`、`spctl -a -vv` を行い、staple 済みの `build/openpath-<version>.zip` を作る | `OPENPATH_NOTARY_PROFILE`（必須） |
+| `build-icon.sh` | `Resources/AppIcon.png` から `sips` と `iconutil` で全サイズを含む `Resources/AppIcon.icns` を生成する。`build.sh` が `.app` に同梱する | なし |
 | `cask.sh [--version X.Y.Z] [--zip PATH] [--output FILE]` | 配布用 zip の sha256 から Homebrew cask 定義を生成する（既定は標準出力） | なし |
 | `cask_style.sh [CASK]` | cask に `brew style` をかける。省略時は `Resources/Info.plist` から生成した cask を確かめる。Homebrew が必要で、tap はしない | なし |
 | `release.sh [--version X.Y.Z]` | build、sign、notarize、cask を順に実行し、`build/openpath-<version>.zip` と `build/Casks/openpath.rb` を作る | 上の 2 つとも必須 |
@@ -259,7 +263,8 @@ Homebrew を使う `cask_style.sh` を除き、どのスクリプトも Command 
 
 リリースは maintainer が [リリース運用](docs/40_arch_design/guide-release-distribution.md) に従って行います。
 変更内容は [リリースノート](docs/releases/) に記録します。
-リリースノートは [v0.1.0](docs/releases/v0.1.0.md)、[v0.1.1](docs/releases/v0.1.1.md) にあり、次のリリースに入る変更は [未リリースの変更](docs/releases/unreleased.md) に追記します。
+[ドキュメントインデックス](docs/00_index/index.md) のリリースノート一覧は `python3 scripts/release_notes_index.py` で `docs/releases/` から生成します（CI が `--check` で検査します）。
+次のリリースに入る変更は [未リリースの変更](docs/releases/unreleased.md) に追記します。
 
 ### ローカルでの署名と公証
 
