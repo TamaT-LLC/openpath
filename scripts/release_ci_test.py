@@ -610,6 +610,16 @@ class ReleaseEnvironmentTests(unittest.TestCase):
         self.assertIn("(needs.prepare.outputs.channel == 'stable' && needs.package-stable.result == 'success')",
                       condition)
 
+    def test_jobs_after_prepare_check_out_the_verified_github_sha(self):
+        # prepare は既定の checkout（github.sha）を検証する。job の出力を ref に使うと、CodeQL が
+        # 信頼できない commit の checkout とみなす（actions/cache-poisoning/poisonable-step）
+        for name, job in self.jobs('release.yml').items():
+            if name in ('prepare', 'homebrew-tap'):
+                continue
+            with self.subTest(name):
+                refs = [line.strip() for line in job.splitlines() if line.strip().startswith('ref:')]
+                self.assertEqual(refs, ['ref: ${{ github.sha }}'])
+
     def test_the_tap_job_receives_its_app_credentials_from_the_homebrew_tap_environment(self):
         jobs = self.jobs('homebrew-tap.yml')
         self.assertEqual(list(jobs), ['update-cask'])

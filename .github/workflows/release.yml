@@ -19,13 +19,14 @@ defaults:
     shell: bash
 
 jobs:
+  # prepare は既定の checkout（github.sha）の commit を検証する。後続の job も同じ github.sha を
+  # checkout するので、検証済みの commit 以外はビルドしない。
   prepare:
     runs-on: ubuntu-24.04
     outputs:
       channel: ${{ steps.metadata.outputs.channel }}
       version: ${{ steps.metadata.outputs.version }}
       preview_number: ${{ steps.metadata.outputs.preview_number }}
-      commit: ${{ steps.metadata.outputs.commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -62,7 +63,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.commit }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Test release gates
@@ -103,7 +104,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.commit }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Test release gates
@@ -215,7 +216,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.commit }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
