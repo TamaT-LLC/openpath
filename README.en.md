@@ -22,8 +22,8 @@ The user interface is Japanese only. The design documents under `docs/` and the
 community files are written in Japanese; this English README covers installation
 and everyday use.
 
-Introduction video (about 35 seconds). The narration and on-screen text are in
-Japanese.
+Introduction video (about 34 seconds). The narration and on-screen text are in
+English.
 
 https://github.com/user-attachments/assets/a81d53cc-956b-448f-a34d-6268721421eb
 
