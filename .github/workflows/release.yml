@@ -19,13 +19,14 @@ defaults:
     shell: bash
 
 jobs:
+  # prepare は既定の checkout（github.sha）の commit を検証する。後続の job も同じ github.sha を
+  # checkout するので、検証済みの commit 以外はビルドしない。
   prepare:
     runs-on: ubuntu-24.04
     outputs:
       channel: ${{ steps.metadata.outputs.channel }}
       version: ${{ steps.metadata.outputs.version }}
       preview_number: ${{ steps.metadata.outputs.preview_number }}
-      commit: ${{ steps.metadata.outputs.commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,8 +51,11 @@ jobs:
             python3 scripts/release_metadata.py --tag "${GITHUB_REF_NAME}" >> "${GITHUB_OUTPUT}"
           fi
 
+  # Smoke と Preview は ad-hoc 署名で、署名・公証の Secrets を使わない。environment を付けないので、
+  # Smoke は任意の ref から、Preview は preview-v* タグから動く。
   package:
     needs: prepare
+    if: needs.prepare.outputs.channel != 'stable'
     runs-on: macos-15
     timeout-minutes: 90
     env:
@@ -59,7 +63,48 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.commit }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Test release gates
+        run: python3 scripts/release_ci_test.py
+
+      - name: Test
+        run: |
+          ./scripts/test.sh 2>&1 | tee "${RUNNER_TEMP}/swift-test.log"
+          grep -Eq 'Test run with [1-9][0-9]* tests?' "${RUNNER_TEMP}/swift-test.log"
+
+      - name: Package smoke or preview
+        env:
+          RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          PREVIEW_NUMBER: ${{ needs.prepare.outputs.preview_number }}
+        run: ./scripts/package_release.sh "${RELEASE_CHANNEL}" "${RELEASE_VERSION}" "${PREVIEW_NUMBER}"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: openpath-${{ needs.prepare.outputs.channel }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/release-dist/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+          overwrite: false
+
+  # 署名・公証の Secrets は environment `release` にだけ置く。`release` のデプロイ対象は v* タグに
+  # 限っているため、ほかのブランチやタグで workflow を書き換えても、この job は Secrets を受け取れない。
+  package-stable:
+    needs: prepare
+    if: needs.prepare.outputs.channel == 'stable'
+    environment: release
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Test release gates
@@ -71,7 +116,6 @@ jobs:
           grep -Eq 'Test run with [1-9][0-9]* tests?' "${RUNNER_TEMP}/swift-test.log"
 
       - name: Prepare signing and notarization
-        if: needs.prepare.outputs.channel == 'stable'
         env:
           OPENPATH_SIGN_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
           OPENPATH_NOTARY_PROFILE: openpath-ci
@@ -121,16 +165,7 @@ jobs:
             --issuer "${APPLE_NOTARY_ISSUER_ID}" --keychain "${keychain}"
           rm "${credential_dir}/certificate.p12" "${credential_dir}/AuthKey.p8"
 
-      - name: Package smoke or preview
-        if: needs.prepare.outputs.channel != 'stable'
-        env:
-          RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
-          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
-          PREVIEW_NUMBER: ${{ needs.prepare.outputs.preview_number }}
-        run: ./scripts/package_release.sh "${RELEASE_CHANNEL}" "${RELEASE_VERSION}" "${PREVIEW_NUMBER}"
-
       - name: Package signed and notarized stable
-        if: needs.prepare.outputs.channel == 'stable'
         env:
           OPENPATH_SIGN_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
           OPENPATH_NOTARY_PROFILE: openpath-ci
@@ -150,7 +185,7 @@ jobs:
           overwrite: false
 
       - name: Remove signing credentials
-        if: always() && needs.prepare.outputs.channel == 'stable'
+        if: always()
         run: |
           credential_dir="${RUNNER_TEMP}/openpath-signing"
           cleanup_status=0
@@ -167,16 +202,21 @@ jobs:
           rm -rf "${credential_dir}" || cleanup_status=1
           exit "${cleanup_status}"
 
+  # package と package-stable のどちらか一方は必ず skip されるため、!cancelled() で既定の success() を外し、
+  # channel に対応する job の成功を明示して確かめる
   publish:
-    needs: [prepare, package]
-    if: needs.prepare.outputs.channel == 'preview' || needs.prepare.outputs.channel == 'stable'
+    needs: [prepare, package, package-stable]
+    if: >-
+      ${{ !cancelled() &&
+      ((needs.prepare.outputs.channel == 'preview' && needs.package.result == 'success') ||
+      (needs.prepare.outputs.channel == 'stable' && needs.package-stable.result == 'success')) }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.commit }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -189,14 +229,16 @@ jobs:
 
   # Stable の公開に成功したときだけ、tap へ cask の更新 PR を出す。成果物は作らないため、
   # この job だけが失敗した場合は、この job だけを再実行してよい（リリース運用のガイドを参照）。
-  # App の秘密鍵は、署名・公証の Secrets と同じく、使う job にだけ明示して渡す。
+  # App の秘密鍵は、呼び出し先の job が environment `homebrew-tap` から受け取る。
+  # environment の Secrets は呼び出し元から渡せないため、ここでは secrets を渡さない。
+  # 祖先の package は Stable で skip されるため、!cancelled() で既定の success() を外す。
   homebrew-tap:
     needs: [prepare, publish]
-    if: needs.prepare.outputs.channel == 'stable' && needs.publish.result == 'success'
+    if: >-
+      ${{ !cancelled() &&
+      needs.prepare.outputs.channel == 'stable' && needs.publish.result == 'success' }}
     permissions:
       contents: read
     uses: ./.github/workflows/homebrew-tap.yml
     with:
       tag: ${{ github.ref_name }}
-    secrets:
-      HOMEBREW_TAP_APP_PRIVATE_KEY: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}

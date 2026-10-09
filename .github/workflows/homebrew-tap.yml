@@ -3,6 +3,8 @@ name: Homebrew tap
 # Stable の公開後に、Release に添付された cask で TamaT-LLC/homebrew-tap へ更新 PR を出す。
 # Release macOS から呼ばれるほか、App を設定した直後の確認や再実行のために手動でも起動できる。
 # 手順は docs/40_arch_design/guide-release-distribution.md を参照。
+# App の Client ID と秘密鍵は environment `homebrew-tap` に置く。デプロイ対象は v* タグ（Release macOS
+# からの呼び出し）と main（手動実行）に限るため、ほかのブランチで書き換えた workflow には渡らない。
 on:
   workflow_call:
     inputs:
@@ -15,10 +17,6 @@ on:
         type: boolean
         required: false
         default: false
-    secrets:
-      HOMEBREW_TAP_APP_PRIVATE_KEY:
-        # 未設定でも Release の公開は止めず、この job の最初で設定不足として失敗させる
-        required: false
   workflow_dispatch:
     inputs:
       tag:
@@ -45,6 +43,8 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+    # environment の Secrets は呼び出し元から渡せないため、この job が environment から直接受け取る
+    environment: homebrew-tap
     # 同じ tag の Release と手動実行が重なっても、tap のブランチを同時に更新しない
     concurrency:
       group: homebrew-tap-${{ inputs.tag }}
@@ -71,11 +71,11 @@ jobs:
         run: |
           status=0
           if [[ -z "${APP_CLIENT_ID}" ]]; then
-            echo "::error::Variable HOMEBREW_TAP_APP_CLIENT_ID is not configured"
+            echo "::error::Variable HOMEBREW_TAP_APP_CLIENT_ID is not configured in environment homebrew-tap"
             status=1
           fi
           if [[ "${HAS_PRIVATE_KEY}" != "true" ]]; then
-            echo "::error::Secret HOMEBREW_TAP_APP_PRIVATE_KEY is not configured"
+            echo "::error::Secret HOMEBREW_TAP_APP_PRIVATE_KEY is not configured in environment homebrew-tap"
             status=1
           fi
           exit "${status}"

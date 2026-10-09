@@ -44,8 +44,13 @@ Stable の公開に成功すると、添付した cask で Homebrew tap に更�
 アプリ内の表示バージョンはどの経路でも `X.Y.Z` のままで、Preview 番号はタグと ZIP 名に付く。
 
 公開用タグは annotated tag に限定し、そのコミットが `origin/main` に含まれることを検証する。
+Stable と Preview のタグ（`v*` と `preview-v*`）を作れるのは、リポジトリの admin だけである。
+公開済みのタグは、admin を含め誰も更新も削除もできない。
+タグの作成は ruleset `restrict-release-tag-creation`（`creation` ルールだけを持ち、リポジトリのロール admin を bypass にする）で、更新と削除は bypass のない ruleset `protect-release-tags` で禁止する。
+bypass は ruleset のすべてのルールに及ぶため、2 つの ruleset に分けて、admin の bypass が更新と削除に及ばないようにしている。
 タグのバージョン、ソースのバージョン、checkout されたコミットが一致しなければ署名処理へ進まない。
 Smoke は任意の ref で実行できるが、署名・公証の Secrets は渡さない。
+Smoke と Preview は `package` job で、Stable は environment `release` を使う `package-stable` job で作る（[認証情報と実行時の扱い](#認証情報と実行時の扱い)）。
 
 ## 公開する手順
 
@@ -129,7 +134,7 @@ CI は、生成した cask に `brew style` をかける（`scripts/cask_style.s
 
 ### App を設定した直後の確認
 
-App を作成し、[README の一覧](../../README.md#github-actions-でリリースする)の Variable と Secret を登録したら、公開済みの `v0.1.0` で dry run を実行する。
+App を作成し、[README の一覧](../../README.md#github-actions-でリリースする)の Variable と Secret を environment `homebrew-tap` に登録したら、公開済みの `v0.1.0` で dry run を実行する。
 dry run は、トークンの発行、tap の clone、差分の確認までで止まり、push も Pull Request の作成もしない。
 
 1. Actions → `Homebrew tap` → `Run workflow` で、branch に `main`、`tag` に `v0.1.0` を指定し、`dry_run` をチェックしたまま実行する。CLI では `gh workflow run homebrew-tap.yml --ref main -f tag=v0.1.0 -f dry_run=true` を使う。
@@ -139,16 +144,34 @@ dry run は、トークンの発行、tap の clone、差分の確認までで�
 
 ## 認証情報と実行時の扱い
 
-登録する Secrets と Variables は [README の一覧](../../README.md#github-actions-でリリースする)を正本とする。
+登録する Secrets と Variables、environment とそのデプロイ対象は [README の一覧](../../README.md#github-actions-でリリースする)を正本とする。
 公証 API キーは openpath 専用の Team API キーを使用し、署名証明書は同じ会社のものを共用する。
 
-署名・公証の認証情報は Stable の package job だけに渡す。
+Secrets はリポジトリ全体には置かず、次の 2 つの environment に置く。
+リポジトリ全体の Secret は、write 権限を持つアカウントが任意のブランチで workflow を書き換えれば読み出せる。
+environment の Secret は、デプロイ対象の ref で動く job にしか渡らない。
+
+| environment | Secret / Variable | 使う job | デプロイを許す ref |
+| --- | --- | --- | --- |
+| `release` | Secret `APPLE_CERTIFICATE_BASE64`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_NOTARY_PRIVATE_KEY_BASE64` | `Release macOS` の `package-stable` | tag `v*` |
+| `homebrew-tap` | Secret `HOMEBREW_TAP_APP_PRIVATE_KEY`、Variable `HOMEBREW_TAP_APP_CLIENT_ID` | `Homebrew tap` の `update cask` | tag `v*`、branch `main` |
+
+`release` は Stable のタグだけを許す。Preview（`preview-v*`）と Smoke は署名・公証の Secrets を使わないため、environment を付けない `package` job で作る。
+`homebrew-tap` は、`Release macOS` から呼ばれたとき（ref は Stable のタグ）と、main から手動実行したときの両方で動く必要があるため、`main` も許す。
+main には、ruleset `protect-main` と `require-code-owner-review` により Pull Request を経た変更しか入らない。
+タグ `v*` と `preview-v*` は admin だけが作れ、公開済みのタグは admin を含め誰も更新も削除もできない（ruleset `restrict-release-tag-creation` と `protect-release-tags`）。
+このため、`release` の Secrets を受け取る job を動かせるのは admin だけになる。
+どちらの environment にも Required reviewers は付けていない。admin のアカウントが乗っ取られた場合は、タグを作って Secrets を使えてしまうことを前提とする。
+Apple の Variable 4 つ（署名 ID、Team ID、Key ID、Issuer ID）は秘密ではないため、リポジトリ全体に置く。
+environment の構成は `.github/settings-desired-v1.json` に宣言し、`python3 scripts/github_settings_drift.py` で実際の設定と照合する。
+
+署名・公証の認証情報は Stable の `package-stable` job だけに渡す。
 一時キーチェーンへ P12 と公証プロファイルを取り込み、終了時には検索リストを復元してキーチェーンを削除する。
 復元や削除が失敗しても残りの削除を試み、いずれかが失敗した場合は job を失敗にする。
 publish job に Apple の秘密鍵は渡さず、GitHub の `contents: write` はその job だけに付与する。
 
-Homebrew tap を更新する GitHub App の秘密鍵は、`Release macOS` の `homebrew-tap` job にだけ渡す。
-`secrets: inherit` は使わず、`HOMEBREW_TAP_APP_PRIVATE_KEY` だけを明示して渡す。
+Homebrew tap を更新する GitHub App の秘密鍵は、`Homebrew tap` の `update cask` job だけが environment `homebrew-tap` から受け取る。
+environment の Secret は呼び出し元の workflow から渡せないため、`Release macOS` は秘密鍵を渡さず、`secrets: inherit` も使わない。
 秘密鍵は `actions/create-github-app-token` の入力にだけ使い、run の環境変数には入れない。設定の確認では、値ではなく有無だけを見る。
 発行するトークンは `TamaT-LLC/homebrew-tap` だけを対象にし、権限を Contents と Pull requests の書き込みに絞る。job の終了時に、action がトークンを失効させる。
 `scripts/update_homebrew_tap.py` は、トークンを引数にもログにも出さない。`gh` は `GH_TOKEN` から読み、git は push のときだけ `gh auth git-credential` を通して受け取る。
@@ -172,11 +195,12 @@ Draft が残った場合は、添付ファイルとログを確認してから�
 
 Homebrew tap の job（`homebrew-tap / update cask`）は、公開済みの Release から添付ファイルを取得し直し、Actions の artifact を使わない。
 このため、Release の公開後にこの job だけが失敗した場合は、`Re-run failed jobs` でこの job だけを再実行してよい。
-上の「失敗した job だけの再実行は使わない」は、実行番号付きの artifact を受け渡す package と publish の job についての方針で、この job には当てはまらない。
+上の「失敗した job だけの再実行は使わない」は、実行番号付きの artifact を受け渡す package（Stable では package-stable）と publish の job についての方針で、この job には当てはまらない。
 逆に、この場合に `Re-run all jobs` は使わない。公開済みの Release は上書きしないため、publish job が失敗する。
 `Release macOS` を再実行する代わりに、`Homebrew tap` を手動実行してもよい。`tag` に対象の版を指定し、`dry_run` を外す。
 公開直後の状態確認で publish job が失敗し、Release を公開済みとして扱う場合は、tap の job が動かないため、同じ手動実行で反映する。
-App の設定不足で失敗した場合は、README の一覧の Variable と Secret を直してから再実行する。
+App の設定不足で失敗した場合は、README の一覧のとおり environment `homebrew-tap` の Variable と Secret を直してから再実行する。
+手動実行は main か Stable のタグから行う。ほかのブランチから実行すると、environment のデプロイ対象外として job が始まらない。
 どの方法で再実行しても、反映済みなら何もせず、既存のブランチと Pull Request は作り直さない。
 
 ## 自動検証と残る実機確認
@@ -188,6 +212,7 @@ App の設定不足で失敗した場合は、README の一覧の Variable と S
 Homebrew tap への反映は、隔離した bare リポジトリを tap に見立て、GitHub CLI をモックして確かめる。
 照合の失敗、Preview の拒否、反映済みなら何もしないこと（tap 側で直した行を含む）、既存のブランチと Pull Request の扱い、auto-merge を要求できないときの警告、dry run が対象である。
 `Release macOS` が Stable の publish の後にだけ tap の workflow を呼ぶことと、App の秘密鍵の渡し方も、workflow の定義から確かめる。
+署名・公証の Secrets を参照するのが environment `release` の `package-stable` job だけであることと、tap の job が environment `homebrew-tap` を使うことも同様に確かめる。
 `scripts/cask.sh` の生成物は、`depends_on macos: :sonoma` であることと、tap と同じ照合に通ることをテストで確かめる。
 CI では、生成物に `brew style` もかける。
 

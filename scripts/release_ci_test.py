@@ -190,7 +190,8 @@ class CleanupTests(unittest.TestCase):
     def test_all_cleanup_operations_are_attempted_even_after_failure(self):
         workflow = (SCRIPTS.parent / '.github/workflows/release.yml').read_text()
         section = workflow.split('      - name: Remove signing credentials\n', 1)[1]
-        body = section.split('        run: |\n', 1)[1].split('\n  publish:', 1)[0]
+        # step の run は、次の job（またはその前のコメント）の手前で終わる
+        body = re.split(r'\n\n  \S', section.split('        run: |\n', 1)[1], maxsplit=1)[0]
         script = textwrap.dedent(body)
         for failures in ['', 'python3', 'security', 'rm', 'python3 security rm']:
             with self.subTest(failures=failures), tempfile.TemporaryDirectory() as temp:
@@ -544,27 +545,106 @@ class HomebrewTapUpdateTests(HomebrewTapFixture):
         self.assertEqual(self.calls, [])
 
 
-class HomebrewTapWorkflowTests(unittest.TestCase):
-    def release_job(self, name):
-        text = (WORKFLOWS / 'release.yml').read_text()
-        return re.split(r'\n  [^ \n][^\n]*:\n', text.split(f'\n  {name}:\n', 1)[1], maxsplit=1)[0]
+def workflow_job(workflow, name):
+    """Return the body of a top-level job in a workflow under .github/workflows."""
+    text = (WORKFLOWS / workflow).read_text()
+    return re.split(r'\n  [^ \n][^\n]*:\n', text.split(f'\n  {name}:\n', 1)[1], maxsplit=1)[0]
 
+
+def job_condition(job):
+    """Return the job-level `if:` of a job body, joining a folded (`>-`) condition into one line."""
+    lines = job.splitlines()
+    index = next(i for i, line in enumerate(lines) if line.startswith('    if:'))
+    condition = lines[index].split(':', 1)[1].strip()
+    if condition != '>-':
+        return condition
+    folded = []
+    for line in lines[index + 1:]:
+        if not line.startswith('      '):
+            break
+        folded.append(line.strip())
+    return ' '.join(folded)
+
+
+class ReleaseEnvironmentTests(unittest.TestCase):
+    """署名・公証と tap 更新の Secrets を environment に閉じ込める構成を、workflow の定義から確かめる。"""
+
+    JOB_HEADER = re.compile(r'^  ([A-Za-z0-9_-]+):$', re.MULTILINE)
+    SECRET_REFERENCE = re.compile(r'secrets\.([A-Z0-9_]+)')
+    SIGNING_SECRETS = {'APPLE_CERTIFICATE_BASE64', 'APPLE_CERTIFICATE_PASSWORD', 'APPLE_NOTARY_PRIVATE_KEY_BASE64'}
+
+    def jobs(self, workflow):
+        text = (WORKFLOWS / workflow).read_text()
+        names = self.JOB_HEADER.findall(text.split('\njobs:\n', 1)[1])
+        return {name: workflow_job(workflow, name) for name in names}
+
+    def environment(self, job):
+        return next((line.split(':', 1)[1].strip() for line in job.splitlines()
+                     if line.startswith('    environment:')), None)
+
+    def test_only_the_stable_package_job_uses_signing_secrets_through_the_release_environment(self):
+        jobs = self.jobs('release.yml')
+        for name, job in jobs.items():
+            with self.subTest(name):
+                secrets = set(self.SECRET_REFERENCE.findall(job))
+                if name == 'package-stable':
+                    self.assertEqual(self.environment(job), 'release')
+                    self.assertEqual(secrets, self.SIGNING_SECRETS)
+                else:
+                    self.assertIsNone(self.environment(job))
+                    self.assertEqual(secrets, set())
+
+    def test_stable_and_other_channels_are_packaged_by_separate_jobs(self):
+        jobs = self.jobs('release.yml')
+        self.assertEqual(job_condition(jobs['package']), "needs.prepare.outputs.channel != 'stable'")
+        self.assertEqual(job_condition(jobs['package-stable']), "needs.prepare.outputs.channel == 'stable'")
+        self.assertNotIn('Prepare signing and notarization', jobs['package'])
+        self.assertIn('./scripts/package_release.sh stable', jobs['package-stable'])
+
+    def test_publish_requires_the_package_job_of_its_channel(self):
+        job = workflow_job('release.yml', 'publish')
+        self.assertIn('needs: [prepare, package, package-stable]', job.splitlines()[0])
+        condition = job_condition(job)
+        self.assertTrue(condition.startswith('${{ !cancelled() &&'), condition)
+        self.assertIn("(needs.prepare.outputs.channel == 'preview' && needs.package.result == 'success')", condition)
+        self.assertIn("(needs.prepare.outputs.channel == 'stable' && needs.package-stable.result == 'success')",
+                      condition)
+
+    def test_jobs_after_prepare_check_out_the_verified_github_sha(self):
+        # prepare は既定の checkout（github.sha）を検証する。job の出力を ref に使うと、CodeQL が
+        # 信頼できない commit の checkout とみなす（actions/cache-poisoning/poisonable-step）
+        for name, job in self.jobs('release.yml').items():
+            if name in ('prepare', 'homebrew-tap'):
+                continue
+            with self.subTest(name):
+                refs = [line.strip() for line in job.splitlines() if line.strip().startswith('ref:')]
+                self.assertEqual(refs, ['ref: ${{ github.sha }}'])
+
+    def test_the_tap_job_receives_its_app_credentials_from_the_homebrew_tap_environment(self):
+        jobs = self.jobs('homebrew-tap.yml')
+        self.assertEqual(list(jobs), ['update-cask'])
+        self.assertEqual(self.environment(jobs['update-cask']), 'homebrew-tap')
+        text = (WORKFLOWS / 'homebrew-tap.yml').read_text()
+        # environment の Secrets は呼び出し元から渡せないため、workflow_call で secrets を受け取らない
+        self.assertNotIn('\n    secrets:\n', text.split('\njobs:\n', 1)[0])
+
+
+class HomebrewTapWorkflowTests(unittest.TestCase):
     def test_release_calls_the_tap_workflow_only_after_a_stable_publish(self):
-        job = self.release_job('homebrew-tap')
+        job = workflow_job('release.yml', 'homebrew-tap')
         lines = [line.strip() for line in job.splitlines()]
         self.assertIn('needs: [prepare, publish]', lines)
-        condition = next(line for line in lines if line.startswith('if:'))
+        condition = job_condition(job)
+        self.assertTrue(condition.startswith('${{ !cancelled() &&'), condition)
         self.assertIn("needs.prepare.outputs.channel == 'stable'", condition)
         self.assertIn("needs.publish.result == 'success'", condition)
         self.assertIn('uses: ./.github/workflows/homebrew-tap.yml', lines)
         self.assertIn('tag: ${{ github.ref_name }}', lines)
-        self.assertEqual([line.strip() for line in job.split('\n    secrets:\n', 1)[1].splitlines() if line.strip()],
-                         ['HOMEBREW_TAP_APP_PRIVATE_KEY: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}'])
+        self.assertNotIn('secrets:', lines)
 
-    def test_the_app_private_key_is_passed_explicitly_and_only_to_the_tap_job(self):
+    def test_the_app_private_key_is_not_passed_through_release_or_inherited(self):
         release = (WORKFLOWS / 'release.yml').read_text()
-        self.assertEqual(release.count('HOMEBREW_TAP_APP_PRIVATE_KEY'), 2)
-        self.assertEqual(self.release_job('homebrew-tap').count('HOMEBREW_TAP_APP_PRIVATE_KEY'), 2)
+        self.assertNotIn('secrets.HOMEBREW_TAP_APP_PRIVATE_KEY', release)
         for workflow in WORKFLOWS.glob('*.yml'):
             self.assertNotRegex(workflow.read_text(), r'secrets: *inherit', workflow.name)
 

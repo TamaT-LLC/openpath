@@ -91,6 +91,9 @@ workflow の `uses:` は、tag ではなく commit SHA に固定し、末尾に 
 `github_policy_check.py` は workflow を行単位で読み、正しく読めると保証できない書き方は拒否します（fail closed）。
 `on:` と、Pull Request で動く job の見出しの直下は、2 スペース字下げの block style で書いてください（`{}` や `[]` のインライン、anchor、alias は使えません）。
 新しい Action を使う場合や version を上げる場合は、upstream の tag から SHA を解決し、`.github/actions-policy.json` も同じ変更で更新してください。
+job に `environment:` を付ける場合は、`.github/settings-desired-v1.json` の `surface/environments` と `environment_policies` に同じ名前を宣言してください（宣言がないと `github_policy_check.py` が失敗します）。
+Required reviewers を付けない environment は、デプロイ対象を custom policy で限定しなければなりません。
+各パターンは `main` や `v*` のように固定文字で始めます。先頭がワイルドカードのパターンと、`protected_branches` だけの制限は検証器で拒否します。
 
 ```console
 gh api repos/actions/checkout/git/ref/tags/v7.0.1 --jq '.object'
@@ -122,6 +125,7 @@ Pull Request で提出した変更は、このリポジトリの [MIT License](.
 ## リリース
 
 version tag と GitHub Release は、maintainer が [リリース運用](./docs/40_arch_design/guide-release-distribution.md) に従って作ります。
+Stable と Preview の tag（`v*` と `preview-v*`）を作れるのは、リポジトリの admin だけです。write 権限では push が拒否されます。
 Stable のタグは Preview と同じコミットに付けるので、Preview を作る前に、`docs/releases/unreleased.md` を `docs/releases/v<version>.md` に改め、新しい `unreleased.md` を作ります。
 続けて `python3 scripts/release_notes_index.py` でドキュメントインデックスのリリースノート一覧を作り直します（CI が `--check` で検査します）。
 意思決定とリリースの責任は [GOVERNANCE.md](./GOVERNANCE.md) にまとめています。

@@ -340,13 +340,69 @@ class SettingsManifestTests(RepositoryFixture):
         self.write_settings(settings)
         self.assert_rejected('protect-release-tags')
 
+    def test_environment_without_reviewers_must_restrict_deployment_refs(self):
+        tag_only = {'protected_branches': False, 'custom_branch_policies': True,
+                    'custom_policies': [{'name': 'v*', 'type': 'tag'}]}
+        policy = {'name': 'release', 'prevent_self_review': False, 'reviewers': [],
+                  'deployment_ref_policy': tag_only}
+        settings = copy.deepcopy(SETTINGS)
+        settings['surface']['environments'] = ['release']
+        settings['environment_policies'] = [policy]
+        self.write_settings(settings)
+        self.assertEqual(self.errors(), [])
+        open_refs = {
+            'all branches': {'protected_branches': False, 'custom_branch_policies': False, 'custom_policies': []},
+            'no custom policy': {'protected_branches': False, 'custom_branch_policies': True, 'custom_policies': []},
+            'policies without custom': {**tag_only, 'custom_branch_policies': False},
+            'both ref policies': {**tag_only, 'protected_branches': True},
+            'protected only': {'protected_branches': True, 'custom_branch_policies': False, 'custom_policies': []},
+        }
+        for pattern in ('*', '**', '?*', '[a-z]*', '*/*'):
+            for kind in ('branch', 'tag'):
+                open_refs[f'{kind} {pattern}'] = {**tag_only, 'custom_policies': [
+                    {'name': 'v*', 'type': 'tag'}, {'name': pattern, 'type': kind}]}
+        for label, ref_policy in open_refs.items():
+            with self.subTest(label):
+                settings['environment_policies'] = [{**policy, 'deployment_ref_policy': ref_policy}]
+                self.write_settings(settings)
+                self.assert_rejected('deployment_ref_policy')
+        settings['environment_policies'] = [{**policy, 'reviewers': ['user:TakehiroT'],
+                                             'deployment_ref_policy': open_refs['all branches']}]
+        self.write_settings(settings)
+        self.assertEqual(self.errors(), [])
+
+    def test_allow_creations_is_an_optional_boolean_of_tag_rulesets(self):
+        settings = copy.deepcopy(SETTINGS)
+        settings['rulesets'][2]['allow_creations'] = False
+        self.write_settings(settings)
+        self.assertEqual(self.errors(), [])
+        cases = {
+            'not a boolean': (2, 0),
+            'branch ruleset': (0, False),
+        }
+        for label, (index, value) in cases.items():
+            with self.subTest(label):
+                settings = copy.deepcopy(SETTINGS)
+                settings['rulesets'][index]['allow_creations'] = value
+                self.write_settings(settings)
+                self.assert_rejected('allow_creations')
+
     def test_workflow_environments_must_be_declared(self):
         self.write_workflow('release.yml', RELEASE.replace('    runs-on: ubuntu-24.04\n', '    runs-on: ubuntu-24.04\n    environment: release\n'))
         self.assert_rejected("'release'")
         settings = copy.deepcopy(SETTINGS)
         settings['surface']['environments'] = ['release']
         self.write_settings(settings)
+        self.assert_rejected('environment_policies')
+        settings['environment_policies'] = [{
+            'name': 'release', 'prevent_self_review': False, 'reviewers': [],
+            'deployment_ref_policy': {'protected_branches': False, 'custom_branch_policies': True,
+                                      'custom_policies': [{'name': 'v*', 'type': 'tag'}]}}]
+        self.write_settings(settings)
         self.assertEqual(self.errors(), [])
+        settings['surface']['environments'] = []
+        self.write_settings(settings)
+        self.assert_rejected('environment_policies')
 
 
 def live_ruleset(identifier, name, target, include, rules, bypass=()):
@@ -394,13 +450,13 @@ def matching_live_state():
 
 
 class DriftTests(unittest.TestCase):
-    def report(self, responses):
+    def report(self, responses, settings=SETTINGS):
         def fetch(path):
             value = responses[path]
             if isinstance(value, drift.ApiError):
                 raise value
             return copy.deepcopy(value)
-        return drift.drift_report(SETTINGS, fetch)
+        return drift.drift_report(settings, fetch)
 
     def test_matching_live_state_has_no_drift(self):
         self.assertEqual(self.report(matching_live_state()), [])
@@ -444,14 +500,88 @@ class DriftTests(unittest.TestCase):
         responses = matching_live_state()
         responses['repos/TamaT-LLC/openpath/rulesets/2']['bypass_actors'].append(
             {'actor_id': 2740, 'actor_type': 'Integration', 'bypass_mode': 'always'})
-        responses['repos/TamaT-LLC/openpath/rulesets/3']['rules'].append({'type': 'creation'})
+        responses['repos/TamaT-LLC/openpath/rulesets/3']['rules'].append({'type': 'required_signatures'})
         responses['repos/TamaT-LLC/openpath/rulesets?per_page=100'].append({'id': 4})
         responses['repos/TamaT-LLC/openpath/rulesets/4'] = live_ruleset(4, 'legacy', 'branch', ['~ALL'], [])
         report = '\n'.join(self.report(responses))
         self.assertIn('require-code-owner-review/bypass_actors', report)
         self.assertIn('app:renovate', report)
-        self.assertIn('protect-release-tags/rules: unexpected creation', report)
+        self.assertIn('protect-release-tags/rules: unexpected required_signatures', report)
         self.assertIn('rulesets/branch/legacy: unexpected', report)
+
+    def test_environment_reviewers_and_deployment_refs_are_compared(self):
+        settings = copy.deepcopy(SETTINGS)
+        settings['surface']['environments'] = ['release']
+        settings['environment_policies'] = [{
+            'name': 'release', 'prevent_self_review': False, 'reviewers': [],
+            'deployment_ref_policy': {'protected_branches': False, 'custom_branch_policies': True,
+                                      'custom_policies': [{'name': 'v*', 'type': 'tag'}]}}]
+        responses = matching_live_state()
+        responses['repos/TamaT-LLC/openpath/environments?per_page=100'] = {'environments': [{
+            'name': 'release', 'protection_rules': [{'type': 'branch_policy'}],
+            'deployment_branch_policy': {'protected_branches': False, 'custom_branch_policies': True}}]}
+        branch_policies = 'repos/TamaT-LLC/openpath/environments/release/deployment-branch-policies?per_page=100'
+        responses[branch_policies] = {'branch_policies': [{'name': 'v*', 'type': 'tag'}]}
+        self.assertEqual(self.report(responses, settings), [])
+        responses[branch_policies] = {'branch_policies': [{'name': 'v*', 'type': 'tag'}, {'name': '*', 'type': 'branch'}]}
+        self.assertIn('environment_policies/release/deployment_ref_policy', '\n'.join(self.report(responses, settings)))
+        responses['repos/TamaT-LLC/openpath/environments?per_page=100'] = {'environments': []}
+        report = self.report(responses, settings)
+        self.assertIn('surface/environments: expected ["release"], actual []', report)
+        self.assertIn('environment_policies/release: missing', report)
+
+    def split_tag_rulesets(self):
+        """protect-release-tags（bypass なし）と、作成だけを admin に許す ruleset の組。"""
+        settings = copy.deepcopy(SETTINGS)
+        creation = {**copy.deepcopy(settings['rulesets'][2]), 'name': 'restrict-release-tag-creation',
+                    'allow_creations': False,
+                    'bypass_actors': [{'identity': 'role:repository-admin', 'permission': 'always'}]}
+        settings['rulesets'].append(creation)
+        responses = matching_live_state()
+        responses['repos/TamaT-LLC/openpath/rulesets?per_page=100'].append({'id': 4})
+        responses['repos/TamaT-LLC/openpath/rulesets/4'] = live_ruleset(
+            4, 'restrict-release-tag-creation', 'tag', ['refs/tags/v*'], [{'type': 'creation'}],
+            bypass=[{'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}])
+        return settings, responses
+
+    def test_tag_creation_can_be_limited_to_admins_by_a_separate_ruleset(self):
+        settings, responses = self.split_tag_rulesets()
+        self.assertEqual(self.report(responses, settings), [])
+
+    def test_a_bypass_on_the_history_ruleset_is_reported(self):
+        # admin も公開済みのタグを更新・削除できないことは、protect-release-tags に bypass が無いことで保つ
+        settings, responses = self.split_tag_rulesets()
+        responses['repos/TamaT-LLC/openpath/rulesets/3']['bypass_actors'] = [
+            {'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}]
+        report = '\n'.join(self.report(responses, settings))
+        self.assertIn('rulesets/tag/protect-release-tags/bypass_actors', report)
+        self.assertIn('rulesets/tag/protect-release-tags/allow_force_pushes: expected false, actual true', report)
+        self.assertIn('rulesets/tag/protect-release-tags/allow_deletions: expected false, actual true', report)
+
+    def test_history_rules_in_the_bypassed_creation_ruleset_do_not_count(self):
+        settings, responses = self.split_tag_rulesets()
+        responses['repos/TamaT-LLC/openpath/rulesets/3']['rules'] = []
+        responses['repos/TamaT-LLC/openpath/rulesets/4']['rules'] += [{'type': 'update'}, {'type': 'deletion'}]
+        report = self.report(responses, settings)
+        self.assertIn('rulesets/tag/protect-release-tags/allow_force_pushes: expected false, actual true', report)
+        self.assertIn('rulesets/tag/protect-release-tags/allow_deletions: expected false, actual true', report)
+
+    def test_creation_rule_must_sit_in_the_admin_bypassed_ruleset(self):
+        settings, responses = self.split_tag_rulesets()
+        responses['repos/TamaT-LLC/openpath/rulesets/4']['rules'] = []
+        responses['repos/TamaT-LLC/openpath/rulesets/3']['rules'].append({'type': 'creation'})
+        report = self.report(responses, settings)
+        self.assertIn('rulesets/tag/protect-release-tags/allow_creations: expected true, actual false', report)
+        settings, responses = self.split_tag_rulesets()
+        responses['repos/TamaT-LLC/openpath/rulesets/4']['rules'] = []
+        self.assertEqual(self.report(responses, settings),
+                         ['rulesets/tag/restrict-release-tag-creation/allow_creations: expected false, actual true'])
+
+    def test_repository_roles_other_than_admin_are_named_by_id(self):
+        settings, responses = self.split_tag_rulesets()
+        responses['repos/TamaT-LLC/openpath/rulesets/4']['bypass_actors'] = [
+            {'actor_id': 4, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}]
+        self.assertIn('role:repository-role-4', '\n'.join(self.report(responses, settings)))
 
     def test_codeql_default_setup_must_analyze_every_required_language(self):
         responses = matching_live_state()
