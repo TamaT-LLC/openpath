@@ -191,4 +191,4 @@ arm64 / x86_64 の包含、ad-hoc 署名、SHA256SUMS を検証し、Preview の
 2026-10-04 に Stable `v0.1.0`（対象は `726dc52`）を公開した。
 Developer ID で署名し、Apple の公証は Accepted だった。
 staple と、`spctl` による Gatekeeper の評価（`source=Notarized Developer ID`）も、Release workflow の中で通った。
-添付ファイルは `openpath-0.1.0.zip`、`openpath.rb`、`SHA256SUMS` で、Release は Latest になっている。
+添付ファイルは `openpath-0.1.0.zip`、`openpath.rb`、`SHA256SUMS` で、Release は、この時点で Latest になっていた。

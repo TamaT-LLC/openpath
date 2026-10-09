@@ -9,6 +9,7 @@ openpath は、macOS のファイル選択ダイアログ（NSOpenPanel）に、
 Claude Desktop、Cursor、VS Code、ブラウザなど、どのアプリの「フォルダを開く」や「ファイルを添付」でも、Finder のツリーを辿らずに、数文字を入力して Enter を押すだけで目的の場所へ移動できます。
 
 最初の Stable [`v0.1.0`](https://github.com/TamaT-LLC/openpath/releases/tag/v0.1.0) を、2026-10-04 に GitHub Releases で公開しました。
+最新の Stable は、[GitHub Releases](https://github.com/TamaT-LLC/openpath/releases) で Latest と表示されているものです。
 [インストール](#インストール) の手順で、ZIP から入れて使えます。
 [ソースからビルド](#ソースからビルドする) して使うこともできます。
 求める権限はアクセシビリティだけで、ネットワーク通信は行いません。
@@ -56,8 +57,9 @@ Claude Desktop、Cursor、VS Code、ブラウザなど、どのアプリの「�
 ### GitHub Releases の ZIP
 
 配布物は [GitHub Releases](https://github.com/TamaT-LLC/openpath/releases) で公開しています。
-最新の Stable は [v0.1.0](https://github.com/TamaT-LLC/openpath/releases/tag/v0.1.0) で、`openpath-0.1.0.zip`、`SHA256SUMS`、Homebrew cask の `openpath.rb` を添付しています。
-Preview の `preview-v0.1.0-1` と `preview-v0.1.0-2` は評価用の prerelease で、サポート対象外です。
+最新の Stable は、Releases で Latest と表示されているものです。
+どの Stable にも、`openpath-<version>.zip`、`SHA256SUMS`、Homebrew cask の `openpath.rb` を添付しています。
+Preview（`preview-vX.Y.Z-N`）は評価用の prerelease で、サポート対象外です。
 通常の利用には Stable を使ってください。
 
 | 種類 | tag | 署名と公証 | 用途 |
