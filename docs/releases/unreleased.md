@@ -2,7 +2,7 @@
 
 次の版に入る変更を記録する。
 `v0.1.2` の内容は [v0.1.2 のリリースノート](./v0.1.2.md) にある。
-Stable を公開するときは、このファイルを `vX.Y.Z.md` に改めて 1 行目を `# vX.Y.Z` または `# vX.Y.Z（補足）` にし、新しい `unreleased.md` を作る。
+Stable のタグは Preview と同じコミットに付けるので、Preview を作る前に、このファイルを `vX.Y.Z.md` に改めて 1 行目を `# vX.Y.Z` または `# vX.Y.Z（補足）` にし、新しい `unreleased.md` を作る。
 続けて `python3 scripts/release_notes_index.py` で [ドキュメントインデックス](../00_index/index.md) のリリースノート一覧を作り直す（CI が `--check` で検査する）。
 
 ## 変更
