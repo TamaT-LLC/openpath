@@ -8,8 +8,11 @@ relaxations:
 - `required_checks[].context` accepts printable text, because openpath's check
   names (`swift build / swift test`, `Analyze (actions)`) contain spaces,
   slashes, and parentheses;
-- `environment_policies` may be empty, because openpath's release workflow does
-  not use deployment environments.
+- `environment_policies[].reviewers` may be empty, because openpath restricts
+  its environments (`release` and `homebrew-tap`) to release tags and `main` by
+  deployment ref policy instead of required reviewers. An environment without
+  reviewers must still restrict its deployment refs, so it cannot be open to
+  every branch.
 """
 from __future__ import annotations
 
@@ -161,7 +164,8 @@ def _environment_policy(check, value, path):
         return
     check.text(value['name'], path + '/name', TOKEN)
     check.boolean(value['prevent_self_review'], path + '/prevent_self_review')
-    for index, reviewer in enumerate(check.array(value['reviewers'], path + '/reviewers', 1, MAX_REVIEWERS)):
+    reviewers = check.array(value['reviewers'], path + '/reviewers', 0, MAX_REVIEWERS)
+    for index, reviewer in enumerate(reviewers):
         check.text(reviewer, f'{path}/reviewers/{index}', TOKEN)
     ref_policy = value['deployment_ref_policy']
     ref_path = path + '/deployment_ref_policy'
@@ -175,6 +179,16 @@ def _environment_policy(check, value, path):
         if check.mapping(item, item_path, CUSTOM_POLICY_KEYS):
             check.text(item['name'], item_path + '/name', max_length=MAX_REF_PATTERN)
             check.choice(item['type'], item_path + '/type', ('branch', 'tag'))
+    # GitHub accepts only one of the two ref policies, and custom policies apply only to the custom one.
+    if ref_policy['protected_branches'] is True and ref_policy['custom_branch_policies'] is True:
+        check.fail(ref_path, 'protected_branches and custom_branch_policies cannot both be true')
+    if ref_policy['custom_branch_policies'] is not True and policies:
+        check.fail(ref_path + '/custom_policies', 'requires custom_branch_policies')
+    # Without reviewers, the ref policy is the only gate in front of the environment's secrets.
+    restricted = ref_policy['protected_branches'] is True or (
+        ref_policy['custom_branch_policies'] is True and len(policies) > 0)
+    if not reviewers and not restricted:
+        check.fail(ref_path, f"environment '{value['name']}' has no reviewers and must restrict its deployment refs")
 
 
 def _surface(check, value):

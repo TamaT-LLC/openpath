@@ -302,19 +302,33 @@ tag は `main` に含まれる commit に付け、バージョンを `Resources/
 Stable の公開に成功すると、添付した `openpath.rb` で [Homebrew tap](https://github.com/TamaT-LLC/homebrew-tap) に更新の Pull Request を自動で出します。
 公開手順と失敗時の復旧は [リリース運用](docs/40_arch_design/guide-release-distribution.md) を参照してください。
 
-リポジトリの Settings → Secrets and variables → Actions に、次の値を登録します。
+Secrets は、リポジトリ全体ではなく、使う job だけが参照できる environment に登録します。
+リポジトリの Settings → Environments で次の 2 つの environment を作り、Deployment branches and tags を「Selected branches and tags」にして、表のルールだけを追加します。
+Required reviewers は設定しません（設定する場合は `.github/settings-desired-v1.json` も合わせて変えます）。
 
-| 種別 | 名前 | 値 |
+| environment | 使う job | デプロイを許す ref |
 |---|---|---|
-| Secret | `APPLE_CERTIFICATE_BASE64` | 秘密鍵付き Developer ID Application 証明書（P12）の Base64 |
-| Secret | `APPLE_CERTIFICATE_PASSWORD` | P12 の書き出しパスワード |
-| Secret | `APPLE_NOTARY_PRIVATE_KEY_BASE64` | openpath 専用の Team API キー（P8）の Base64 |
-| Secret | `HOMEBREW_TAP_APP_PRIVATE_KEY` | Homebrew tap を更新する GitHub App の秘密鍵（ダウンロードした `.pem` の内容） |
-| Variable | `APPLE_SIGNING_IDENTITY` | `Developer ID Application: 組織名 (TEAMID)` |
-| Variable | `APPLE_TEAM_ID` | 証明書の Team ID |
-| Variable | `APPLE_NOTARY_KEY_ID` | Team API キーの Key ID |
-| Variable | `APPLE_NOTARY_ISSUER_ID` | App Store Connect の Issuer ID |
-| Variable | `HOMEBREW_TAP_APP_CLIENT_ID` | 同じ GitHub App の Client ID（App ID ではない） |
+| `release` | `Release macOS` の `package-stable`（Stable の署名と公証） | tag `v*` |
+| `homebrew-tap` | `Homebrew tap` の `update cask` | tag `v*`（`Release macOS` からの呼び出し）、branch `main`（手動実行） |
+
+値は次の場所に登録します。
+Variable のうち Apple の 4 つは秘密ではないため、リポジトリの Settings → Secrets and variables → Actions に置きます。
+
+| 置き場所 | 種別 | 名前 | 値 |
+|---|---|---|---|
+| environment `release` | Secret | `APPLE_CERTIFICATE_BASE64` | 秘密鍵付き Developer ID Application 証明書（P12）の Base64 |
+| environment `release` | Secret | `APPLE_CERTIFICATE_PASSWORD` | P12 の書き出しパスワード |
+| environment `release` | Secret | `APPLE_NOTARY_PRIVATE_KEY_BASE64` | openpath 専用の Team API キー（P8）の Base64 |
+| environment `homebrew-tap` | Secret | `HOMEBREW_TAP_APP_PRIVATE_KEY` | Homebrew tap を更新する GitHub App の秘密鍵（ダウンロードした `.pem` の内容） |
+| environment `homebrew-tap` | Variable | `HOMEBREW_TAP_APP_CLIENT_ID` | 同じ GitHub App の Client ID（App ID ではない） |
+| リポジトリ | Variable | `APPLE_SIGNING_IDENTITY` | `Developer ID Application: 組織名 (TEAMID)` |
+| リポジトリ | Variable | `APPLE_TEAM_ID` | 証明書の Team ID |
+| リポジトリ | Variable | `APPLE_NOTARY_KEY_ID` | Team API キーの Key ID |
+| リポジトリ | Variable | `APPLE_NOTARY_ISSUER_ID` | App Store Connect の Issuer ID |
+
+同じ名前の Secret をリポジトリ全体にも置かないでください。
+リポジトリ全体の Secret は、どのブランチで書き換えた workflow からも読めるためです。
+environment の設定は `python3 scripts/github_settings_drift.py` で `.github/settings-desired-v1.json` と照合できます。
 
 公証用の Team API キーは Developer 権限で作成します。
 プロジェクトごとに別のキーを作ると、個別に失効と交換ができます。

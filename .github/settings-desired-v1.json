@@ -76,7 +76,42 @@
       "bypass_actors": []
     }
   ],
-  "environment_policies": [],
+  "environment_policies": [
+    {
+      "name": "homebrew-tap",
+      "prevent_self_review": false,
+      "reviewers": [],
+      "deployment_ref_policy": {
+        "protected_branches": false,
+        "custom_branch_policies": true,
+        "custom_policies": [
+          {
+            "name": "main",
+            "type": "branch"
+          },
+          {
+            "name": "v*",
+            "type": "tag"
+          }
+        ]
+      }
+    },
+    {
+      "name": "release",
+      "prevent_self_review": false,
+      "reviewers": [],
+      "deployment_ref_policy": {
+        "protected_branches": false,
+        "custom_branch_policies": true,
+        "custom_policies": [
+          {
+            "name": "v*",
+            "type": "tag"
+          }
+        ]
+      }
+    }
+  ],
   "surface": {
     "apps": [
       {
@@ -88,7 +123,10 @@
     "deploy_key_fingerprints": [],
     "token_fingerprints": [],
     "teams": [],
-    "environments": [],
+    "environments": [
+      "homebrew-tap",
+      "release"
+    ],
     "runner_groups": [
       "github-hosted"
     ]

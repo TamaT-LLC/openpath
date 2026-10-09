@@ -275,14 +275,19 @@ Releases are cut by maintainers through the `Release macOS` GitHub Actions
 workflow (Smoke, Preview, and Stable channels). The procedure is documented in
 Japanese in [docs/40_arch_design/guide-release-distribution.md](docs/40_arch_design/guide-release-distribution.md),
 and the required secrets are listed in the [Japanese README](README.md#github-actions-でリリースする).
+The signing and notarization secrets live in the deployment environment
+`release`, which only `v*` tags can deploy to, and the Homebrew tap credentials
+live in the environment `homebrew-tap`, which only `v*` tags and `main` can
+deploy to. Do not keep copies of these secrets at the repository level.
 
 After a stable release is published, the workflow opens a pull request in
 [TamaT-LLC/homebrew-tap](https://github.com/TamaT-LLC/homebrew-tap) that
 replaces `Casks/openpath.rb` with the attached cask. It authenticates as a
 GitHub App through the variable `HOMEBREW_TAP_APP_CLIENT_ID` (the App's client
 ID, not its App ID) and the secret `HOMEBREW_TAP_APP_PRIVATE_KEY` (the App's
-private key). Install the App only on the tap, with the Contents and Pull
-requests repository permissions set to Read and write and nothing else.
+private key), both stored in the `homebrew-tap` environment. Install the App
+only on the tap, with the Contents and Pull requests repository permissions set
+to Read and write and nothing else.
 
 ## Contributing
 

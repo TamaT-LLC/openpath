@@ -340,6 +340,32 @@ class SettingsManifestTests(RepositoryFixture):
         self.write_settings(settings)
         self.assert_rejected('protect-release-tags')
 
+    def test_environment_without_reviewers_must_restrict_deployment_refs(self):
+        tag_only = {'protected_branches': False, 'custom_branch_policies': True,
+                    'custom_policies': [{'name': 'v*', 'type': 'tag'}]}
+        policy = {'name': 'release', 'prevent_self_review': False, 'reviewers': [],
+                  'deployment_ref_policy': tag_only}
+        settings = copy.deepcopy(SETTINGS)
+        settings['surface']['environments'] = ['release']
+        settings['environment_policies'] = [policy]
+        self.write_settings(settings)
+        self.assertEqual(self.errors(), [])
+        open_refs = {
+            'all branches': {'protected_branches': False, 'custom_branch_policies': False, 'custom_policies': []},
+            'no custom policy': {'protected_branches': False, 'custom_branch_policies': True, 'custom_policies': []},
+            'policies without custom': {**tag_only, 'custom_branch_policies': False},
+            'both ref policies': {**tag_only, 'protected_branches': True},
+        }
+        for label, ref_policy in open_refs.items():
+            with self.subTest(label):
+                settings['environment_policies'] = [{**policy, 'deployment_ref_policy': ref_policy}]
+                self.write_settings(settings)
+                self.assert_rejected('deployment_ref_policy')
+        settings['environment_policies'] = [{**policy, 'reviewers': ['user:TakehiroT'],
+                                             'deployment_ref_policy': open_refs['all branches']}]
+        self.write_settings(settings)
+        self.assertEqual(self.errors(), [])
+
     def test_workflow_environments_must_be_declared(self):
         self.write_workflow('release.yml', RELEASE.replace('    runs-on: ubuntu-24.04\n', '    runs-on: ubuntu-24.04\n    environment: release\n'))
         self.assert_rejected("'release'")
@@ -394,13 +420,13 @@ def matching_live_state():
 
 
 class DriftTests(unittest.TestCase):
-    def report(self, responses):
+    def report(self, responses, settings=SETTINGS):
         def fetch(path):
             value = responses[path]
             if isinstance(value, drift.ApiError):
                 raise value
             return copy.deepcopy(value)
-        return drift.drift_report(SETTINGS, fetch)
+        return drift.drift_report(settings, fetch)
 
     def test_matching_live_state_has_no_drift(self):
         self.assertEqual(self.report(matching_live_state()), [])
@@ -452,6 +478,27 @@ class DriftTests(unittest.TestCase):
         self.assertIn('app:renovate', report)
         self.assertIn('protect-release-tags/rules: unexpected creation', report)
         self.assertIn('rulesets/branch/legacy: unexpected', report)
+
+    def test_environment_reviewers_and_deployment_refs_are_compared(self):
+        settings = copy.deepcopy(SETTINGS)
+        settings['surface']['environments'] = ['release']
+        settings['environment_policies'] = [{
+            'name': 'release', 'prevent_self_review': False, 'reviewers': [],
+            'deployment_ref_policy': {'protected_branches': False, 'custom_branch_policies': True,
+                                      'custom_policies': [{'name': 'v*', 'type': 'tag'}]}}]
+        responses = matching_live_state()
+        responses['repos/TamaT-LLC/openpath/environments?per_page=100'] = {'environments': [{
+            'name': 'release', 'protection_rules': [{'type': 'branch_policy'}],
+            'deployment_branch_policy': {'protected_branches': False, 'custom_branch_policies': True}}]}
+        branch_policies = 'repos/TamaT-LLC/openpath/environments/release/deployment-branch-policies?per_page=100'
+        responses[branch_policies] = {'branch_policies': [{'name': 'v*', 'type': 'tag'}]}
+        self.assertEqual(self.report(responses, settings), [])
+        responses[branch_policies] = {'branch_policies': [{'name': 'v*', 'type': 'tag'}, {'name': '*', 'type': 'branch'}]}
+        self.assertIn('environment_policies/release/deployment_ref_policy', '\n'.join(self.report(responses, settings)))
+        responses['repos/TamaT-LLC/openpath/environments?per_page=100'] = {'environments': []}
+        report = self.report(responses, settings)
+        self.assertIn('surface/environments: expected ["release"], actual []', report)
+        self.assertIn('environment_policies/release: missing', report)
 
     def test_codeql_default_setup_must_analyze_every_required_language(self):
         responses = matching_live_state()
