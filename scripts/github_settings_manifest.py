@@ -194,8 +194,12 @@ def _environment_policy(check, value, path):
     if ref_policy['custom_branch_policies'] is not True and policies:
         check.fail(ref_path + '/custom_policies', 'requires custom_branch_policies')
     # Without reviewers, the ref policy is the only gate in front of the environment's secrets.
-    restricted = ref_policy['protected_branches'] is True or (
-        ref_policy['custom_branch_policies'] is True and len(policies) > 0)
+    # Protected-only can allow every branch when no legacy branch protection exists.
+    # Require a literal prefix on every custom pattern; fail closed on leading globs.
+    restricted = (ref_policy['custom_branch_policies'] is True and len(policies) > 0
+                  and all(isinstance(item, dict) and isinstance(item.get('name'), str)
+                          and re.match(r'[^*?\[\\]', item['name'])
+                          for item in policies))
     if not reviewers and not restricted:
         check.fail(ref_path, f"environment '{value['name']}' has no reviewers and must restrict its deployment refs")
 
@@ -232,6 +236,10 @@ def validate(data):
     for index, policy in enumerate(policies):
         _environment_policy(check, policy, f'environment_policies/{index}')
     _surface(check, data['surface'])
+    if not check.errors:
+        names = [policy['name'] for policy in policies]
+        if len(names) != len(set(names)) or set(names) != set(data['surface']['environments']):
+            check.fail('environment_policies', 'must declare each surface/environments name exactly once')
     if check.mapping(data['security'], 'security', SECURITY_KEYS):
         for key in SECURITY_KEYS:
             check.boolean(data['security'][key], 'security/' + key)

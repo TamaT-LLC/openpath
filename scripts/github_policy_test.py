@@ -355,7 +355,12 @@ class SettingsManifestTests(RepositoryFixture):
             'no custom policy': {'protected_branches': False, 'custom_branch_policies': True, 'custom_policies': []},
             'policies without custom': {**tag_only, 'custom_branch_policies': False},
             'both ref policies': {**tag_only, 'protected_branches': True},
+            'protected only': {'protected_branches': True, 'custom_branch_policies': False, 'custom_policies': []},
         }
+        for pattern in ('*', '**', '?*', '[a-z]*', '*/*'):
+            for kind in ('branch', 'tag'):
+                open_refs[f'{kind} {pattern}'] = {**tag_only, 'custom_policies': [
+                    {'name': 'v*', 'type': 'tag'}, {'name': pattern, 'type': kind}]}
         for label, ref_policy in open_refs.items():
             with self.subTest(label):
                 settings['environment_policies'] = [{**policy, 'deployment_ref_policy': ref_policy}]
@@ -388,7 +393,16 @@ class SettingsManifestTests(RepositoryFixture):
         settings = copy.deepcopy(SETTINGS)
         settings['surface']['environments'] = ['release']
         self.write_settings(settings)
+        self.assert_rejected('environment_policies')
+        settings['environment_policies'] = [{
+            'name': 'release', 'prevent_self_review': False, 'reviewers': [],
+            'deployment_ref_policy': {'protected_branches': False, 'custom_branch_policies': True,
+                                      'custom_policies': [{'name': 'v*', 'type': 'tag'}]}}]
+        self.write_settings(settings)
         self.assertEqual(self.errors(), [])
+        settings['surface']['environments'] = []
+        self.write_settings(settings)
+        self.assert_rejected('environment_policies')
 
 
 def live_ruleset(identifier, name, target, include, rules, bypass=()):
