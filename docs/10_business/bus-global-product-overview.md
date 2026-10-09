@@ -8,7 +8,7 @@ upstream: []
 downstream:
 - PROJ-REQ-001
 owner: TakehiroT
-updated: 2026-09-23
+updated: 2026-10-07
 ---
 
 # プロダクト概要（openpath / OSS 方針）

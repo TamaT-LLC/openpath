@@ -202,6 +202,8 @@ reads item names to offer them as candidates. Denying access only removes those
 folders' contents from the candidates. You can change the decision later in
 System Settings > Privacy & Security > Files and Folders, then choose
 "候補を再構築" (rebuild candidates) from the menu.
+This prompt behavior is expected from the implementation and macOS behavior,
+and has not yet been verified on a real device (manual scenario ONB-20).
 
 ## Privacy
 
@@ -229,8 +231,13 @@ and scope.
   menu, that the Accessibility permission is granted, and that the app is not
   in `disabled_apps`. After closing the palette with Esc, Ctrl+Shift+O brings it
   back.
+- After rebuilding from source, if the permission does not take effect, remove
+  openpath from the Accessibility list and add it again.
 - To restart the first-launch guide, quit openpath and run
   `defaults delete jp.tamat.openpath onboardingFinished`.
+
+Release notes, including known limitations, are in
+[docs/releases/](docs/releases/) (Japanese).
 
 Logs are written to `~/Library/Logs/openpath/openpath.log` (rotated to
 `openpath.log.1` above 5 MiB) and to the unified log (subsystem

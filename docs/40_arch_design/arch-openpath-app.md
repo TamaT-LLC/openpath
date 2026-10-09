@@ -12,7 +12,7 @@ downstream:
 - PROJ-DSN-002
 - PROJ-TST-001
 owner: TakehiroT
-updated: 2026-10-04
+updated: 2026-10-09
 ---
 
 # アーキテクチャ設計: openpath
@@ -145,7 +145,7 @@ Idle ─────────────▶ PanelShown ───────
 - ネットワーク: 一切使用しない。`com.apple.security.network.client` は付与しない。
 - サンドボックス: openpath 自体は非サンドボックス（AX 観測のため）。
 
-## 10. リポジトリ構成（予定）
+## 10. リポジトリ構成
 
 ```
 openpath/
@@ -158,9 +158,16 @@ openpath/
 │   └── OpenPathCoreTests/   # Swift Testing によるユニットテスト
 ├── Resources/
 │   ├── Info.plist           # LSUIElement = YES（実行ファイルにも埋め込む）
-│   └── openpath.entitlements
-├── scripts/                 # test（CLT 環境向け swift test ラッパー）, build, sign, notarize, cask 生成
-└── docs/                    # 本ドキュメント群
+│   ├── openpath.entitlements
+│   ├── AppIcon.png          # アプリアイコンの元画像（透過 PNG）
+│   ├── AppIcon.icns         # AppIcon.png から scripts/build-icon.sh で生成。build.sh が .app に同梱する
+│   └── AppIcon.prompt.txt   # AppIcon.png の画像生成プロンプト
+├── scripts/                 # test（CLT 環境向け swift test ラッパー）, build, build-icon, sign, notarize, cask, cask_style, release, package_release,
+│                            # smoke-open-panel と measure-*（実機の確認と計測）, GitHub 設定の検証（github_policy_*, github_settings_*）, リリースの補助（release_*, publish_release, update_homebrew_tap）, lib/common.sh
+├── .github/                 # workflows（ci, release, homebrew-tap）, Issue / Pull Request テンプレート, CODEOWNERS, Actions の policy と設定の期待値
+└── docs/                    # 本ドキュメント群（docs/releases/ にリリースノート）
 ```
+
+ルートには、README（日本語・英語）、CONTRIBUTING、SECURITY、SUPPORT、GOVERNANCE、CODE_OF_CONDUCT、LICENSE などの文書もある。
 
 `OpenPathCore` は AppKit に依存させず、ファジーマッチ・frecency・設定パースをユニットテスト可能に保つ。

@@ -72,6 +72,14 @@ Pull Request の CI は、Swift のビルドとテストに加えて、この検
 結果は Pull Request テンプレートの表に記入してください。
 権限の無い環境で確認できなかった項目は「未確認」とし、maintainer に確認を依頼してください。
 
+### アプリアイコンを変える場合
+
+アプリアイコンの元画像は `Resources/AppIcon.png`（透過 PNG）で、画像生成に使ったプロンプトを `Resources/AppIcon.prompt.txt` に残しています。
+元画像を差し替えたら、リポジトリのルートで `./scripts/build-icon.sh` を実行し、`Resources/AppIcon.icns` を作り直して一緒に commit してください。
+スクリプトは macOS 標準の `sips` と `iconutil` だけを使い、16〜512 ポイントの 1x と 2x（最大 1024 ピクセル）を含む `.icns` を生成します。
+`./scripts/build.sh` が `Resources/*.icns` を `.app` に同梱します。
+Finder で表示されるアイコンは、[手動シナリオテスト](./docs/50_test/test-openpath-manual-scenarios.md) の ONB-21 で確かめます。
+
 ### GitHub Actions を変える場合
 
 workflow の `uses:` は、tag ではなく commit SHA に固定し、末尾に `# vX.Y.Z` の形で version を書きます。

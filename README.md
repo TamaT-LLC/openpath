@@ -179,6 +179,7 @@ Full Disk Access は求めません。
 `roots` にホーム（`~`）など、デスクトップ、書類、ダウンロードを含む場所を指定した場合（ghq が無いときの既定を含む）は、その中を初めて読むときに macOS がアクセスの許可を確認することがあります。
 確認には、フォルダ内の項目の名前を候補にするためという用途の説明が出ます。
 許可しなくても openpath は動き、そのフォルダの中が候補に入らないだけです。
+この確認の挙動は実装と macOS の仕様からの想定で、実機では未確認です（手動シナリオの ONB-20 で確認予定）。
 あとから変えるときは「システム設定 > プライバシーとセキュリティ > ファイルとフォルダ」で openpath の項目を切り替え、メニューの「候補を再構築」を選びます。
 
 ## プライバシー
@@ -247,6 +248,7 @@ Homebrew を使う `cask_style.sh` を除き、どのスクリプトも Command 
 | `build.sh [--arch universal\|arm64\|x86_64] [--version X.Y.Z]` | `swift build -c release` をアーキテクチャごとに実行して lipo で結合し、`build/openpath.app` を組み立てる | なし |
 | `sign.sh` | Hardened Runtime と `Resources/openpath.entitlements` を付けて署名し、`codesign --verify --deep --strict` で検証する | `OPENPATH_SIGN_IDENTITY`（任意） |
 | `notarize.sh` | zip にして `notarytool submit --wait`、`stapler staple`、`spctl -a -vv` を行い、staple 済みの `build/openpath-<version>.zip` を作る | `OPENPATH_NOTARY_PROFILE`（必須） |
+| `build-icon.sh` | `Resources/AppIcon.png` から `sips` と `iconutil` で全サイズを含む `Resources/AppIcon.icns` を生成する。`build.sh` が `.app` に同梱する | なし |
 | `cask.sh [--version X.Y.Z] [--zip PATH] [--output FILE]` | 配布用 zip の sha256 から Homebrew cask 定義を生成する（既定は標準出力） | なし |
 | `cask_style.sh [CASK]` | cask に `brew style` をかける。省略時は `Resources/Info.plist` から生成した cask を確かめる。Homebrew が必要で、tap はしない | なし |
 | `release.sh [--version X.Y.Z]` | build、sign、notarize、cask を順に実行し、`build/openpath-<version>.zip` と `build/Casks/openpath.rb` を作る | 上の 2 つとも必須 |
