@@ -22,6 +22,11 @@ from it, as in the live rulesets of depgraph-cli and repo-knowledge-mcp:
   require-code-owner-review relies on protect-main for this protection;
 - allow_creations = false (tag rulesets only, true when absent) means an active
   ruleset for the same tags has a creation rule;
+- these protections count only rulesets whose bypass actors are among the
+  declared ruleset's own, so a bypass elsewhere cannot weaken them: the
+  bypass-free protect-release-tags is not satisfied by the creation rule of
+  restrict-release-tag-creation (bypassed by admins), and adding a bypass actor
+  to a ruleset that holds an update or deletion rule is reported;
 - a branch ruleset with approvals, code owner review, or conversation
   resolution has a pull_request rule;
 - every required `Analyze (<language>)` check needs CodeQL default setup to
@@ -161,11 +166,19 @@ def _expected_ruleset(desired):
     return fields, implied
 
 
-def _effective_rules(live):
-    """Map (target, ref pattern) to the rule types of every active ruleset that includes it."""
+def _actor_key(actor):
+    return actor['identity'], actor['permission']
+
+
+def _effective_rules(live, actors, allowed_actors):
+    """Map (target, ref pattern) to the rule types of every active ruleset that includes it.
+
+    Only rulesets whose bypass actors are all in `allowed_actors` count, because
+    a rule that someone else can bypass does not protect against that actor.
+    """
     effective = {}
-    for ruleset in live.values():
-        if ruleset.get('enforcement') != 'active':
+    for key, ruleset in live.items():
+        if ruleset.get('enforcement') != 'active' or not actors[key] <= allowed_actors:
             continue
         types = {rule['type'] for rule in ruleset.get('rules', [])}
         for pattern in ((ruleset.get('conditions') or {}).get('ref_name') or {}).get('include', []):
@@ -179,7 +192,9 @@ def _ruleset_drift(desired, fetch, base):
     for summary in fetch(f'{base}/rulesets?per_page=100') or []:
         ruleset = fetch(f"{base}/rulesets/{summary['id']}")
         live[(ruleset['target'], ruleset['name'])] = ruleset
-    effective = _effective_rules(live)
+    actors = {key: {(_actor(fetch, a), a.get('bypass_mode')) for a in ruleset.get('bypass_actors') or []}
+              for key, ruleset in live.items()}
+    all_live = dict(live)
     for ruleset in desired['rulesets']:
         key = (ruleset['target'], ruleset['name'])
         path = f'rulesets/{key[0]}/{key[1]}'
@@ -188,7 +203,9 @@ def _ruleset_drift(desired, fetch, base):
             continue
         expected, expected_implied = _expected_ruleset(ruleset)
         actual, actual_implied, unexpected = _normalize_ruleset(fetch, live.pop(key))
-        # History protection is cumulative: another active ruleset for the same refs may provide it.
+        # Protection is cumulative: another active ruleset for the same refs may provide it,
+        # as long as nobody outside this ruleset's bypass actors can bypass that ruleset.
+        effective = _effective_rules(all_live, actors, {_actor_key(a) for a in ruleset['bypass_actors']})
         protected = set.intersection(*(effective.get((key[0], p), set()) for p in ruleset['include']))
         actual['allow_force_pushes'] = HISTORY_RULE[key[0]] not in protected
         actual['allow_deletions'] = 'deletion' not in protected

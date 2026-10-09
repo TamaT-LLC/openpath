@@ -298,8 +298,8 @@ export OPENPATH_NOTARY_PROFILE=<profile>
 | Stable | annotated tag `vX.Y.Z` | Developer ID 署名、公証、staple | 正式 Release。Latest にする |
 
 tag は `main` に含まれる commit に付け、バージョンを `Resources/Info.plist` と一致させます。
-Stable と Preview の tag（`v*` と `preview-v*`）を作れるのは、リポジトリの admin だけです（ruleset `protect-release-tags`）。
-admin 以外は、作った tag を更新も削除もできません（bypass は ruleset のすべてのルールに及ぶため、admin は更新と削除もできます。公開済みの tag は差し替えないでください）。
+Stable と Preview の tag（`v*` と `preview-v*`）を作れるのは、リポジトリの admin だけです（ruleset `restrict-release-tag-creation`）。
+公開済みの tag は、admin を含め誰も更新も削除もできません（ruleset `protect-release-tags`）。
 すべての経路で `SHA256SUMS` を生成し、Stable にだけ Homebrew cask を添付します。
 Stable の公開に成功すると、添付した `openpath.rb` で [Homebrew tap](https://github.com/TamaT-LLC/homebrew-tap) に更新の Pull Request を自動で出します。
 公開手順と失敗時の復旧は [リリース運用](docs/40_arch_design/guide-release-distribution.md) を参照してください。

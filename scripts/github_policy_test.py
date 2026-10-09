@@ -516,25 +516,58 @@ class DriftTests(unittest.TestCase):
         self.assertIn('surface/environments: expected ["release"], actual []', report)
         self.assertIn('environment_policies/release: missing', report)
 
-    def test_tag_creation_rule_and_repository_admin_bypass_are_compared(self):
+    def split_tag_rulesets(self):
+        """protect-release-tags（bypass なし）と、作成だけを admin に許す ruleset の組。"""
         settings = copy.deepcopy(SETTINGS)
-        settings['rulesets'][2]['allow_creations'] = False
-        settings['rulesets'][2]['bypass_actors'] = [{'identity': 'role:repository-admin', 'permission': 'always'}]
+        creation = {**copy.deepcopy(settings['rulesets'][2]), 'name': 'restrict-release-tag-creation',
+                    'allow_creations': False,
+                    'bypass_actors': [{'identity': 'role:repository-admin', 'permission': 'always'}]}
+        settings['rulesets'].append(creation)
         responses = matching_live_state()
-        tags = responses['repos/TamaT-LLC/openpath/rulesets/3']
-        tags['rules'].append({'type': 'creation'})
-        tags['bypass_actors'] = [{'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}]
+        responses['repos/TamaT-LLC/openpath/rulesets?per_page=100'].append({'id': 4})
+        responses['repos/TamaT-LLC/openpath/rulesets/4'] = live_ruleset(
+            4, 'restrict-release-tag-creation', 'tag', ['refs/tags/v*'], [{'type': 'creation'}],
+            bypass=[{'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}])
+        return settings, responses
+
+    def test_tag_creation_can_be_limited_to_admins_by_a_separate_ruleset(self):
+        settings, responses = self.split_tag_rulesets()
         self.assertEqual(self.report(responses, settings), [])
-        tags['rules'] = [rule for rule in tags['rules'] if rule['type'] != 'creation']
-        tags['bypass_actors'] = [{'actor_id': 4, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}]
+
+    def test_a_bypass_on_the_history_ruleset_is_reported(self):
+        # admin も公開済みのタグを更新・削除できないことは、protect-release-tags に bypass が無いことで保つ
+        settings, responses = self.split_tag_rulesets()
+        responses['repos/TamaT-LLC/openpath/rulesets/3']['bypass_actors'] = [
+            {'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}]
         report = '\n'.join(self.report(responses, settings))
-        self.assertIn('protect-release-tags/allow_creations: expected false, actual true', report)
-        self.assertIn('role:repository-role-4', report)
-        # allow_creations を書かない tag ruleset は作成を許す（creation rule があれば差分）
-        responses = matching_live_state()
+        self.assertIn('rulesets/tag/protect-release-tags/bypass_actors', report)
+        self.assertIn('rulesets/tag/protect-release-tags/allow_force_pushes: expected false, actual true', report)
+        self.assertIn('rulesets/tag/protect-release-tags/allow_deletions: expected false, actual true', report)
+
+    def test_history_rules_in_the_bypassed_creation_ruleset_do_not_count(self):
+        settings, responses = self.split_tag_rulesets()
+        responses['repos/TamaT-LLC/openpath/rulesets/3']['rules'] = []
+        responses['repos/TamaT-LLC/openpath/rulesets/4']['rules'] += [{'type': 'update'}, {'type': 'deletion'}]
+        report = self.report(responses, settings)
+        self.assertIn('rulesets/tag/protect-release-tags/allow_force_pushes: expected false, actual true', report)
+        self.assertIn('rulesets/tag/protect-release-tags/allow_deletions: expected false, actual true', report)
+
+    def test_creation_rule_must_sit_in_the_admin_bypassed_ruleset(self):
+        settings, responses = self.split_tag_rulesets()
+        responses['repos/TamaT-LLC/openpath/rulesets/4']['rules'] = []
         responses['repos/TamaT-LLC/openpath/rulesets/3']['rules'].append({'type': 'creation'})
-        self.assertEqual(self.report(responses),
-                         ['rulesets/tag/protect-release-tags/allow_creations: expected true, actual false'])
+        report = self.report(responses, settings)
+        self.assertIn('rulesets/tag/protect-release-tags/allow_creations: expected true, actual false', report)
+        settings, responses = self.split_tag_rulesets()
+        responses['repos/TamaT-LLC/openpath/rulesets/4']['rules'] = []
+        self.assertEqual(self.report(responses, settings),
+                         ['rulesets/tag/restrict-release-tag-creation/allow_creations: expected false, actual true'])
+
+    def test_repository_roles_other_than_admin_are_named_by_id(self):
+        settings, responses = self.split_tag_rulesets()
+        responses['repos/TamaT-LLC/openpath/rulesets/4']['bypass_actors'] = [
+            {'actor_id': 4, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}]
+        self.assertIn('role:repository-role-4', '\n'.join(self.report(responses, settings)))
 
     def test_codeql_default_setup_must_analyze_every_required_language(self):
         responses = matching_live_state()
