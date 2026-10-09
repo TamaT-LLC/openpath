@@ -163,7 +163,7 @@ openpath/
 │   ├── AppIcon.icns         # AppIcon.png から scripts/build-icon.sh で生成。build.sh が .app に同梱する
 │   └── AppIcon.prompt.txt   # AppIcon.png の画像生成プロンプト
 ├── scripts/                 # test（CLT 環境向け swift test ラッパー）, build, build-icon, sign, notarize, cask, cask_style, release, package_release,
-│                            # smoke-open-panel と measure-*（実機の確認と計測）, GitHub 設定の検証（github_policy_*, github_settings_*）, リリースの補助（release_*, publish_release, update_homebrew_tap）, lib/common.sh
+│                            # smoke-open-panel と measure-*（実機の確認と計測）, GitHub 設定の検証（github_policy_*, github_settings_*）, リリースの補助（release_*, publish_release, update_homebrew_tap）, リリースノート一覧の生成（release_notes_index*）, lib/common.sh
 ├── .github/                 # workflows（ci, release, homebrew-tap）, Issue / Pull Request テンプレート, CODEOWNERS, Actions の policy と設定の期待値
 └── docs/                    # 本ドキュメント群（docs/releases/ にリリースノート）
 ```

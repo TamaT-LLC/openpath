@@ -21,9 +21,12 @@
 
 ## リリースノート
 
+<!-- release-notes:begin -->
 - [v0.1.0 のリリースノート（最初の Stable）](../releases/v0.1.0.md)
 - [v0.1.1 のリリースノート](../releases/v0.1.1.md)
-- [未リリースの変更（`v0.1.2` 以降）](../releases/unreleased.md)
+- [v0.1.2 のリリースノート（アプリアイコンの追加）](../releases/v0.1.2.md)
+- [未リリースの変更](../releases/unreleased.md)
+<!-- release-notes:end -->
 
 ## プロジェクトの運用
 

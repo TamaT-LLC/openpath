@@ -9,7 +9,7 @@ upstream:
 downstream:
 - PROJ-TST-001
 owner: TakehiroT
-updated: 2026-10-04
+updated: 2026-10-09
 ---
 
 # openpath のリリース運用
@@ -61,6 +61,11 @@ git pull --ff-only
 git tag -a preview-v0.1.0-1 -m "openpath 0.1.0 Preview 1"
 git push origin refs/tags/preview-v0.1.0-1
 ```
+
+Stable のタグを付ける前に、`docs/releases/unreleased.md` を `docs/releases/vX.Y.Z.md` に改め、新しい `unreleased.md` を作って main にマージする。
+改めたファイルの 1 行目は `# vX.Y.Z` または `# vX.Y.Z（補足）` にする。括弧の中の補足は、ドキュメントインデックスのリンクにも付く。
+続けて `python3 scripts/release_notes_index.py` で [ドキュメントインデックス](../00_index/index.md) のリリースノート一覧を再生成する。
+CI の `repository policy` が `python3 scripts/release_notes_index.py --check` で一覧と `docs/releases/` の一致を検査する。
 
 Preview の ZIP を実機で確認したら、確認済みのコミットに Stable タグを付ける。
 次の例では Preview と同じコミットを指定する。修正が必要だった場合は新しい Preview を検証してから進める。

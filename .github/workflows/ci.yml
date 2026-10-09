@@ -21,7 +21,8 @@ defaults:
 
 jobs:
   # Actions の SHA 固定と、.github/settings-desired-v1.json の必須チェックが CI の job 名と
-  # 一致することを確かめる（CONTRIBUTING.md「GitHub Actions を変える場合」）
+  # 一致することを確かめる（CONTRIBUTING.md「GitHub Actions を変える場合」）。
+  # ドキュメントインデックスのリリースノート一覧も、Python だけで済む検査なのでこの job で行う
   repository-policy:
     name: repository policy
     runs-on: ubuntu-24.04
@@ -36,6 +37,13 @@ jobs:
 
       - name: Verify Actions pins and desired settings
         run: python3 scripts/github_policy_check.py
+
+      # docs/00_index/index.md のリリースノート一覧が docs/releases/ と一致することを確かめる
+      - name: Test release notes index generator
+        run: python3 scripts/release_notes_index_test.py
+
+      - name: Verify release notes index
+        run: python3 scripts/release_notes_index.py --check
 
   build-and-test:
     name: swift build / swift test

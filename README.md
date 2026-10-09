@@ -263,7 +263,8 @@ Homebrew を使う `cask_style.sh` を除き、どのスクリプトも Command 
 
 リリースは maintainer が [リリース運用](docs/40_arch_design/guide-release-distribution.md) に従って行います。
 変更内容は [リリースノート](docs/releases/) に記録します。
-リリースノートは [v0.1.0](docs/releases/v0.1.0.md)、[v0.1.1](docs/releases/v0.1.1.md) にあり、次のリリースに入る変更は [未リリースの変更](docs/releases/unreleased.md) に追記します。
+[ドキュメントインデックス](docs/00_index/index.md) のリリースノート一覧は `python3 scripts/release_notes_index.py` で `docs/releases/` から生成します（CI が `--check` で検査します）。
+次のリリースに入る変更は [未リリースの変更](docs/releases/unreleased.md) に追記します。
 
 ### ローカルでの署名と公証
 

@@ -17,6 +17,7 @@
 - [ ] release workflow や `scripts/` のリリース処理を変えた場合は `python3 scripts/release_ci_test.py` が通る
 - [ ] `.github/` を変えた場合は `python3 scripts/github_policy_test.py` と `python3 scripts/github_policy_check.py` が通る
 - [ ] Homebrew cask（`scripts/cask.sh`）を変えた場合は `./scripts/cask_style.sh` が通る
+- [ ] `docs/releases/` やドキュメントインデックスを変えた場合は `python3 scripts/release_notes_index_test.py` と `python3 scripts/release_notes_index.py --check` が通る
 - [ ] 実行できなかった検証は、理由と影響範囲を本文に記載した
 
 ## Privacy と security

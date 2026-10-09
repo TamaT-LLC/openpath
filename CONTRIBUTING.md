@@ -57,6 +57,8 @@ swift build
 python3 scripts/release_ci_test.py
 python3 scripts/github_policy_test.py
 python3 scripts/github_policy_check.py
+python3 scripts/release_notes_index_test.py
+python3 scripts/release_notes_index.py --check
 ```
 
 Homebrew cask（`scripts/cask.sh`）を変えた場合は、`./scripts/cask_style.sh` で生成物に `brew style` をかけてください（Homebrew が必要です。tap はしません）。
@@ -64,6 +66,9 @@ CI の `swift build / swift test` も同じ確認をします。
 
 `github_policy_check.py` は、workflow が使う Actions が [.github/actions-policy.json](./.github/actions-policy.json) の commit SHA に固定されていることと、[.github/settings-desired-v1.json](./.github/settings-desired-v1.json) の必須チェックが CI の job 名と一致することを確かめます。
 Pull Request の CI は、Swift のビルドとテストに加えて、この検証も実行します。
+
+`release_notes_index.py --check` は、[ドキュメントインデックス](./docs/00_index/index.md) のリリースノート一覧が `docs/releases/` の `vX.Y.Z.md` と一致することを確かめます。
+一致しない場合は、`python3 scripts/release_notes_index.py` で一覧を作り直してください。
 
 ### 手動シナリオ
 
@@ -118,6 +123,7 @@ Pull Request で提出した変更は、このリポジトリの [MIT License](.
 
 version tag と GitHub Release は、maintainer が [リリース運用](./docs/40_arch_design/guide-release-distribution.md) に従って作ります。
 Stable を公開するときは、`docs/releases/unreleased.md` を `docs/releases/v<version>.md` に改め、新しい `unreleased.md` を作ります。
+続けて `python3 scripts/release_notes_index.py` でドキュメントインデックスのリリースノート一覧を作り直します（CI が `--check` で検査します）。
 意思決定とリリースの責任は [GOVERNANCE.md](./GOVERNANCE.md) にまとめています。
 
 ## 行動規範

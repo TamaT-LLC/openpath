@@ -2,7 +2,8 @@
 
 次の版に入る変更を記録する。
 `v0.1.2` の内容は [v0.1.2 のリリースノート](./v0.1.2.md) にある。
-Stable を公開するときは、このファイルを `vX.Y.Z.md` に改め、新しい `unreleased.md` を作る。
+Stable を公開するときは、このファイルを `vX.Y.Z.md` に改めて 1 行目を `# vX.Y.Z` または `# vX.Y.Z（補足）` にし、新しい `unreleased.md` を作る。
+続けて `python3 scripts/release_notes_index.py` で [ドキュメントインデックス](../00_index/index.md) のリリースノート一覧を作り直す（CI が `--check` で検査する）。
 
 ## 変更
 
@@ -12,6 +13,7 @@ Stable を公開するときは、このファイルを `vX.Y.Z.md` に改め、
 
 - README の「検索」まわりの説明から、`cdr` や `fzf` を引き合いに出す表現を外した（#123）。UX 設計、プロダクト概要、ドキュメントインデックスの題も合わせた。
 - `FileListRowSampler` と `FileListSample` のテストで、パラメータ化テストの引数の配列に型注釈（`as [(String, String, Int)]` など）を付けた（#123）。テストの内容は変えていない。
+- ドキュメントインデックスのリリースノート一覧を、`docs/releases/` から `scripts/release_notes_index.py` で生成するようにした。CI の `repository policy` が `--check` で一覧の食い違いを検出する。リンクの補足は、各リリースノートの 1 行目の括弧（例: `# v0.1.0（最初の Stable）`）から取る。
 
 ## 実機で確かめる項目
 
