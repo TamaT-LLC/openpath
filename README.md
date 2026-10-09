@@ -14,9 +14,9 @@ Claude Desktop、Cursor、VS Code、ブラウザなど、どのアプリの「�
 [ソースからビルド](#ソースからビルドする) して使うこともできます。
 求める権限はアクセシビリティだけで、ネットワーク通信は行いません。
 
-[![openpath の紹介動画（約 35 秒、音声あり）](assets/openpath-intro-poster.png)](assets/openpath-intro.mp4)
+openpath の紹介動画です（約 35 秒、日本語のナレーション付き）。
 
-画像を選ぶと、紹介動画（約 35 秒、日本語のナレーション付き）を開きます。
+https://github.com/user-attachments/assets/ee936bb0-6a86-44e3-a95c-582425cdb283
 
 ## 目的別の案内
 

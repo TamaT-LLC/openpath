@@ -22,10 +22,10 @@ The user interface is Japanese only. The design documents under `docs/` and the
 community files are written in Japanese; this English README covers installation
 and everyday use.
 
-[![openpath introduction video (about 35 seconds, with audio)](assets/openpath-intro-poster.png)](assets/openpath-intro.mp4)
+Introduction video (about 35 seconds). The narration and on-screen text are in
+Japanese.
 
-Select the image to open the introduction video (about 35 seconds). The
-narration and on-screen text are in Japanese.
+https://github.com/user-attachments/assets/a81d53cc-956b-448f-a34d-6268721421eb
 
 ## Find what you need
 

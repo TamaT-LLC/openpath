@@ -13,6 +13,7 @@ Stable を公開するときは、このファイルを `vX.Y.Z.md` に改めて
 
 - README の「検索」まわりの説明から、`cdr` や `fzf` を引き合いに出す表現を外した（#123）。UX 設計、プロダクト概要、ドキュメントインデックスの題も合わせた。
 - `FileListRowSampler` と `FileListSample` のテストで、パラメータ化テストの引数の配列に型注釈（`as [(String, String, Int)]` など）を付けた（#123）。テストの内容は変えていない。
+- README に、約 35 秒の紹介動画（日本語ナレーション付き）を GitHub の動画添付（user-attachments）で埋め込んだ（#124）。GitHub の README ではリポジトリ内の mp4 を再生できないため、添付の URL を単独の行で置き、README 上でプレーヤーとして再生される形にしている。
 - ドキュメントインデックスのリリースノート一覧を、`docs/releases/` から `scripts/release_notes_index.py` で生成するようにした。CI の `repository policy` が `--check` で一覧の食い違いを検出する。リンクの補足は、各リリースノートの 1 行目の括弧（例: `# v0.1.0（最初の Stable）`）から取る。
 
 ## 実機で確かめる項目
