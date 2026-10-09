@@ -124,6 +124,7 @@ Pull Request で提出した変更は、このリポジトリの [MIT License](.
 ## リリース
 
 version tag と GitHub Release は、maintainer が [リリース運用](./docs/40_arch_design/guide-release-distribution.md) に従って作ります。
+Stable と Preview の tag（`v*` と `preview-v*`）を作れるのは、リポジトリの admin だけです。write 権限では push が拒否されます。
 Stable のタグは Preview と同じコミットに付けるので、Preview を作る前に、`docs/releases/unreleased.md` を `docs/releases/v<version>.md` に改め、新しい `unreleased.md` を作ります。
 続けて `python3 scripts/release_notes_index.py` でドキュメントインデックスのリリースノート一覧を作り直します（CI が `--check` で検査します）。
 意思決定とリリースの責任は [GOVERNANCE.md](./GOVERNANCE.md) にまとめています。

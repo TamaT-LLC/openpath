@@ -44,6 +44,9 @@ Stable の公開に成功すると、添付した cask で Homebrew tap に更�
 アプリ内の表示バージョンはどの経路でも `X.Y.Z` のままで、Preview 番号はタグと ZIP 名に付く。
 
 公開用タグは annotated tag に限定し、そのコミットが `origin/main` に含まれることを検証する。
+Stable と Preview のタグ（`v*` と `preview-v*`）を作れるのは、リポジトリの admin だけである。
+ruleset `protect-release-tags` がタグの作成・更新・削除を禁止し、リポジトリのロール admin だけを bypass にしている。
+bypass は ruleset のすべてのルールに及ぶため、admin は更新と削除もできる。公開済みのタグは差し替えない（[失敗と再実行](#失敗と再実行)）。
 タグのバージョン、ソースのバージョン、checkout されたコミットが一致しなければ署名処理へ進まない。
 Smoke は任意の ref で実行できるが、署名・公証の Secrets は渡さない。
 Smoke と Preview は `package` job で、Stable は environment `release` を使う `package-stable` job で作る（[認証情報と実行時の扱い](#認証情報と実行時の扱い)）。
@@ -155,8 +158,9 @@ environment の Secret は、デプロイ対象の ref で動く job にしか�
 `release` は Stable のタグだけを許す。Preview（`preview-v*`）と Smoke は署名・公証の Secrets を使わないため、environment を付けない `package` job で作る。
 `homebrew-tap` は、`Release macOS` から呼ばれたとき（ref は Stable のタグ）と、main から手動実行したときの両方で動く必要があるため、`main` も許す。
 main には、ruleset `protect-main` と `require-code-owner-review` により Pull Request を経た変更しか入らない。
-タグ `v*` と `preview-v*` の更新と削除は ruleset `protect-release-tags` で禁止している。
-どちらの environment にも Required reviewers は付けていない。
+タグ `v*` と `preview-v*` は admin だけが作れ、admin 以外は更新も削除もできない（ruleset `protect-release-tags`）。
+このため、`release` の Secrets を受け取る job を動かせるのは admin だけになる。
+どちらの environment にも Required reviewers は付けていない。admin のアカウントが乗っ取られた場合は、タグを作って Secrets を使えてしまうことを前提とする。
 Apple の Variable 4 つ（署名 ID、Team ID、Key ID、Issuer ID）は秘密ではないため、リポジトリ全体に置く。
 environment の構成は `.github/settings-desired-v1.json` に宣言し、`python3 scripts/github_settings_drift.py` で実際の設定と照合する。
 

@@ -20,6 +20,8 @@ from it, as in the live rulesets of depgraph-cli and repo-knowledge-mcp:
   non_fast_forward rule (branches) or an update rule (tags), and
   allow_deletions = false means one has a deletion rule; as in depgraph-cli,
   require-code-owner-review relies on protect-main for this protection;
+- allow_creations = false (tag rulesets only, true when absent) means an active
+  ruleset for the same tags has a creation rule;
 - a branch ruleset with approvals, code owner review, or conversation
   resolution has a pull_request rule;
 - every required `Analyze (<language>)` check needs CodeQL default setup to
@@ -43,9 +45,11 @@ import github_settings_manifest as manifest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DESCRIPTION = 'List differences between .github/settings-desired-v1.json and the live settings.'
 KNOWN_APPS = {15368: 'github-actions', 2740: 'renovate'}
+# Built-in repository roles that rulesets can name as bypass actors.
+KNOWN_REPOSITORY_ROLES = {5: 'repository-admin'}
 ALLOWED_RULES = {
     'branch': {'deletion', 'non_fast_forward', 'pull_request', 'required_status_checks'},
-    'tag': {'deletion', 'update'},
+    'tag': {'creation', 'deletion', 'update'},
 }
 HISTORY_RULE = {'branch': 'non_fast_forward', 'tag': 'update'}
 NOT_VERIFIED = ('surface/apps', 'surface/token_fingerprints', 'surface/runner_groups')
@@ -99,6 +103,8 @@ def _actor(fetch, actor):
         return 'app:' + KNOWN_APPS.get(identifier, f'id-{identifier}')
     if kind == 'OrganizationAdmin':
         return 'role:organization-admin'
+    if kind == 'RepositoryRole':
+        return 'role:' + KNOWN_REPOSITORY_ROLES.get(identifier, f'repository-role-{identifier}')
     return f'{str(kind).lower()}:{identifier}'
 
 
@@ -122,6 +128,7 @@ def _normalize_ruleset(fetch, live):
         'require_conversation_resolution': bool((review or {}).get('required_review_thread_resolution')),
         'allow_force_pushes': HISTORY_RULE.get(target) not in rules,
         'allow_deletions': 'deletion' not in rules,
+        'allow_creations': 'creation' not in rules,
         'bypass_actors': sorted(actors, key=lambda a: a['identity']),
     }
     implied = {
@@ -138,6 +145,8 @@ def _normalize_ruleset(fetch, live):
 def _expected_ruleset(desired):
     fields = {key: desired[key] for key in manifest.RULESET_KEYS if key not in ('name', 'target')}
     fields['include'] = sorted(fields['include'])
+    if desired['target'] == 'tag':
+        fields[manifest.ALLOW_CREATIONS_KEY] = desired.get(manifest.ALLOW_CREATIONS_KEY, True)
     fields['required_checks'] = sorted(fields['required_checks'], key=lambda c: c['context'])
     fields['bypass_actors'] = sorted(fields['bypass_actors'], key=lambda a: a['identity'])
     code_owner = desired['require_code_owner_review']
@@ -183,6 +192,7 @@ def _ruleset_drift(desired, fetch, base):
         protected = set.intersection(*(effective.get((key[0], p), set()) for p in ruleset['include']))
         actual['allow_force_pushes'] = HISTORY_RULE[key[0]] not in protected
         actual['allow_deletions'] = 'deletion' not in protected
+        actual['allow_creations'] = 'creation' not in protected
         for field in expected:
             _compare(drift, f'{path}/{field}', expected[field], actual[field])
         for field in expected_implied:

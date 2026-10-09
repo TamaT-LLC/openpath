@@ -366,6 +366,22 @@ class SettingsManifestTests(RepositoryFixture):
         self.write_settings(settings)
         self.assertEqual(self.errors(), [])
 
+    def test_allow_creations_is_an_optional_boolean_of_tag_rulesets(self):
+        settings = copy.deepcopy(SETTINGS)
+        settings['rulesets'][2]['allow_creations'] = False
+        self.write_settings(settings)
+        self.assertEqual(self.errors(), [])
+        cases = {
+            'not a boolean': (2, 0),
+            'branch ruleset': (0, False),
+        }
+        for label, (index, value) in cases.items():
+            with self.subTest(label):
+                settings = copy.deepcopy(SETTINGS)
+                settings['rulesets'][index]['allow_creations'] = value
+                self.write_settings(settings)
+                self.assert_rejected('allow_creations')
+
     def test_workflow_environments_must_be_declared(self):
         self.write_workflow('release.yml', RELEASE.replace('    runs-on: ubuntu-24.04\n', '    runs-on: ubuntu-24.04\n    environment: release\n'))
         self.assert_rejected("'release'")
@@ -470,13 +486,13 @@ class DriftTests(unittest.TestCase):
         responses = matching_live_state()
         responses['repos/TamaT-LLC/openpath/rulesets/2']['bypass_actors'].append(
             {'actor_id': 2740, 'actor_type': 'Integration', 'bypass_mode': 'always'})
-        responses['repos/TamaT-LLC/openpath/rulesets/3']['rules'].append({'type': 'creation'})
+        responses['repos/TamaT-LLC/openpath/rulesets/3']['rules'].append({'type': 'required_signatures'})
         responses['repos/TamaT-LLC/openpath/rulesets?per_page=100'].append({'id': 4})
         responses['repos/TamaT-LLC/openpath/rulesets/4'] = live_ruleset(4, 'legacy', 'branch', ['~ALL'], [])
         report = '\n'.join(self.report(responses))
         self.assertIn('require-code-owner-review/bypass_actors', report)
         self.assertIn('app:renovate', report)
-        self.assertIn('protect-release-tags/rules: unexpected creation', report)
+        self.assertIn('protect-release-tags/rules: unexpected required_signatures', report)
         self.assertIn('rulesets/branch/legacy: unexpected', report)
 
     def test_environment_reviewers_and_deployment_refs_are_compared(self):
@@ -499,6 +515,26 @@ class DriftTests(unittest.TestCase):
         report = self.report(responses, settings)
         self.assertIn('surface/environments: expected ["release"], actual []', report)
         self.assertIn('environment_policies/release: missing', report)
+
+    def test_tag_creation_rule_and_repository_admin_bypass_are_compared(self):
+        settings = copy.deepcopy(SETTINGS)
+        settings['rulesets'][2]['allow_creations'] = False
+        settings['rulesets'][2]['bypass_actors'] = [{'identity': 'role:repository-admin', 'permission': 'always'}]
+        responses = matching_live_state()
+        tags = responses['repos/TamaT-LLC/openpath/rulesets/3']
+        tags['rules'].append({'type': 'creation'})
+        tags['bypass_actors'] = [{'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}]
+        self.assertEqual(self.report(responses, settings), [])
+        tags['rules'] = [rule for rule in tags['rules'] if rule['type'] != 'creation']
+        tags['bypass_actors'] = [{'actor_id': 4, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}]
+        report = '\n'.join(self.report(responses, settings))
+        self.assertIn('protect-release-tags/allow_creations: expected false, actual true', report)
+        self.assertIn('role:repository-role-4', report)
+        # allow_creations を書かない tag ruleset は作成を許す（creation rule があれば差分）
+        responses = matching_live_state()
+        responses['repos/TamaT-LLC/openpath/rulesets/3']['rules'].append({'type': 'creation'})
+        self.assertEqual(self.report(responses),
+                         ['rulesets/tag/protect-release-tags/allow_creations: expected true, actual false'])
 
     def test_codeql_default_setup_must_analyze_every_required_language(self):
         responses = matching_live_state()

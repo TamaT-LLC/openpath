@@ -279,6 +279,10 @@ The signing and notarization secrets live in the deployment environment
 `release`, which only `v*` tags can deploy to, and the Homebrew tap credentials
 live in the environment `homebrew-tap`, which only `v*` tags and `main` can
 deploy to. Do not keep copies of these secrets at the repository level.
+Only repository admins can create the stable and preview tags (`v*` and
+`preview-v*`); the ruleset `protect-release-tags` blocks everyone else from
+creating, updating, or deleting them. The admin bypass covers every rule of the
+ruleset, so do not move or delete a published tag.
 
 After a stable release is published, the workflow opens a pull request in
 [TamaT-LLC/homebrew-tap](https://github.com/TamaT-LLC/homebrew-tap) that

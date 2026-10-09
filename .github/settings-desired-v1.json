@@ -73,7 +73,13 @@
       "require_conversation_resolution": false,
       "allow_force_pushes": false,
       "allow_deletions": false,
-      "bypass_actors": []
+      "allow_creations": false,
+      "bypass_actors": [
+        {
+          "identity": "role:repository-admin",
+          "permission": "always"
+        }
+      ]
     }
   ],
   "environment_policies": [

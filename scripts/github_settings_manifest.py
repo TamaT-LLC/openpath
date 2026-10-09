@@ -2,8 +2,8 @@
 """Closed-schema validation of .github/settings-desired-v1.json.
 
 The manifest uses the github-settings-desired-v1 fields of TamaT-LLC/depgraph-cli
-(schemas/github-settings-desired-v1.schema.json) with two openpath-specific
-relaxations:
+(schemas/github-settings-desired-v1.schema.json) with three openpath-specific
+differences:
 
 - `required_checks[].context` accepts printable text, because openpath's check
   names (`swift build / swift test`, `Analyze (actions)`) contain spaces,
@@ -12,7 +12,10 @@ relaxations:
   its environments (`release` and `homebrew-tap`) to release tags and `main` by
   deployment ref policy instead of required reviewers. An environment without
   reviewers must still restrict its deployment refs, so it cannot be open to
-  every branch.
+  every branch;
+- a tag ruleset may carry `allow_creations` (default true). `false` means a
+  `creation` rule, so only the ruleset's bypass actors can create matching tags,
+  which openpath uses to limit release tags to repository admins.
 """
 from __future__ import annotations
 
@@ -49,6 +52,8 @@ RULESET_KEYS = ('name', 'target', 'enforcement', 'include', 'required_checks',
                 'required_approvals', 'require_code_owner_review',
                 'require_conversation_resolution', 'allow_force_pushes',
                 'allow_deletions', 'bypass_actors')
+# Optional ruleset key; only tag rulesets may carry it.
+ALLOW_CREATIONS_KEY = 'allow_creations'
 CHECK_KEYS = ('context', 'source_app_id', 'source_app_slug')
 PRINCIPAL_KEYS = ('identity', 'permission')
 ENVIRONMENT_KEYS = ('name', 'prevent_self_review', 'reviewers', 'deployment_ref_policy')
@@ -68,12 +73,12 @@ class _Validator:
     def fail(self, path, message):
         self.errors.append(f'{SETTINGS_FILE}: {path}: {message}')
 
-    def mapping(self, value, path, keys):
+    def mapping(self, value, path, keys, optional=()):
         if not isinstance(value, dict):
             self.fail(path, 'must be an object')
             return False
-        if set(value) != set(keys):
-            unknown = sorted(set(value) - set(keys))
+        if not set(keys) <= set(value) <= set(keys) | set(optional):
+            unknown = sorted(set(value) - set(keys) - set(optional))
             missing = sorted(set(keys) - set(value))
             self.fail(path, f'unknown keys {unknown}, missing keys {missing}')
             return False
@@ -134,7 +139,7 @@ def _required_check(check, value, path):
 
 
 def _ruleset(check, value, path):
-    if not check.mapping(value, path, RULESET_KEYS):
+    if not check.mapping(value, path, RULESET_KEYS, optional=(ALLOW_CREATIONS_KEY,)):
         return
     check.text(value['name'], path + '/name', TOKEN)
     check.choice(value['target'], path + '/target', ('branch', 'tag'))
@@ -157,6 +162,10 @@ def _ruleset(check, value, path):
                value['require_code_owner_review'], value['require_conversation_resolution'])
     if value['target'] == 'tag' and reviews != ([], 0, False, False):
         check.fail(path, f"tag ruleset '{value['name']}' cannot require checks or reviews")
+    if ALLOW_CREATIONS_KEY in value:
+        check.boolean(value[ALLOW_CREATIONS_KEY], f'{path}/{ALLOW_CREATIONS_KEY}')
+        if value['target'] != 'tag':
+            check.fail(path + '/' + ALLOW_CREATIONS_KEY, 'is only supported for tag rulesets')
 
 
 def _environment_policy(check, value, path):
