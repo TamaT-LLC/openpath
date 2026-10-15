@@ -3,5 +3,5 @@
 public enum AppInfo {
     public static let name = "openpath"
     public static let bundleIdentifier = "jp.tamat.openpath"
-    public static let version = "0.1.2"
+    public static let version = "0.1.3"
 }
