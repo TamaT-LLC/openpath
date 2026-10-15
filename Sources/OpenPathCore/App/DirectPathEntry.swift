@@ -28,7 +28,7 @@ public struct DirectPathEntry: Sendable {
     public func row(for query: String, directoriesOnly: Bool, lastUsed: Date? = nil) -> PaletteRow? {
         guard let path = path(for: query), let kind = FileSystemItemKind.ofItem(atPath: path) else { return nil }
         guard !directoriesOnly || kind == .directory else { return nil }
-        return PaletteRow(name: CandidatePath.name(of: path), path: path, lastUsed: lastUsed)
+        return PaletteRow(name: CandidatePath.name(of: path), path: path, lastUsed: lastUsed, isDirectory: kind == .directory)
     }
 
     /// 候補の先頭に直接入力の行を加える。同じパスの候補は除き（最終使用日時は引き継ぐ）、`limit` 件に収める。

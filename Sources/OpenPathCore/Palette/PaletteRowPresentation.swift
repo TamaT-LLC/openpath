@@ -7,8 +7,11 @@ public struct PaletteRowPresentation: Equatable, Sendable {
     public let name: HighlightedText
     /// 場所（親ディレクトリ）の表示候補。ホームは "~" で表し、先頭ほど省略が少ない。常に 1 件以上ある
     public let locationVariants: [HighlightedText]
+    /// フォルダと書類のアイコンを選ぶための種別
+    public let isDirectory: Bool
 
     public init(row: PaletteRow, homeDirectory: String) {
+        isDirectory = row.isDirectory
         let path = HighlightedText(row.path, highlightedOffsets: row.pathHighlights)
         let (parent, lastComponent) = PathDisplay.splitParent(path)
 
