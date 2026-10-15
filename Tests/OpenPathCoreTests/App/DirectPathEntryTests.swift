@@ -23,6 +23,7 @@ struct DirectPathEntryTests {
         let row = entry.row(for: tree.path("repos/fern"), directoriesOnly: true)
 
         #expect(row == PaletteRow(name: "fern", path: tree.path("repos/fern"), lastUsed: nil))
+        #expect(row?.isDirectory == true)
     }
 
     @Test("~/ で始まるパスはホームディレクトリで展開する")
@@ -63,6 +64,7 @@ struct DirectPathEntryTests {
     func fileFollowsDirectoriesOnly() {
         #expect(entry.row(for: "~/repos/notes.txt", directoriesOnly: true) == nil)
         #expect(entry.row(for: "~/repos/notes.txt", directoriesOnly: false)?.name == "notes.txt")
+        #expect(entry.row(for: "~/repos/notes.txt", directoriesOnly: false)?.isDirectory == false)
     }
 
     // MARK: - 候補との統合

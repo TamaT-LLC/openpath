@@ -7,6 +7,7 @@ extension PaletteRow {
             name: candidate.name,
             path: candidate.path,
             lastUsed: candidate.lastUsed,
+            isDirectory: candidate.isDirectory,
             nameHighlights: match?.field == .name ? positions : [],
             pathHighlights: match?.field == .path ? positions : []
         )

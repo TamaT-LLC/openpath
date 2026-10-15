@@ -6,24 +6,30 @@ import OpenPathCore
 enum PaletteRowLayout {
     static let horizontalPadding: CGFloat = 10
     static let columnSpacing: CGFloat = 10
-    static let selectionMarkerWidth: CGFloat = 10
-    /// 行ごとに場所の列の開始位置が揃うよう、表示名の列は固定幅にする（UX-001 §3 のレイアウト）
-    static let nameColumnWidth: CGFloat = 180
+    static let iconWidth: CGFloat = 16
+    /// アイコンを広げた分だけ表示名の列を縮め、場所の列の開始位置を保つ（UX-001 §3）。
+    static let nameColumnWidth: CGFloat = 174
     /// 「12か月前」が収まる幅
     static let lastUsedColumnWidth: CGFloat = 64
 
     /// 表示名の列の開始位置。0 件の案内の字下げに使う
     static var nameColumnLeading: CGFloat {
-        horizontalPadding + selectionMarkerWidth + columnSpacing
+        horizontalPadding + iconWidth + columnSpacing
     }
 }
 
-/// 候補 1 行: 選択マーカー / 表示名 / 場所（親ディレクトリ）/ 最終使用日時（UX-001 §3）。
+/// 候補 1 行: 種類のアイコン / 表示名 / 場所（親ディレクトリ）/ 最終使用日時（UX-001 §3）。
 struct PaletteRowView: View {
     private enum Constants {
-        static let selectionMarkerName = "arrowtriangle.right.fill"
         static let selectionInset: CGFloat = 4
         static let selectionCornerRadius: CGFloat = 6
+    }
+
+    private var iconName: String {
+        if presentation.isDirectory {
+            return isSelected ? "folder.fill" : "folder"
+        }
+        return isSelected ? "doc.fill" : "doc"
     }
 
     let presentation: PaletteRowPresentation
@@ -32,11 +38,11 @@ struct PaletteRowView: View {
 
     var body: some View {
         HStack(spacing: PaletteRowLayout.columnSpacing) {
-            Image(systemName: Constants.selectionMarkerName)
-                .font(.caption2)
+            Image(systemName: iconName)
+                .font(.callout)
                 .foregroundStyle(.secondary)
-                .frame(width: PaletteRowLayout.selectionMarkerWidth)
-                .opacity(isSelected ? 1 : 0)
+                .frame(width: PaletteRowLayout.iconWidth)
+                .accessibilityHidden(true)
             Text(presentation.name.attributedString())
                 .lineLimit(1)
                 .frame(width: PaletteRowLayout.nameColumnWidth, alignment: .leading)

@@ -11,6 +11,8 @@ public struct PaletteRow: Identifiable, Equatable, Sendable {
     public let path: String
     /// 最終使用日時。履歴にない候補は nil
     public let lastUsed: Date?
+    /// 候補の種類。行のアイコンをフォルダと書類で描き分ける
+    public let isDirectory: Bool
     /// `name` 内のマッチ位置（Character オフセット）
     public let nameHighlights: [Int]
     /// `path` 内のマッチ位置（Character オフセット）
@@ -23,12 +25,14 @@ public struct PaletteRow: Identifiable, Equatable, Sendable {
         name: String,
         path: String,
         lastUsed: Date?,
+        isDirectory: Bool = true,
         nameHighlights: [Int] = [],
         pathHighlights: [Int] = []
     ) {
         self.name = name
         self.path = path
         self.lastUsed = lastUsed
+        self.isDirectory = isDirectory
         self.nameHighlights = nameHighlights
         self.pathHighlights = pathHighlights
     }

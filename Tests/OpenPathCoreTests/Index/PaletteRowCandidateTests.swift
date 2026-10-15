@@ -17,6 +17,20 @@ struct PaletteRowCandidateTests {
         lastUsed: F.ago(F.oneHour)
     )
 
+    @Test("候補の種類を表示用モデルまで引き継ぐ", arguments: [true, false])
+    func preservesItemKind(isDirectory: Bool) {
+        let candidate = Candidate(
+            path: "/repos/item", name: "item", isDirectory: isDirectory,
+            source: .ghq, frecency: 0, lastUsed: nil
+        )
+
+        let row = PaletteRow(candidate: candidate, match: nil)
+        let presentation = PaletteRowPresentation(row: row, homeDirectory: "/Users/example")
+
+        #expect(row.isDirectory == isDirectory)
+        #expect(presentation.isDirectory == isDirectory)
+    }
+
     @Test("name にマッチした場合は一致位置を nameHighlights にする")
     func nameMatchHighlightsName() {
         let match = FuzzyCandidateMatch(score: 10, field: .name, positions: [0, 3])
