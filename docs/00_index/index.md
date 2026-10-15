@@ -25,6 +25,7 @@
 - [v0.1.0 のリリースノート（最初の Stable）](../releases/v0.1.0.md)
 - [v0.1.1 のリリースノート](../releases/v0.1.1.md)
 - [v0.1.2 のリリースノート（アプリアイコンの追加）](../releases/v0.1.2.md)
+- [v0.1.3 のリリースノート（候補行のフォルダ・書類アイコン）](../releases/v0.1.3.md)
 - [未リリースの変更](../releases/unreleased.md)
 <!-- release-notes:end -->
 
