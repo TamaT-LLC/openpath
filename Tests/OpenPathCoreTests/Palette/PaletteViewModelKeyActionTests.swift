@@ -15,7 +15,7 @@ struct PaletteViewModelKeyActionTests {
 
     private let viewModel = PaletteViewModel(homeDirectory: PaletteViewModelKeyActionTests.home)
 
-    private func perform(_ action: PaletteAction, isDirectory: (String) -> Bool = isDirectory) -> PaletteEvent? {
+    private func perform(_ action: PaletteAction, isDirectory: @escaping (String) -> Bool = isDirectory) -> PaletteEvent? {
         viewModel.perform(action, isDirectory: isDirectory)
     }
 

@@ -29,11 +29,19 @@ public final class PalettePresenter: PaletteDisplaying {
     private let window: any PaletteWindowControlling
     private let includeFiles: @MainActor () -> Bool
     private let search: PaletteQuerySession.Search
+    private let ignoredNames: @MainActor () -> Set<String>
+    private let loadDirectory: DirectoryQuerySession.Load
+    private let history: @MainActor () -> [HistoryEntry]
     private let clock: any Clock<Duration>
     private let didShow: @MainActor (PanelContext) -> Void
     private let diagnose: @MainActor (PalettePresenterDiagnostic) -> Void
     private lazy var querySession = PaletteQuerySession(search: search) { [weak self] rows, keepingSelection in
         self?.apply(rows, keepingSelection: keepingSelection)
+    }
+    private lazy var directorySession = DirectoryQuerySession(load: loadDirectory, history: history) { [weak self] result, keepingSelection in
+        guard let self else { return }
+        self.viewModel.directoryMessage = result.message
+        self.apply(result.rows, keepingSelection: keepingSelection)
     }
     /// 表示中のパレットのパネル。閉じている間は nil
     private var presentedPanel: PanelContext?
@@ -46,12 +54,17 @@ public final class PalettePresenter: PaletteDisplaying {
     private var lastRowsRequest = RowsRequest.show
     /// ウィンドウを出しているか。別のパネルの候補を待つ前に、前のパネルのパレットを閉じるかの判定に使う
     private var isWindowShown = false
+    private var isBrowsingDirectory = false
+    private var hiddenDirectorySelection: PaletteRow.ID?
 
     /// - Parameters:
     ///   - viewModel: パレットのビューの状態。検索語の変更の通知（`onQueryChange`）はこの型が受け持つ。
     ///   - window: パレットのウィンドウ。
     ///   - includeFiles: 設定 include_files。設定ファイルの変更を反映するため、候補を引くたびに読む。
     ///   - search: 候補の引き方。
+    ///   - ignoredNames: Tab の列挙から除外する名前。設定の変更を候補の要求時に読む。
+    ///   - loadDirectory: Tab で開いたフォルダの直下を取得する。テストでは完了順を制御できる。
+    ///   - history: 動的候補の順位と最終使用日時に使う履歴。
     ///   - clock: 初出の表示で最初の候補を待つ上限の計測に使う。テストでは手動で進める Clock を渡す。
     ///   - didShow: ウィンドウを出した直後に、表示のたびに呼ぶ。既定では `palette shown` をログに出す。
     ///   - diagnose: 表示・閉じる・候補の引き直しの報告先。既定では debug ログに出す。
@@ -60,6 +73,9 @@ public final class PalettePresenter: PaletteDisplaying {
         window: any PaletteWindowControlling,
         includeFiles: @escaping @MainActor () -> Bool,
         search: @escaping PaletteQuerySession.Search,
+        ignoredNames: @escaping @MainActor () -> Set<String> = { Set(Config.defaultIgnore) },
+        loadDirectory: @escaping DirectoryQuerySession.Load = DirectorySnapshot.load,
+        history: @escaping @MainActor () -> [HistoryEntry] = { [] },
         clock: any Clock<Duration> = ContinuousClock(),
         didShow: @escaping @MainActor (PanelContext) -> Void = PalettePresenter.logShown,
         diagnose: @escaping @MainActor (PalettePresenterDiagnostic) -> Void = PalettePresenterDiagnostic.log
@@ -68,6 +84,9 @@ public final class PalettePresenter: PaletteDisplaying {
         self.window = window
         self.includeFiles = includeFiles
         self.search = search
+        self.ignoredNames = ignoredNames
+        self.loadDirectory = loadDirectory
+        self.history = history
         self.clock = clock
         self.didShow = didShow
         self.diagnose = diagnose
@@ -83,9 +102,12 @@ public final class PalettePresenter: PaletteDisplaying {
         cancelPendingReveal()
         // reset() による検索語の変更で、前のパネルの条件のまま候補を引かないよう、表示中の扱いを外してから戻す
         presentedPanel = nil
+        directorySession.cancel()
         if isSamePanel {
             viewModel.clearStatus()
         } else {
+            isBrowsingDirectory = false
+            hiddenDirectorySelection = nil
             viewModel.reset()
         }
         presentedPanel = context
@@ -120,6 +142,14 @@ public final class PalettePresenter: PaletteDisplaying {
         cancelPendingReveal()
         presentedPanel = nil
         querySession.cancel()
+        directorySession.cancel()
+        if viewModel.expandedDirectory != nil {
+            // 検索範囲と文字列だけを残し、候補は再表示時に取り直す。
+            if let selection = viewModel.selectedRow?.id { hiddenDirectorySelection = selection }
+            viewModel.replaceRows([])
+            viewModel.directoryMessage = nil
+            window.rowCount = 0
+        }
         isWindowShown = false
         window.hide()
         // 閉じている間の hide（Idle の panelGone 等）は報告しない
@@ -185,15 +215,41 @@ public final class PalettePresenter: PaletteDisplaying {
 
     private func queryDidChange() {
         guard presentedPanel != nil else { return }
+        hiddenDirectorySelection = nil
         requestRows(.queryChange, keepingSelection: false)
     }
 
     private func requestRows(_ request: RowsRequest, keepingSelection: Bool) {
         guard let presentedPanel else { return }
         lastRowsRequest = request
+        let directoriesOnly = presentedPanel.showsDirectoriesOnly(includeFiles: includeFiles())
+        if let directory = viewModel.expandedDirectory {
+            isBrowsingDirectory = true
+            querySession.cancel()
+            if !keepingSelection {
+                viewModel.replaceRows([])
+                window.rowCount = 0
+            }
+            viewModel.directoryMessage = PaletteText.loadingDirectory
+            let prefix = PaletteQueryExpansion.query(expanding: directory, isDirectory: true)
+            directorySession.request(
+                directory: directory, text: String(viewModel.query.dropFirst(prefix.count)),
+                ignoredNames: ignoredNames(), directoriesOnly: directoriesOnly,
+                keepingSelection: keepingSelection,
+                reload: request == .show || request == .rebuildFinished || request == .candidatesChanged
+            )
+            return
+        }
+        directorySession.cancel()
+        if isBrowsingDirectory {
+            viewModel.replaceRows([])
+            window.rowCount = 0
+            isBrowsingDirectory = false
+        }
+        viewModel.directoryMessage = nil
         querySession.request(
             viewModel.query,
-            directoriesOnly: presentedPanel.showsDirectoriesOnly(includeFiles: includeFiles()),
+            directoriesOnly: directoriesOnly,
             keepingSelection: keepingSelection
         )
     }
@@ -201,6 +257,11 @@ public final class PalettePresenter: PaletteDisplaying {
     private func apply(_ rows: [PaletteRow], keepingSelection: Bool) {
         let previousSelectionID = viewModel.selectedRow?.id
         viewModel.replaceRows(rows, keepingSelection: keepingSelection)
+        if keepingSelection, let hiddenDirectorySelection,
+           let index = rows.firstIndex(where: { $0.id == hiddenDirectorySelection }) {
+            viewModel.select(at: index)
+        }
+        hiddenDirectorySelection = nil
         window.rowCount = rows.count
         reportRefresh(previousSelectionID: previousSelectionID)
         guard isAwaitingInitialRows else { return }

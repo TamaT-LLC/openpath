@@ -4,6 +4,7 @@ struct RootItemCollector {
     let limit: Int
     private(set) var items: [SourceItem] = []
     private(set) var isTruncated = false
+    var unavailableReason: RootUnavailableReason?
 
     init(root: String, limit: Int) {
         self.root = root
@@ -21,6 +22,9 @@ struct RootItemCollector {
     }
 
     func snapshot() -> CandidateSourceSnapshot {
+        if let unavailableReason {
+            return CandidateSourceSnapshot(items: [], warnings: [.rootUnavailable(root: root, reason: unavailableReason)])
+        }
         let warnings: [CandidateSourceWarning] = isTruncated ? [.rootTruncated(root: root, limit: limit)] : []
         return CandidateSourceSnapshot(items: items, warnings: warnings)
     }

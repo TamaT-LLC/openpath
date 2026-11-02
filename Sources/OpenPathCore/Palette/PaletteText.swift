@@ -10,6 +10,12 @@ public enum PaletteText {
     ]
     /// 候補ソースの構築中にフッターへ出す文言（UX-001 §5）
     public static let buildingCandidates = "候補を構築中…"
+    public static let loadingDirectory = "フォルダを読み込み中…"
+    public static let emptyDirectory = "このフォルダに表示できる項目がありません"
+    public static let directoryNotFound = "フォルダが見つかりません。移動または削除された可能性があります"
+    public static let directoryUnreadable = "フォルダを読み込めません。アクセス権を確認してください"
+    public static let directoryNotDirectory = "この場所はフォルダではありません"
+    public static let directoryTruncated = "項目が多いため、一部のみ表示しています"
     /// 候補が 0 件のときにリストへ出す案内（UX-001 §5）。
     /// `/` や `~/` で始まる存在するパスを打つと先頭に直接入力の行が出るため、それを伝える（Tab は選択候補の展開で、直接入力には不要）
     public static let noMatches = "一致する候補がありません。~/ や / で始まるパスも入力できます"
