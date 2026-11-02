@@ -167,4 +167,40 @@ struct PaletteDirectoryBrowsingTests {
         #expect(viewModel.selectedRow?.name == "b")
         presenter.hide()
     }
+
+    /// 列挙済みの絞り込みは既存の行を保ち、実際に再列挙するときだけ読み込み中へ切り替える。
+    @Test("列挙済みフォルダの打鍵では行数と候補を保ち、再構築時だけ読み込み中を出す")
+    func cachedTypingDoesNotFlashLoading() async throws {
+        try tree.makeDirectories("alpha", "beta")
+        let loader = ScriptedDirectoryLoad()
+        let rootRow = PaletteRow(name: "root", path: tree.root, lastUsed: nil)
+        let presenter = PalettePresenter(
+            viewModel: viewModel, window: window, includeFiles: { false },
+            search: { _, _, _ in [rootRow] }, loadDirectory: loader.load
+        )
+        presenter.show(context: .sample)
+        await MainActorQueue.waitUntil { viewModel.hasReceivedRows }
+        _ = viewModel.perform(.expandSelection)
+        await loader.waitForCalls(1)
+        #expect(viewModel.emptyMessage == PaletteText.loadingDirectory)
+        loader.respond(0, items: [.directory(tree.path("alpha")), .directory(tree.path("beta"))])
+        await waitForNames(["alpha", "beta"])
+        let previousRows = viewModel.rows
+
+        viewModel.query += "al"
+        // MainActor を譲る前に、次の結果を待つ間の表示を検査する。
+        #expect(viewModel.rows == previousRows)
+        #expect(window.rowCount == 2)
+        #expect(viewModel.directoryMessage == nil)
+        await waitForNames(["alpha"])
+        #expect(loader.paths.count == 1)
+
+        presenter.candidateRebuildingDidChange(true)
+        presenter.candidateRebuildingDidChange(false)
+        #expect(viewModel.directoryMessage == PaletteText.loadingDirectory)
+        await loader.waitForCalls(2)
+        loader.respond(1, items: [.directory(tree.path("alpha"))])
+        await waitForNames(["alpha"])
+        presenter.hide()
+    }
 }

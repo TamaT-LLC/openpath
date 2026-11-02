@@ -84,6 +84,8 @@ public struct RootDirectoryScanner: Sendable {
         return RootScanResult(snapshot: collector.snapshot(), marker: recorder.marker())
     }
 
+    /// ルートのリンク先を列挙し、指定された深さと上限まで候補を集める。
+    /// 一覧取得の失敗では変更検知用の記録を無効にし、ルート自身の失敗なら利用不可として返す。
     private func collectDescendants(
         of root: String,
         into collector: inout RootItemCollector,

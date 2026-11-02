@@ -13,6 +13,7 @@ public struct DirectorySnapshot: Sendable {
     private let matcher = FuzzyMatcher()
     public let message: String?
 
+    /// 同じパスを一件にまとめ、繰り返す検索で再利用する名前のマッチ対象を前処理する。
     public init(items: [SourceItem], message: String? = nil) {
         let matcher = FuzzyMatcher()
         var seen: Set<String> = []

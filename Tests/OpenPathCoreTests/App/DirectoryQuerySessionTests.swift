@@ -80,17 +80,25 @@ struct DirectoryQuerySessionTests {
     func optionsAndReloadInvalidateListing() async {
         request()
         await loader.waitForCalls(1)
+        #expect(!session.isListed(directory: "/root", ignoredNames: []))
         loader.respond(0)
         await MainActorQueue.waitUntil { results.values.count == 1 }
+        #expect(session.isListed(directory: "/root", ignoredNames: []))
+        #expect(!session.isListed(directory: "/other", ignoredNames: []))
+        #expect(!session.isListed(directory: "/root", ignoredNames: ["skip"]))
         request(ignore: ["skip"])
+        #expect(!session.isListed(directory: "/root", ignoredNames: ["skip"]))
         await loader.waitForCalls(2)
         loader.respond(1)
         await MainActorQueue.waitUntil { results.values.count == 2 }
         request(ignore: ["skip"], reload: true)
+        #expect(!session.isListed(directory: "/root", ignoredNames: ["skip"]))
         await loader.waitForCalls(3)
         #expect(loader.ignoredNames == [[], ["skip"], ["skip"]])
         loader.respond(2)
         await MainActorQueue.waitUntil { results.values.count == 3 }
+        #expect(session.isListed(directory: "/root", ignoredNames: ["skip"]))
         session.cancel()
+        #expect(!session.isListed(directory: "/root", ignoredNames: ["skip"]))
     }
 }

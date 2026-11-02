@@ -94,6 +94,7 @@ protocol ChangeTrackingCandidateSource: CandidateSource {
 - `PaletteViewModel.expandedDirectory` は Tab で選んだディレクトリだけを保持する。検索語がその `パス/` を接頭辞に持つ間、`PalettePresenter` は通常の索引検索を取り消し、`DirectoryQuerySession` に残りの語を渡す。候補の種別は取得時の値を使い、Tab のキー操作で同期 I/O は行わない。
 - `DirectorySnapshot.load` は MainActor の外で `RootDirectoryScanner` を depth=1・includeFiles=true で呼び、ルート自身を除く。隠し・ignore・パッケージ・リンクの規則は roots と共通。ルートの列挙エラーは空と区別して通知する。項目上限はルート自身を含め 20,000 件で、打ち切り時は案内する。
 - 列挙は同じフォルダ内の打鍵では共有する。検索は直下の名前だけを対象にし、フォルダ専用モードと include_files を反映する。frecency の加味と最終使用日時は通常検索と共通で、空検索では frecency 順、それ以外は名前のマッチスコア × (1 + log1p(frecency)) 順。同点は最終使用日時、パスの順。結果は最大 50 件で、返す前に存在と種別を再確認する。
+- `DirectoryQuerySession.isListed(directory:ignoredNames:)` で同じキーの取得結果を保持しているかを判定する。Presenter は再列挙が必要なときだけ読み込み表示にし、取得済みの候補の絞り込みでは次の結果を待つ間も行を維持する。
 - 共有 `CandidateIndex` とは混ぜず、現在のフォルダのスナップショットだけを保持するため、他ソースの候補との重複や範囲外の混入はない。確定したパスは既存の仕組みで履歴に記録される。
 - 別フォルダへの移動・通常検索への復帰・パレットを閉じる際に列挙と検索を取り消し、保持した候補を破棄する。世代の照合で古い結果・案内の反映を防ぐ。同じパネルの再表示では範囲と選択パスだけを保って再列挙する。ignore の変更、再構築の完了、候補変更の通知でも列挙し直す。
 

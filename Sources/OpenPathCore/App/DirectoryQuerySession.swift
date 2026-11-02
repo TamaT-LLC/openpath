@@ -37,6 +37,14 @@ public final class DirectoryQuerySession {
         self.history = history
     }
 
+    /// 指定したフォルダと除外条件に対応する列挙結果があるか。再列挙中・破棄後は false。
+    /// 空やアクセス不可の結果も保持するため、通常の打鍵では読み込み表示を繰り返さない。
+    public func isListed(directory: String, ignoredNames: Set<String>) -> Bool {
+        snapshot != nil && key == Key(directory: directory, ignoredNames: ignoredNames)
+    }
+
+    /// 最新の検索語を記録する。同じキーでは列挙を共有し、キー変更または reload 時は取り直す。
+    /// 列挙中の要求は最後の一件だけを保持し、取得済みなら新しい検索で前の検索を取り消す。
     public func request(
         directory: String, text: String, ignoredNames: Set<String>, directoriesOnly: Bool,
         keepingSelection: Bool = false, reload: Bool = false
@@ -53,6 +61,7 @@ public final class DirectoryQuerySession {
         searchSnapshot()
     }
 
+    /// 列挙を非同期に開始し、この列挙の世代が有効な場合だけ最新の検索要求へ結果を渡す。
     private func startListing(_ key: Key) {
         let currentGeneration = listingGeneration
         listing = Task { [weak self, load] in
@@ -72,6 +81,7 @@ public final class DirectoryQuerySession {
         }
     }
 
+    /// 保持したスナップショットを検索し、途中で語や検索範囲が変わっていなければ表示に反映する。
     private func searchSnapshot() {
         guard let snapshot, let request = pendingRequest else { return }
         let currentGeneration = generation
@@ -94,6 +104,7 @@ public final class DirectoryQuerySession {
         }
     }
 
+    /// 列挙・検索の両世代を無効にし、実行中の処理と保持した候補を破棄する。
     public func cancel() {
         generation += 1
         listingGeneration += 1

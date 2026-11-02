@@ -21,6 +21,7 @@ struct RootItemCollector {
         return true
     }
 
+    /// ルートが読めなければ候補を返さず理由を通知する。それ以外は収集結果と打ち切り警告を返す。
     func snapshot() -> CandidateSourceSnapshot {
         if let unavailableReason {
             return CandidateSourceSnapshot(items: [], warnings: [.rootUnavailable(root: root, reason: unavailableReason)])

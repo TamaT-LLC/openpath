@@ -97,6 +97,8 @@ public final class PalettePresenter: PaletteDisplaying {
 
     // MARK: - PaletteDisplaying
 
+    /// パネルが変われば検索をリセットする。同じパネルでは検索語を保ち、動的な候補は再取得する。
+    /// 初出では最初の検索結果を上限時間まで待ち、空状態のちらつきを防ぐ。
     public func show(context: PanelContext) {
         let isSamePanel = context.id == lastPanelID
         cancelPendingReveal()
@@ -136,6 +138,7 @@ public final class PalettePresenter: PaletteDisplaying {
         requestRows(.panelContextChanged, keepingSelection: true)
     }
 
+    /// 候補の検索と列挙を取り消して隠す。動的候補は破棄し、再表示用の選択パスだけを覚える。
     public func hide() {
         let hiddenPanel = presentedPanel
         let wasVisible = isWindowShown
@@ -213,12 +216,15 @@ public final class PalettePresenter: PaletteDisplaying {
 
     // MARK: - 候補
 
+    /// 表示中の打鍵で候補を引き直す。再表示用に覚えた選択より、新しい語の検索結果を優先する。
     private func queryDidChange() {
         guard presentedPanel != nil else { return }
         hiddenDirectorySelection = nil
         requestRows(.queryChange, keepingSelection: false)
     }
 
+    /// Tab の検索範囲があれば直下を検索し、それ以外は共有索引へ問い合わせる。
+    /// 実際の列挙中だけ読み込み表示を使い、取得済みの候補を絞る打鍵では行と行数を維持する。
     private func requestRows(_ request: RowsRequest, keepingSelection: Bool) {
         guard let presentedPanel else { return }
         lastRowsRequest = request
@@ -226,17 +232,21 @@ public final class PalettePresenter: PaletteDisplaying {
         if let directory = viewModel.expandedDirectory {
             isBrowsingDirectory = true
             querySession.cancel()
-            if !keepingSelection {
-                viewModel.replaceRows([])
-                window.rowCount = 0
+            let ignored = ignoredNames()
+            let reload = request == .show || request == .rebuildFinished || request == .candidatesChanged
+            if reload || !directorySession.isListed(directory: directory, ignoredNames: ignored) {
+                if !keepingSelection {
+                    viewModel.replaceRows([])
+                    window.rowCount = 0
+                }
+                viewModel.directoryMessage = PaletteText.loadingDirectory
             }
-            viewModel.directoryMessage = PaletteText.loadingDirectory
             let prefix = PaletteQueryExpansion.query(expanding: directory, isDirectory: true)
             directorySession.request(
                 directory: directory, text: String(viewModel.query.dropFirst(prefix.count)),
-                ignoredNames: ignoredNames(), directoriesOnly: directoriesOnly,
+                ignoredNames: ignored, directoriesOnly: directoriesOnly,
                 keepingSelection: keepingSelection,
-                reload: request == .show || request == .rebuildFinished || request == .candidatesChanged
+                reload: reload
             )
             return
         }
@@ -254,6 +264,7 @@ public final class PalettePresenter: PaletteDisplaying {
         )
     }
 
+    /// 最新の候補を反映し、再表示時の選択パスがあれば復元する。初出の待ちもここで解除する。
     private func apply(_ rows: [PaletteRow], keepingSelection: Bool) {
         let previousSelectionID = viewModel.selectedRow?.id
         viewModel.replaceRows(rows, keepingSelection: keepingSelection)
