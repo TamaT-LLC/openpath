@@ -22,6 +22,32 @@ struct ApplicationHistoryTests {
         #expect(reloaded.first?.applications["org.example.editor"]?.count == 1)
     }
 
+    @Test("旧 history.json の ISO 8601 形式を読み、再起動後も全体とアプリ実績を保持する")
+    @MainActor
+    func retainsLegacyFileAcrossRelaunch() throws {
+        let temporary = try HistoryTemporaryDirectory()
+        let file = HistoryFile(directory: temporary.url)
+        let legacy = #"[{"path":"/example/project","count":7,"last_used":"1970-01-12T13:46:40Z"}]"#
+        try Data(legacy.utf8).write(to: file.fileURL)
+        let usedAt = Self.now.addingTimeInterval(60)
+        let store = HistoryStore(persistence: file, now: { usedAt })
+        let original = try #require(store.entries.first)
+        #expect(original.count == 7)
+        #expect(original.lastUsed == Self.now)
+        #expect(original.applications.isEmpty)
+
+        store.record(path: Self.path, applicationBundleID: "org.example.editor")
+        store.flush()
+        let reloaded = HistoryStore(persistence: file, now: { usedAt })
+        #expect(reloaded.entries == store.entries)
+        let entry = try #require(reloaded.entries.first)
+        #expect(entry.path == Self.path)
+        #expect(entry.count == 8)
+        #expect(entry.lastUsed == usedAt)
+        #expect(entry.applications["org.example.editor"]?.count == 1)
+        #expect(entry.applications["org.example.editor"]?.lastUsed == usedAt)
+    }
+
     @Test("同じパスの全体実績と各アプリの実績を独立して増やす")
     func recordsGlobalAndAppCounts() {
         var list = HistoryList()
