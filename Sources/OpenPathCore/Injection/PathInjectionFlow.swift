@@ -86,7 +86,7 @@ public final class PathInjectionFlow {
             snapshot = try await saveFilename.capture(on: timeline)
         }
         do {
-            try await navigate(path: normalizedPath, autoConfirm: autoConfirm, timeline: timeline)
+            try await navigate(path: normalizedPath, autoConfirm: autoConfirm, panelKind: panelKind, timeline: timeline)
         } catch {
             if let snapshot {
                 // 後処理の失敗でペーストボード復元失敗など、元のエラーを上書きしない。
@@ -110,10 +110,10 @@ public final class PathInjectionFlow {
     }
 
     /// 主方式で移動し、シート出現・貼り付け・閉鎖のタイムアウトだけ副方式へ切り替える。
-    private func navigate(path normalizedPath: String, autoConfirm: Bool, timeline: ElapsedTimeline) async throws {
+    private func navigate(path normalizedPath: String, autoConfirm: Bool, panelKind: PanelKind, timeline: ElapsedTimeline) async throws {
         do {
             Log.debug("注入を主方式（⌘⇧G + ペースト）で始めます（auto_confirm: \(autoConfirm)）")
-            try await primary.run(path: normalizedPath, autoConfirm: autoConfirm)
+            try await primary.run(path: normalizedPath, autoConfirm: autoConfirm, panelKind: panelKind)
             Log.debug("主方式で注入しました（+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
         } catch let error as InjectionError {
             guard case .timeout(let step) = error, Self.fallbackSteps.contains(step) else {
@@ -127,7 +127,8 @@ public final class PathInjectionFlow {
                     path: normalizedPath,
                     autoConfirm: autoConfirm,
                     fallingBackFrom: error,
-                    keyRoute: primary.lastKeyRoute
+                    keyRoute: primary.lastKeyRoute,
+                    panelKind: panelKind
                 )
             } catch {
                 Log.debug("副方式の注入に失敗しました（\(error)、+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")

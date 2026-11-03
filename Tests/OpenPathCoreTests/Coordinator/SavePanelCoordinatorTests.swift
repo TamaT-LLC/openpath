@@ -17,6 +17,17 @@ struct SavePanelCoordinatorTests {
         #expect(context.withFrame(.zero).kind == .save)
     }
 
+    @Test func unverifiedDestinationDoesNotRecordHistory() async throws {
+        let error = InjectionError.saveNavigationUnverified
+        let harness = CoordinatorHarness(injectorBehavior: .fail(error))
+        let context = PanelContext(id: PanelContext.sample.id, isDirectoriesOnly: true, frame: .zero, kind: .save)
+        harness.showPanel(context)
+        harness.coordinator.handle(.confirm(path: "/tmp", openImmediately: true))
+        await harness.waitForState(.panelShown(context, isPaletteVisible: true))
+        #expect(harness.history.recordedPaths.isEmpty)
+        #expect(harness.palette.calls.contains(.showError(try #require(error.userMessage))))
+    }
+
     @Test func escapeKeepsSavePanel() {
         let harness = CoordinatorHarness()
         let context = PanelContext(id: PanelContext.sample.id, isDirectoriesOnly: true, frame: .zero, kind: .save)

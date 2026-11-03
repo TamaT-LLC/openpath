@@ -29,6 +29,31 @@ struct SavePanelInjectionTests {
         #expect(harness.pasteboard.contents == .userClipboard)
     }
 
+    /// キー準備中にシートが閉じても、後ろの保存パネルへ Return を送らない。
+    @Test(arguments: [false, true], [false, nil] as [Bool?])
+    func dismissedSheetNeverReceivesReturn(secondary: Bool, sheetFocus: Bool?) async {
+        let log = InjectionEventLog(clock: VirtualClock())
+        let filename = PanelElementFake("filename", log: log)
+        filename.simulateTyping("original.txt")
+        let harness = FlowHarness(
+            sheetAppearsAt: secondary ? nil : .milliseconds(150),
+            saveFilename: SaveFilenamePreservation { _ in filename }
+        )
+        harness.goToFieldLocator.goButton = nil
+        harness.keyboard.onPrepare = { key in
+            guard key == .returnKey else { return }
+            harness.targetGuard.goToSheetFocus = sheetFocus
+            filename.simulateTyping("changed.txt")
+        }
+        await #expect(throws: InjectionError.saveNavigationUnverified) {
+            try await harness.flow.run(path: NSTemporaryDirectory(), autoConfirm: true, panelKind: .save)
+        }
+        #expect(!harness.log.events.contains(.key(.returnKey)))
+        #expect(!harness.log.events.contains(.didSubmitGoToSheet(autoConfirm: false)))
+        #expect(filename.currentValue == "original.txt")
+        #expect(harness.pasteboard.contents == .userClipboard)
+    }
+
     @Test func missingFilenameStopsBeforeKeyboard() async {
         let harness = FlowHarness(saveFilename: SaveFilenamePreservation { _ in nil })
         await #expect(throws: InjectionError.saveFilenameUnavailable) {

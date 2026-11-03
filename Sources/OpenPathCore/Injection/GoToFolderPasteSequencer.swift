@@ -92,7 +92,7 @@ public final class GoToFolderPasteSequencer {
     /// NSOpenPanel を path へ移動させる。
     /// - Throws: 失敗時は `InjectionError`、キャンセル時は `CancellationError`。
     ///   OS 側の操作の失敗は、ユーザーに見せる文言が合うよう失敗したステップの `timeout(step:)` に寄せる。
-    public func run(path: String, autoConfirm: Bool) async throws {
+    public func run(path: String, autoConfirm: Bool, panelKind: PanelKind = .open) async throws {
         await gate.enter()
         defer { gate.leave() }
         try Task.checkCancellation()
@@ -119,6 +119,7 @@ public final class GoToFolderPasteSequencer {
                 controls: controls,
                 restoration: restoration,
                 autoConfirm: autoConfirm,
+                panelKind: panelKind,
                 // 開いていたシートでは、注入先のプロセスへ送ったキーが届くかをまだ確かめていない
                 isKeyRouteUnverified: preopenedControls != nil,
                 on: timeline
@@ -207,6 +208,7 @@ public final class GoToFolderPasteSequencer {
         controls: GoToFieldControls?,
         restoration: PasteboardRestoration,
         autoConfirm: Bool,
+        panelKind: PanelKind,
         isKeyRouteUnverified: Bool,
         on timeline: ElapsedTimeline
     ) async throws {
@@ -231,7 +233,10 @@ public final class GoToFolderPasteSequencer {
         if isKeyRouteUnverified {
             useSystemRouteForPreopenedSheetReturn(on: timeline)
         }
-        try await sender.post(.returnKey, via: lastKeyRoute, failingAs: .waitPaste, on: timeline)
+        try await sender.post(
+            .returnKey, via: lastKeyRoute, failingAs: .waitPaste,
+            requiresSheetKeyFocus: panelKind == .save, on: timeline
+        )
         Self.logStep("Return を送りました（経路: \(lastKeyRoute.rawValue)）", on: timeline)
 
         let submittedAt = timeline.elapsed

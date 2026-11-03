@@ -17,6 +17,8 @@ public enum InjectionError: Error, Equatable, Sendable {
     case panelGoneBeforeConfirm
     case saveFilenameUnavailable
     case saveDestinationNotDirectory
+    /// 保存先への移動を確認できない。シートの却下・読み取り不能も成功や履歴記録にしない。
+    case saveNavigationUnverified
 }
 
 /// タイムアウトした注入ステップ（DSN-001 §3.1）。
@@ -54,6 +56,8 @@ extension InjectionError {
             PaletteMessage.injectionFailed(reason: "パネルが最前面でなくなりました")
         case .saveFilenameUnavailable:
             PaletteMessage.injectionFailed(reason: "保存するファイル名を保持できません")
+        case .saveNavigationUnverified:
+            PaletteMessage.injectionFailed(reason: "保存先への移動を確認できません")
         case .saveDestinationNotDirectory:
             PaletteMessage.injectionFailed(reason: "保存先のフォルダが見つかりません")
         case .panelGoneBeforeConfirm:
