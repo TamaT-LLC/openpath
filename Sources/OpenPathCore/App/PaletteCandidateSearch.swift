@@ -10,7 +10,12 @@ public enum PaletteCandidateSearch {
             let rows = try await index.query(text, directoriesOnly: directoriesOnly, limit: limit).map(\.paletteRow)
             // 打鍵が続いて不要になった検索では、パスの存在確認（stat）まで進めない
             try Task.checkCancellation()
-            return directPath.merging(rows, query: text, directoriesOnly: directoriesOnly, limit: limit)
+            var exactRow: PaletteRow?
+            if let path = directPath.path(for: text) {
+                exactRow = try await index.row(atPath: path)
+            }
+            try Task.checkCancellation()
+            return directPath.merging(rows, query: text, directoriesOnly: directoriesOnly, limit: limit, exactRow: exactRow)
         }
     }
 }

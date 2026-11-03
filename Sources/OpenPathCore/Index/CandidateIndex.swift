@@ -215,6 +215,21 @@ public final class CandidateIndex: Sendable {
         }
     }
 
+    /// 直接入力の解決済みパスを索引から正確に引き、検索語や結果の件数に依存せず別名と履歴を返す。
+    /// 存在・現在の種別の検証は DirectPathEntry に任せるため、ここではファイルシステムを読まない。
+    func row(atPath path: String) async throws -> PaletteRow? {
+        let entries = await history()
+        try Task.checkCancellation()
+        let catalog = state.withLock { $0.catalog }
+        guard let index = catalog.index(ofPath: path) else { return nil }
+        let entry = catalog.entries[index]
+        let usage = HistoryLookup(entries: entries, now: now(), catalog: catalog).usage(at: index)
+        return PaletteRow(
+            name: entry.displayName ?? CandidatePath.name(of: path), path: path,
+            lastUsed: usage?.lastUsed, isDirectory: entry.isDirectory
+        )
+    }
+
     /// `text` にマッチする候補を、総合スコア `fuzzyScore × (1 + log1p(frecency))` の降順で最大 `limit` 件返す。
     ///
     /// - 空のクエリ（正規化後に文字が残らないものを含む）はマッチを行わず、frecency の降順で最大 8 件

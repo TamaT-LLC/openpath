@@ -63,6 +63,18 @@ struct PaletteRowPresentationTests {
         let presentation = PaletteRowPresentation(row: row, homeDirectory: Self.home)
 
         #expect(presentation.name.highlightedOffsets.isEmpty)
+        #expect(presentation.locationVariants.first == HighlightedText("~/repos/fern", highlightedOffsets: [8]))
+        #expect(presentation.locationVariants.allSatisfy { $0.text.hasSuffix("/fern") && $0.highlightedOffsets.contains($0.text.count - 4) })
+    }
+
+    @Test("別名のハイライトは名前欄に保ち、場所欄には実パス全体を出す")
+    func preservesAliasHighlightsAndActualLastComponent() {
+        let row = PaletteRow(
+            name: "仕事", path: "/Users/example/repos/fern", lastUsed: nil, nameHighlights: [0, 1]
+        )
+        let presentation = PaletteRowPresentation(row: row, homeDirectory: Self.home)
+        #expect(presentation.name == HighlightedText("仕事", highlightedOffsets: [0, 1]))
+        #expect(presentation.locationVariants.first == HighlightedText("~/repos/fern"))
     }
 
     @Test("日本語のパスも表示名と場所に分けてハイライトできる")
