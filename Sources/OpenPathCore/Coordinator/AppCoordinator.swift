@@ -119,6 +119,8 @@ public final class AppCoordinator {
         }
     }
 
+    /// パネルを見失ったときに表示と注入を整理する。自動確定の結果を待つ場合は注入を残し、
+    /// 復元失敗後の消滅では、注入開始時に保持した呼び出し元へ確定履歴を記録する。
     private func panelGone() {
         switch state {
         case .idle:
@@ -275,6 +277,8 @@ public final class AppCoordinator {
 
     // MARK: - 注入
 
+    /// 新しい注入と全体タイムアウトを作り、パネルの入力をロックする。
+    /// 履歴の帰属はこの時点の呼び出し元に固定し、その後のパネル情報更新から切り離す。
     private func startInjection(context: PanelContext, path: String, autoConfirm: Bool) {
         // 失敗を表示しているパレットからの確定は、再試行
         let isRetry = displayedFailure != nil
@@ -334,6 +338,8 @@ public final class AppCoordinator {
         activeInjection?.hasStarted = true
     }
 
+    /// 現在の注入の結果だけを受け取り、成功なら開始時の呼び出し元へ履歴を記録する。
+    /// 自動確定後の消滅は専用処理へ渡し、失敗・タイムアウトでは再試行用の表示を残す。
     private func finishInjection(id: Int, outcome: InjectionOutcome) {
         // 取り消し済み・置き換え済みの注入から遅れて届いた結果は捨てる
         guard let injection = activeInjection, injection.id == id,

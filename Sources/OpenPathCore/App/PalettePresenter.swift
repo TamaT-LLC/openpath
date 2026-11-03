@@ -130,6 +130,8 @@ public final class PalettePresenter: PaletteDisplaying {
         revealWindow(.immediately)
     }
 
+    /// 同じパネルの位置・選択モード・呼び出し元を更新する。位置だけなら再配置し、
+    /// 選択条件か呼び出し元が変わった場合は選択を保ったまま候補と履歴順位を引き直す。
     public func update(context: PanelContext) {
         guard let presentedPanel, presentedPanel.id == context.id else { return }
         self.presentedPanel = context
