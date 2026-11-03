@@ -17,6 +17,7 @@ struct CandidateIndexRebuilderConfigTests {
         case ghq
         case zoxide
 
+        /// どの設定を変えるケースかを、失敗時にも設定ファイルのキー名で識別できるようにする。
         var testDescription: String {
             switch self {
             case .roots: "roots"
@@ -28,6 +29,7 @@ struct CandidateIndexRebuilderConfigTests {
             }
         }
 
+        /// 指定した一つのソース設定だけを変え、それ以外の値を保持して再構築の契機を検証する。
         func applied(to base: Config) -> Config {
             Config(
                 roots: self == .roots ? base.roots + [F.secondRoot] : base.roots,

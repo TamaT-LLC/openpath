@@ -4,7 +4,7 @@ import os
 
 /// 設定から ScriptedCandidateSource を組み立てる CandidateSourceProviding。
 /// 同じ kind には常に同じソースを返すため、設定が変わっても kind ごとの呼び出しを追える。
-/// 並びは本番（StandardCandidateSources）と同じく history → roots → ghq。
+/// 並びは本番（StandardCandidateSources）と同じく history → roots → ghq → zoxide。
 final class ScriptedSourceProvider: CandidateSourceProviding {
     private let sources = OSAllocatedUnfairLock<[CandidateSourceKind: ScriptedCandidateSource]>(initialState: [:])
 
@@ -20,6 +20,7 @@ final class ScriptedSourceProvider: CandidateSourceProviding {
         }
     }
 
+    /// 設定で有効なソースだけを返し、無効化したソースの候補が再構築で除去されることを検証する。
     func sources(for config: Config) -> [any CandidateSource] {
         let roots: [any CandidateSource] = config.roots.map { source(.root($0)) }
         let ghq: [any CandidateSource] = config.ghq.enabled ? [source(.ghq)] : []

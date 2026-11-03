@@ -93,6 +93,7 @@ struct ZoxideCandidateSourceTests {
         #expect(!FileManager.default.fileExists(atPath: tree.path("db.txt")))
     }
 
+    /// 各 CLI 失敗を発生させ、分類された失敗理由と、一時コピーの削除・元 DB の保持を同時に確かめる。
     @Test("失敗・タイムアウト・起動失敗では元を変更せず一時コピーを削除する", arguments: ["exit", "timeout", "launch"])
     func failuresCleanUp(mode: String) async throws {
         try makeDatabase()
