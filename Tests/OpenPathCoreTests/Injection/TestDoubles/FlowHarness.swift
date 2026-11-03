@@ -39,7 +39,8 @@ final class FlowHarness {
         clipboard: PasteboardSnapshot = .userClipboard,
         fallsBackWhenSheetMissing: Bool = false,
         routeMemory: GoToSheetRouteMemory? = nil,
-        saveFilename: SaveFilenamePreservation? = nil
+        saveFilename: SaveFilenamePreservation? = nil,
+        afterSubmit: @escaping @MainActor () -> Void = {}
     ) {
         let log = InjectionEventLog(clock: clock)
         let pasteboard = FakePasteboard(contents: clipboard)
@@ -72,6 +73,7 @@ final class FlowHarness {
         let didSubmit: PathInjectionHooks.DidSubmitGoToSheet = { isAutoConfirm, elapsedSinceSubmit in
             log.record(.didSubmitGoToSheet(autoConfirm: isAutoConfirm))
             try await autoConfirm.confirm(autoConfirm: isAutoConfirm, elapsedSinceSubmit: elapsedSinceSubmit)
+            afterSubmit()
         }
         let prepareForKeyEvents: PathInjectionHooks.PrepareForKeyEvents = { log.record(.prepareForKeyEvents) }
         let normalizer = InjectionPathNormalizer(homeDirectory: Self.homeDirectory)

@@ -63,7 +63,7 @@ public final class PathInjectionFlow {
     }
 
     /// 保存先の実在と種別を確かめ、保存時は名前を退避して移動前後の復元まで行う。
-    /// 移動失敗時もキャンセルされていなければ復元を試み、成功した移動だけを呼び出し元へ返す。
+    /// 移動失敗・キャンセル時にも同じ注入先への復元を試み、元の失敗理由を保持する。
     private func inject(path: String, autoConfirm: Bool, panelKind: PanelKind) async throws {
         try Task.checkCancellation()
 
@@ -88,14 +88,25 @@ public final class PathInjectionFlow {
         do {
             try await navigate(path: normalizedPath, autoConfirm: autoConfirm, timeline: timeline)
         } catch {
-            if let snapshot, !Task.isCancelled {
-                try await saveFilename?.restore(snapshot, targetGuard: targetGuard, on: timeline)
+            if let snapshot {
+                // 後処理の失敗でペーストボード復元失敗など、元のエラーを上書きしない。
+                try? await restoreFilename(snapshot, on: timeline)
             }
             throw error
         }
         if let snapshot {
-            try await saveFilename?.restore(snapshot, targetGuard: targetGuard, on: timeline)
+            try await restoreFilename(snapshot, on: timeline)
+            try Task.checkCancellation()
         }
+    }
+
+    /// キャンセルを引き継がない後処理で名前を戻す。完了まで直列化ゲートを保持し、注入先は毎回確認する。
+    private func restoreFilename(_ snapshot: (any PanelElementOperating, String), on timeline: ElapsedTimeline) async throws {
+        guard let saveFilename else { return }
+        let cleanup = Task { @MainActor in
+            try await saveFilename.restore(snapshot, targetGuard: targetGuard, on: timeline)
+        }
+        try await cleanup.value
     }
 
     /// 主方式で移動し、シート出現・貼り付け・閉鎖のタイムアウトだけ副方式へ切り替える。
