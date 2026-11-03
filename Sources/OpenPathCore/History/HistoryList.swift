@@ -27,12 +27,13 @@ public struct HistoryList: Sendable, Equatable {
     /// 確定を記録する。既存なら count を 1 増やして lastUsed を更新し、新規なら count 1 で追加する。
     /// 上限を超えた場合は frecency 下位から削除するが、今回記録したパスは対象外にする
     /// （新規パスは count 1 のため、既存がすべて高スコアだと記録直後に消えてしまうのを防ぐ）。
-    public mutating func record(path: String, now: Date) {
+    public mutating func record(path: String, now: Date, applicationBundleID: String? = nil) {
         if let index = entries.firstIndex(where: { $0.path == path }) {
-            entries[index].count += 1
-            entries[index].lastUsed = now
+            entries[index].record(applicationBundleID: applicationBundleID, now: now)
         } else {
-            entries.append(HistoryEntry(path: path, count: 1, lastUsed: now))
+            var entry = HistoryEntry(path: path, count: 0, lastUsed: now)
+            entry.record(applicationBundleID: applicationBundleID, now: now)
+            entries.append(entry)
         }
         evictOverflow(protecting: path, now: now)
     }
@@ -73,6 +74,7 @@ public struct HistoryList: Sendable, Equatable {
         entries.removeAll { evictedPaths.contains($0.path) }
     }
 
+    /// 重複パスの全体・アプリ実績を合算し、各アプリの新しい日時と保持上限を維持する。
     private static func mergingDuplicates(_ entries: [HistoryEntry]) -> [HistoryEntry] {
         var merged: [HistoryEntry] = []
         var indexByPath: [String: Int] = [:]
@@ -84,6 +86,16 @@ public struct HistoryList: Sendable, Equatable {
             }
             merged[index].count += entry.count
             merged[index].lastUsed = max(merged[index].lastUsed, entry.lastUsed)
+            for (app, usage) in entry.applications {
+                if let previous = merged[index].applications[app] {
+                    merged[index].applications[app] = ApplicationHistoryUsage(
+                        count: previous.count + usage.count, lastUsed: max(previous.lastUsed, usage.lastUsed)
+                    )
+                } else {
+                    merged[index].applications[app] = usage
+                }
+            }
+            merged[index].boundApplications()
         }
         return merged
     }

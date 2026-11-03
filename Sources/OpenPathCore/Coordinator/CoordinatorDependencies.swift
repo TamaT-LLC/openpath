@@ -30,4 +30,12 @@ public protocol PathInjecting {
 @MainActor
 public protocol HistoryRecording {
     func record(path: String)
+    func record(path: String, applicationBundleID: String?)
+}
+
+public extension HistoryRecording {
+    /// アプリ別履歴に対応しない記録先は従来どおり全体の履歴へ記録する。
+    func record(path: String, applicationBundleID: String?) {
+        record(path: path)
+    }
 }

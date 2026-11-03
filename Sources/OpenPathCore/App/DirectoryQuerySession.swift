@@ -14,6 +14,7 @@ public final class DirectoryQuerySession {
         let text: String
         let directoriesOnly: Bool
         let keepingSelection: Bool
+        let applicationBundleID: String?
     }
 
     private let load: Load
@@ -47,7 +48,7 @@ public final class DirectoryQuerySession {
     /// 列挙中の要求は最後の一件だけを保持し、取得済みなら新しい検索で前の検索を取り消す。
     public func request(
         directory: String, text: String, ignoredNames: Set<String>, directoriesOnly: Bool,
-        keepingSelection: Bool = false, reload: Bool = false
+        keepingSelection: Bool = false, reload: Bool = false, applicationBundleID: String? = nil
     ) {
         let newKey = Key(directory: directory, ignoredNames: ignoredNames)
         if key != newKey || reload {
@@ -57,7 +58,10 @@ public final class DirectoryQuerySession {
         }
         queryTask?.cancel()
         generation += 1
-        pendingRequest = Request(text: text, directoriesOnly: directoriesOnly, keepingSelection: keepingSelection)
+        pendingRequest = Request(
+            text: text, directoriesOnly: directoriesOnly, keepingSelection: keepingSelection,
+            applicationBundleID: applicationBundleID
+        )
         searchSnapshot()
     }
 
@@ -91,7 +95,7 @@ public final class DirectoryQuerySession {
                 try Task.checkCancellation()
                 result = try await snapshot.search(
                     request.text, directoriesOnly: request.directoriesOnly,
-                    limit: PaletteQuerySession.resultLimit, history: history()
+                    limit: PaletteQuerySession.resultLimit, history: history(), applicationBundleID: request.applicationBundleID
                 )
             } catch is CancellationError {
                 return

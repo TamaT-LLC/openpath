@@ -16,7 +16,7 @@ enum PanelScanner {
     }
 
     /// - Parameters:
-    ///   - bundleIdentifier: 観測中のアプリの bundle id。debug ログ（走査の要約）に出すだけに使う。
+    ///   - bundleIdentifier: 観測中の呼び出し元アプリの bundle id。履歴と走査の診断に使う。
     ///   - diagnostics: 走査の要約の debug ログ。ウィンドウの判定より先に出す。
     static func scan(
         processID: pid_t,
@@ -45,6 +45,7 @@ enum PanelScanner {
         let converter = ScreenCoordinateConverter.forCurrentDisplays()
         let contexts = panels.map { panel in
             panel.context.withFrame(converter.screenRect(fromAXRect: panel.context.frame))
+                .withCallingApplication(bundleIdentifier)
         }
         let estimates = panels.reduce(into: [PanelContext.ID: PanelSelectionEstimate]()) { estimates, panel in
             estimates[panel.context.id] = panel.selectionEstimate

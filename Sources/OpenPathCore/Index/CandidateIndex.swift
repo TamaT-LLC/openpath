@@ -220,13 +220,17 @@ public final class CandidateIndex: Sendable {
     /// - 空のクエリ（正規化後に文字が残らないものを含む）はマッチを行わず、frecency の降順で最大 8 件
     ///   （`emptyQueryLimit` と `limit` の小さい方）返す。履歴が足りなければ履歴のない候補をパスの昇順で補う。
     /// - 返す直前に存在を確かめ、存在しない候補は除外して次の候補を繰り上げる（FR-HISTORY-03）。
-    /// - Parameter directoriesOnly: true ならファイル（パッケージを含む）を返さない（FR-SOURCE-05）。
+    /// - Parameters:
+    ///   - directoriesOnly: true ならファイル（パッケージを含む）を返さない（FR-SOURCE-05）。
+    ///   - applicationBundleID: 呼び出し元の履歴を加味する。不明・未知なら全体履歴だけを使う。
     /// - Throws: キャンセルされた場合は `CancellationError`。入力が続いて不要になったクエリを途中でやめるため。
-    public func query(_ text: String, directoriesOnly: Bool, limit: Int) async throws -> [RankedCandidate] {
+    public func query(
+        _ text: String, directoriesOnly: Bool, limit: Int, applicationBundleID: String? = nil
+    ) async throws -> [RankedCandidate] {
         let entries = await history()
         try Task.checkCancellation()
         let catalog = state.withLock { $0.catalog }
-        let lookup = HistoryLookup(entries: entries, now: now(), catalog: catalog)
+        let lookup = HistoryLookup(entries: entries, now: now(), catalog: catalog, applicationBundleID: applicationBundleID)
         return try ranker.rank(text, in: catalog, history: lookup, directoriesOnly: directoriesOnly, limit: limit)
     }
 }

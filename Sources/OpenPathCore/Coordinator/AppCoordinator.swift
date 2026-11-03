@@ -137,7 +137,7 @@ public final class AppCoordinator {
                 }
                 state = .idle
                 palette.hide()
-                history.record(path: restoreFailure.path)
+                history.record(path: restoreFailure.path, applicationBundleID: restoreFailure.applicationBundleID)
                 onErrorOutsidePalette?(.pasteboardRestoreFailed)
                 return
             }
@@ -286,6 +286,7 @@ public final class AppCoordinator {
         activeInjection = ActiveInjection(
             id: injectionID,
             isAutoConfirm: autoConfirm,
+            applicationBundleID: context.callingApplicationBundleID,
             work: makeInjectionTask(id: injectionID, path: path, autoConfirm: autoConfirm),
             timeout: Self.makeTimeoutTask(on: clock) { [weak self] in
                 self?.finishInjection(id: injectionID, outcome: .timedOut)
@@ -340,7 +341,7 @@ public final class AppCoordinator {
         cancelActiveInjection()
 
         if injection.isPanelGone {
-            finishInjectionAfterPanelGone(context: context, path: path, outcome: outcome)
+            finishInjectionAfterPanelGone(context: context, path: path, applicationBundleID: injection.applicationBundleID, outcome: outcome)
             return
         }
         switch outcome {
@@ -350,7 +351,7 @@ public final class AppCoordinator {
             state = .idle
             palette.setLocked(false)
             palette.hide()
-            history.record(path: path)
+            history.record(path: path, applicationBundleID: injection.applicationBundleID)
         case .failed(InjectionError.panelGone):
             state = .idle
             palette.setLocked(false)
@@ -359,7 +360,7 @@ public final class AppCoordinator {
             // 失敗はパレットを残し、そのまま再試行できるようにする（UX-001 §5）
             state = .panelShown(context, isPaletteVisible: true)
             if injection.isAutoConfirm, error as? InjectionError == .pasteboardRestoreFailed {
-                pendingRestoreFailure = PendingRestoreFailure(panelID: context.id, path: path)
+                pendingRestoreFailure = PendingRestoreFailure(panelID: context.id, path: path, applicationBundleID: injection.applicationBundleID)
             }
             palette.setLocked(false)
             showFailure(PanelFailure(panelID: context.id, error: error))
@@ -375,18 +376,20 @@ public final class AppCoordinator {
     }
 
     /// 自動確定中にパネルが消えた注入を終える。パレットは閉じ済みのため、結果にかかわらずエラーはその場では出さない。
-    private func finishInjectionAfterPanelGone(context: PanelContext, path: String, outcome: InjectionOutcome) {
+    private func finishInjectionAfterPanelGone(
+        context: PanelContext, path: String, applicationBundleID: String?, outcome: InjectionOutcome
+    ) {
         switch outcome {
         case .succeeded, .failed(InjectionError.panelGone):
             // 「開く」の押下でパネルが閉じたとみなす。押下まで進んだかは Coordinator からは分からないため、
             // injector がパネルの消滅（panelGone）で終えた場合も、パネルの消滅を根拠に成功として扱う
             finishAsIdle()
-            history.record(path: path)
+            history.record(path: path, applicationBundleID: applicationBundleID)
         case .failed(InjectionError.pasteboardRestoreFailed):
             // 元の結果より優先して伝えられるペーストボードの復元失敗も、パネルの消滅を根拠に成功として扱う。
             // クリップボードが失われたことはパレットで伝えられないため、外へ知らせる
             finishAsIdle()
-            history.record(path: path)
+            history.record(path: path, applicationBundleID: applicationBundleID)
             onErrorOutsidePalette?(.pasteboardRestoreFailed)
         case .failed(InjectionError.panelGoneBeforeConfirm):
             // 「開く」を押す前にパネルが閉じられた。パネルは戻ってこないため、何も伝えない
@@ -417,6 +420,7 @@ public final class AppCoordinator {
 private struct PendingRestoreFailure {
     let panelID: PanelContext.ID
     let path: String
+    let applicationBundleID: String?
 }
 
 /// パレットに出す（出した）注入の失敗と、その注入先のパネル。
@@ -454,6 +458,8 @@ private struct ActiveInjection {
     let id: Int
     /// 最後に「開く」を押す注入か（auto_confirm または Cmd+Enter）。
     let isAutoConfirm: Bool
+    /// 注入開始時点の呼び出し元。後続のパネル情報更新で帰属を変えない。
+    let applicationBundleID: String?
     let work: Task<Void, Never>
     let timeout: Task<Void, Never>
     /// injector の呼び出しを始めたか。始める前のパネル消滅は「開く」の押下によるものではない。
