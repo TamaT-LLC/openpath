@@ -14,6 +14,8 @@ public struct PanelContext: Identifiable, Equatable, Sendable {
     }
 
     public let id: ID
+    /// パネルを呼び出したアプリ。AX 要素の所属する XPC サービスではなく、観測していたアプリの ID。
+    public let callingApplicationBundleID: String?
     /// フォルダのみ選択できるパネルと推定されたか（DSN-001 §2.3）。
     /// false（推定できない場合を含む）のときは設定 include_files に従う。
     public let isDirectoriesOnly: Bool
@@ -25,8 +27,12 @@ public struct PanelContext: Identifiable, Equatable, Sendable {
     /// true の間は、PanelWatcher がパレットの表示中も走査を続け、推定し直した結果を `panelContextChanged` で知らせる。
     public let isSelectionModeProvisional: Bool
 
-    public init(id: ID, isDirectoriesOnly: Bool, frame: CGRect, isSelectionModeProvisional: Bool = false) {
+    public init(
+        id: ID, isDirectoriesOnly: Bool, frame: CGRect, isSelectionModeProvisional: Bool = false,
+        callingApplicationBundleID: String? = nil
+    ) {
         self.id = id
+        self.callingApplicationBundleID = Self.historyApplicationID(callingApplicationBundleID)
         self.isDirectoriesOnly = isDirectoriesOnly
         self.frame = frame
         self.isSelectionModeProvisional = isSelectionModeProvisional
@@ -38,7 +44,24 @@ public struct PanelContext: Identifiable, Equatable, Sendable {
             id: id,
             isDirectoriesOnly: isDirectoriesOnly,
             frame: frame,
-            isSelectionModeProvisional: isSelectionModeProvisional
+            isSelectionModeProvisional: isSelectionModeProvisional,
+            callingApplicationBundleID: callingApplicationBundleID
         )
+    }
+
+    /// 走査対象のアプリを呼び出し元として付ける。検知した AX 要素の PID に依存しない。
+    public func withCallingApplication(_ bundleID: String?) -> PanelContext {
+        PanelContext(
+            id: id, isDirectoriesOnly: isDirectoriesOnly, frame: frame,
+            isSelectionModeProvisional: isSelectionModeProvisional, callingApplicationBundleID: bundleID
+        )
+    }
+
+    /// 不明な ID と AppKit のパネルサービスは、アプリ別ではなく全体履歴だけに記録する。
+    public static func historyApplicationID(_ bundleID: String?) -> String? {
+        guard let bundleID, !bundleID.isEmpty, bundleID.utf8.count <= 255,
+              !bundleID.contains(where: \.isWhitespace),
+              !bundleID.hasPrefix("com.apple.appkit.xpc.openAndSavePanelService") else { return nil }
+        return bundleID
     }
 }

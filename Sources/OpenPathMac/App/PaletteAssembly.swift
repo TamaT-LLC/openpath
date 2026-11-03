@@ -32,6 +32,7 @@ final class PaletteAssembly {
             window: window,
             includeFiles: { config().includeFiles },
             search: PaletteCandidateSearch.make(index: index),
+            contextualSearch: PaletteCandidateSearch.makeContextual(index: index),
             ignoredNames: { Set(config().ignore) },
             history: history
         )

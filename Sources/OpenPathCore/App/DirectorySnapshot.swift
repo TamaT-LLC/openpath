@@ -51,7 +51,7 @@ public struct DirectorySnapshot: Sendable {
     /// 直下の名前だけをファジー検索。通常検索と同じく履歴を加味し、最大 limit 件返す。
     public func search(
         _ text: String, directoriesOnly: Bool, limit: Int,
-        history: [HistoryEntry] = [], now: Date = Date()
+        history: [HistoryEntry] = [], now: Date = Date(), applicationBundleID: String? = nil
     ) async throws -> DirectorySearchResult {
         let query = matcher.prepareQuery(text)
         let usage = Dictionary(history.map { ($0.path, $0) }, uniquingKeysWith: { _, latest in latest })
@@ -60,7 +60,7 @@ public struct DirectorySnapshot: Sendable {
             try Task.checkCancellation()
             guard !directoriesOnly || entry.item.isDirectory,
                   let match = matcher.score(query: query, in: entry.target) else { continue }
-            let frecency = usage[entry.item.path]?.frecency(now: now) ?? 0
+            let frecency = usage[entry.item.path]?.frecency(now: now, applicationBundleID: applicationBundleID) ?? 0
             let score = query.codes.isEmpty ? frecency : Double(match.score) * (1 + log1p(frecency))
             matches.append((entry, match, score))
         }
