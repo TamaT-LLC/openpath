@@ -5,9 +5,12 @@ public struct SourceItem: Sendable, Hashable {
     /// パネルでディレクトリとして移動できるか。シンボリックリンクはリンク先の種別で決める。
     /// パッケージ（`.app` 等）は NSOpenPanel が既定でファイルとして扱うため false
     public let isDirectory: Bool
+    /// 別名がある候補の表示名。nil の場合はパスの末尾要素を使う。
+    public let displayName: String?
 
-    public init(path: String, isDirectory: Bool) {
+    public init(path: String, isDirectory: Bool, displayName: String? = nil) {
         self.path = path
         self.isDirectory = isDirectory
+        self.displayName = displayName
     }
 }

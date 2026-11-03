@@ -184,6 +184,23 @@ effect.
 | `disabled_apps` | `[]` | Bundle IDs of apps where the palette never appears (for example `["com.apple.finder"]`) |
 | `ignore` | `["node_modules", ".git", "target", "DerivedData", ".build"]` | Directory names skipped while scanning |
 | `enabled` in `[ghq]` | `true` | Include repositories listed by `ghq list -p` |
+| `[favorites]` | Empty table | Map aliases to paths and prioritize matching favorites |
+
+Add favorites at the end of the configuration file:
+
+```toml
+[favorites]
+"Work" = "~/repos/my-project"
+"Invoices" = "~/Documents/invoices"
+```
+
+Both the alias and the actual path are searchable. Favorites appear first in
+an empty search; while typing, only matching favorites receive priority.
+Duplicate paths from history, roots, and ghq are merged into one row. Missing
+paths stay hidden, and folder-only dialogs exclude files and packages.
+Within favorites, the usual frecency, last-used time, and path order apply.
+Use one alias per path. Invalid settings (including blank aliases, relative
+paths, or duplicate paths) keep the previous configuration active.
 
 The initial `roots` depends on your environment at first launch: the ghq root
 when `ghq root` resolves to an absolute path, otherwise your home directory

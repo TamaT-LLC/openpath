@@ -1,5 +1,7 @@
 /// 候補の出どころ（DSN-002 §2 の `Candidate.source`）。CandidateIndex はこれを単位に候補を差し替える。
 public enum CandidateSourceKind: Sendable, Hashable {
+    /// 設定 [favorites] の明示的なパス
+    case favorites
     /// 確定履歴（HistoryStore）
     case history
     /// 設定 `roots` の 1 ルート。値はそのルートの絶対パス（設定の表記のまま）
@@ -11,7 +13,7 @@ public enum CandidateSourceKind: Sendable, Hashable {
 /// 候補ソース（history / roots / ghq 共通。DSN-002 §3）。
 ///
 /// 再構築のたびに `snapshot()` で現時点の中身をまとめて取り直す。
-/// 表示名・frecency・スコアは持たず、統合と順位付けは CandidateIndex が行う。
+/// 明示的な別名は SourceItem に添え、frecency の付与・統合・順位付けは CandidateIndex が行う。
 public protocol CandidateSource: Sendable {
     var kind: CandidateSourceKind { get }
 
