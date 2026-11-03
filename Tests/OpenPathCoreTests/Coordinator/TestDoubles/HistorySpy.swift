@@ -4,9 +4,15 @@ import OpenPathCore
 @MainActor
 final class HistorySpy: HistoryRecording {
     private(set) var recordedPaths: [String] = []
+    private(set) var recordedApplications: [String?] = []
 
     func record(path: String) {
+        record(path: path, applicationBundleID: nil)
+    }
+
+    func record(path: String, applicationBundleID: String?) {
         recordedPaths.append(path)
+        recordedApplications.append(applicationBundleID)
     }
 }
 

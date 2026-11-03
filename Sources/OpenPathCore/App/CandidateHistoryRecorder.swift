@@ -16,7 +16,12 @@ public final class CandidateHistoryRecorder: HistoryRecording {
     }
 
     public func record(path: String) {
-        store.record(path: path)
+        record(path: path, applicationBundleID: nil)
+    }
+
+    /// 呼び出し元をそのまま記録先へ渡し、更新後の履歴で候補を引き直す。
+    public func record(path: String, applicationBundleID: String?) {
+        store.record(path: path, applicationBundleID: applicationBundleID)
         didRecord()
     }
 }

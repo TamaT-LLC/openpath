@@ -9,6 +9,8 @@ public final class PaletteQuerySession {
     /// 候補を引く。`CandidateIndex.query` の結果をパレットの行へ変換したものを返す。
     /// 呼び出し元（MainActor）ではなく並行実行用のスレッドで動かすため、隔離しない。
     public typealias Search = @Sendable (_ text: String, _ directoriesOnly: Bool, _ limit: Int) async throws -> [PaletteRow]
+    /// パネルの呼び出し元を含めた検索。検索開始時の ID を固定して非同期処理へ渡す。
+    public typealias ContextualSearch = @Sendable (_ text: String, _ directoriesOnly: Bool, _ limit: Int, _ applicationBundleID: String?) async throws -> [PaletteRow]
     /// 引いた候補をパレットへ反映する。
     public typealias Apply = @MainActor (_ rows: [PaletteRow], _ keepingSelection: Bool) -> Void
 
@@ -17,6 +19,7 @@ public final class PaletteQuerySession {
     public static let resultLimit = 50
 
     private let search: Search
+    private let contextualSearch: ContextualSearch?
     private let apply: Apply
     private let limit: Int
     /// 要求のたびに増やし、結果が最新の要求のものかを照合する
@@ -26,10 +29,15 @@ public final class PaletteQuerySession {
     /// - Parameters:
     ///   - limit: 1 回に引く候補の上限。
     ///   - search: 候補の引き方。
+    ///   - contextualSearch: 呼び出し元アプリを受け取る検索。指定時はこちらを使う。
     ///   - apply: 最新の要求の結果の反映先。
-    public init(limit: Int = resultLimit, search: @escaping Search, apply: @escaping Apply) {
+    public init(
+        limit: Int = resultLimit, search: @escaping Search, contextualSearch: ContextualSearch? = nil,
+        apply: @escaping Apply
+    ) {
         self.limit = limit
         self.search = search
+        self.contextualSearch = contextualSearch
         self.apply = apply
     }
 
@@ -37,12 +45,19 @@ public final class PaletteQuerySession {
     /// - Parameters:
     ///   - directoriesOnly: ディレクトリだけを候補にするか。
     ///   - keepingSelection: 選択中の候補が結果に残っていれば選択を保つか（検索語を変えずに引き直す場合）。
-    public func request(_ text: String, directoriesOnly: Bool, keepingSelection: Bool = false) {
+    ///   - applicationBundleID: 対象パネルが保持する呼び出し元。要求ごとに固定し、処理中に読み直さない。
+    public func request(
+        _ text: String, directoriesOnly: Bool, keepingSelection: Bool = false, applicationBundleID: String? = nil
+    ) {
         let requestGeneration = advanceGeneration()
-        task = Task { [weak self, search, limit] in
+        task = Task { [weak self, search, contextualSearch, limit] in
             let rows: [PaletteRow]
             do {
-                rows = try await search(text, directoriesOnly, limit)
+                if let contextualSearch {
+                    rows = try await contextualSearch(text, directoriesOnly, limit, applicationBundleID)
+                } else {
+                    rows = try await search(text, directoriesOnly, limit)
+                }
             } catch is CancellationError {
                 return
             } catch {

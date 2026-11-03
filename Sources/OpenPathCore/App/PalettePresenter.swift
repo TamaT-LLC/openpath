@@ -29,13 +29,14 @@ public final class PalettePresenter: PaletteDisplaying {
     private let window: any PaletteWindowControlling
     private let includeFiles: @MainActor () -> Bool
     private let search: PaletteQuerySession.Search
+    private let contextualSearch: PaletteQuerySession.ContextualSearch?
     private let ignoredNames: @MainActor () -> Set<String>
     private let loadDirectory: DirectoryQuerySession.Load
     private let history: @MainActor () -> [HistoryEntry]
     private let clock: any Clock<Duration>
     private let didShow: @MainActor (PanelContext) -> Void
     private let diagnose: @MainActor (PalettePresenterDiagnostic) -> Void
-    private lazy var querySession = PaletteQuerySession(search: search) { [weak self] rows, keepingSelection in
+    private lazy var querySession = PaletteQuerySession(search: search, contextualSearch: contextualSearch) { [weak self] rows, keepingSelection in
         self?.apply(rows, keepingSelection: keepingSelection)
     }
     private lazy var directorySession = DirectoryQuerySession(load: loadDirectory, history: history) { [weak self] result, keepingSelection in
@@ -62,6 +63,7 @@ public final class PalettePresenter: PaletteDisplaying {
     ///   - window: パレットのウィンドウ。
     ///   - includeFiles: 設定 include_files。設定ファイルの変更を反映するため、候補を引くたびに読む。
     ///   - search: 候補の引き方。
+    ///   - contextualSearch: 呼び出し元アプリ別の履歴を扱う候補検索。指定時はこちらを使う。
     ///   - ignoredNames: Tab の列挙から除外する名前。設定の変更を候補の要求時に読む。
     ///   - loadDirectory: Tab で開いたフォルダの直下を取得する。テストでは完了順を制御できる。
     ///   - history: 動的候補の順位と最終使用日時に使う履歴。
@@ -73,6 +75,7 @@ public final class PalettePresenter: PaletteDisplaying {
         window: any PaletteWindowControlling,
         includeFiles: @escaping @MainActor () -> Bool,
         search: @escaping PaletteQuerySession.Search,
+        contextualSearch: PaletteQuerySession.ContextualSearch? = nil,
         ignoredNames: @escaping @MainActor () -> Set<String> = { Set(Config.defaultIgnore) },
         loadDirectory: @escaping DirectoryQuerySession.Load = DirectorySnapshot.load,
         history: @escaping @MainActor () -> [HistoryEntry] = { [] },
@@ -84,6 +87,7 @@ public final class PalettePresenter: PaletteDisplaying {
         self.window = window
         self.includeFiles = includeFiles
         self.search = search
+        self.contextualSearch = contextualSearch
         self.ignoredNames = ignoredNames
         self.loadDirectory = loadDirectory
         self.history = history
@@ -126,6 +130,8 @@ public final class PalettePresenter: PaletteDisplaying {
         revealWindow(.immediately)
     }
 
+    /// 同じパネルの位置・選択モード・呼び出し元を更新する。位置だけなら再配置し、
+    /// 選択条件か呼び出し元が変わった場合は選択を保ったまま候補と履歴順位を引き直す。
     public func update(context: PanelContext) {
         guard let presentedPanel, presentedPanel.id == context.id else { return }
         self.presentedPanel = context
@@ -134,7 +140,8 @@ public final class PalettePresenter: PaletteDisplaying {
             window.reposition(near: context.frame)
         }
         // 選択モードの推定し直しでフォルダのみかどうかが変わったときだけ、絞り込みを合わせて引き直す
-        guard presentedPanel.isDirectoriesOnly != context.isDirectoriesOnly else { return }
+        guard presentedPanel.isDirectoriesOnly != context.isDirectoriesOnly
+            || presentedPanel.callingApplicationBundleID != context.callingApplicationBundleID else { return }
         requestRows(.panelContextChanged, keepingSelection: true)
     }
 
@@ -246,7 +253,7 @@ public final class PalettePresenter: PaletteDisplaying {
                 directory: directory, text: String(viewModel.query.dropFirst(prefix.count)),
                 ignoredNames: ignored, directoriesOnly: directoriesOnly,
                 keepingSelection: keepingSelection,
-                reload: reload
+                reload: reload, applicationBundleID: presentedPanel.callingApplicationBundleID
             )
             return
         }
@@ -260,7 +267,8 @@ public final class PalettePresenter: PaletteDisplaying {
         querySession.request(
             viewModel.query,
             directoriesOnly: directoriesOnly,
-            keepingSelection: keepingSelection
+            keepingSelection: keepingSelection,
+            applicationBundleID: presentedPanel.callingApplicationBundleID
         )
     }
 
