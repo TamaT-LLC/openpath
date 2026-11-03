@@ -7,6 +7,7 @@ struct CandidateCatalog: Sendable {
         let path: String
         /// 同じパスを持つソースのうち、最も優先度の高いもの
         let source: CandidateSourceKind
+        let displayName: String?
         /// すべてのソースがディレクトリとした場合だけ true
         fileprivate(set) var isDirectory: Bool
         let targets: CandidateTargets
@@ -31,7 +32,7 @@ struct CandidateCatalog: Sendable {
 
     /// ソースごとの候補を、同じパスは 1 件にまとめて統合する（DSN-002 §3）。
     ///
-    /// source は優先度 history > ghq > roots（`CandidateSourceKind.mergesBefore`）で最も高いものにする。
+    /// source と表示名は優先度 favorites > history > ghq > roots（`CandidateSourceKind.mergesBefore`）で最も高いものにする。
     /// isDirectory が食い違う場合はファイルとして扱う。種別が走査の間に変わった可能性があり、
     /// フォルダ選択のパネル（FR-SOURCE-05）にファイルを出すより、ディレクトリを 1 件出し損ねる方が害が小さいため。
     init(merging sources: [CandidateSourceKind: [PreparedCandidate]]) {
@@ -49,7 +50,7 @@ struct CandidateCatalog: Sendable {
                     continue
                 }
                 indexByPath[candidate.path] = entries.count
-                entries.append(Entry(path: candidate.path, source: kind, isDirectory: candidate.isDirectory, targets: candidate.targets))
+                entries.append(Entry(path: candidate.path, source: kind, displayName: candidate.displayName, isDirectory: candidate.isDirectory, targets: candidate.targets))
             }
         }
         entries.sort { $0.path < $1.path }
@@ -73,7 +74,8 @@ struct CandidateCatalog: Sendable {
     }
 
     /// 正規化済みのパス `path` の前処理済みの対象。差し替えのときに同じパスの前処理を使い回すために使う
-    func targets(forPath path: String) -> CandidateTargets? {
-        index(ofPath: path).map { entries[$0].targets }
+    func targets(forPath path: String, displayName: String? = nil) -> CandidateTargets? {
+        guard let index = index(ofPath: path), entries[index].displayName == displayName else { return nil }
+        return entries[index].targets
     }
 }

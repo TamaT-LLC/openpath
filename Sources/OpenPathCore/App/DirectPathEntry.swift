@@ -33,15 +33,29 @@ public struct DirectPathEntry: Sendable {
 
     /// 候補の先頭に直接入力の行を加える。同じパスの候補は除き（最終使用日時は引き継ぐ）、`limit` 件に収める。
     /// 検索語がパスでなければ、ファイルシステムを引かずに候補をそのまま返す。
-    public func merging(_ rows: [PaletteRow], query: String, directoriesOnly: Bool, limit: Int) -> [PaletteRow] {
+    /// exactRow はファジー結果や件数制限で落ちた、解決済みパスの表示名・履歴を補う。
+    public func merging(
+        _ rows: [PaletteRow], query: String, directoriesOnly: Bool, limit: Int, exactRow: PaletteRow? = nil
+    ) -> [PaletteRow] {
         guard let path = path(for: query) else { return rows }
-        let lastUsed = rows.first { $0.path == path }?.lastUsed
+        let existingRow = rows.first { $0.path == path } ?? exactRow.flatMap { $0.path == path ? $0 : nil }
+        let lastUsed = existingRow?.lastUsed
         guard let directRow = row(for: query, directoriesOnly: directoriesOnly, lastUsed: lastUsed) else { return rows }
-        return Array(([directRow] + rows.filter { $0.path != path }).prefix(limit))
+        // 索引の行に別名があれば名前を保つ。通常の行は直接入力用のハイライトなしの表示にする。
+        let preferredRow: PaletteRow
+        if let existingRow, existingRow.name != CandidatePath.name(of: path) {
+            preferredRow = PaletteRow(
+                name: existingRow.name, path: path, lastUsed: lastUsed, isDirectory: directRow.isDirectory,
+                nameHighlights: existingRow.nameHighlights, pathHighlights: existingRow.pathHighlights
+            )
+        } else {
+            preferredRow = directRow
+        }
+        return Array(([preferredRow] + rows.filter { $0.path != path }).prefix(limit))
     }
 
     /// 検索語を移動先のパスとして読めるときの、正規化した絶対パス。存在は確かめない。
-    private func path(for query: String) -> String? {
+    func path(for query: String) -> String? {
         guard query.hasPrefix(Self.absolutePathPrefix) || query.hasPrefix(Self.homeRelativePathPrefix),
               query.last != Self.separator
         else {
