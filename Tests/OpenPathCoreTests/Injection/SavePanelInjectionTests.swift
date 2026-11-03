@@ -19,7 +19,7 @@ struct SavePanelInjectionTests {
         if secondary {
             harness.goButton.onActivate = {
                 filename.simulateTyping("changed.txt")
-                harness.closeGoToSheet()
+                harness.completeNavigation()
             }
         }
         try await harness.flow.run(path: NSTemporaryDirectory(), autoConfirm: true, panelKind: .save)
@@ -52,6 +52,27 @@ struct SavePanelInjectionTests {
         #expect(!harness.log.events.contains(.didSubmitGoToSheet(autoConfirm: false)))
         #expect(filename.currentValue == "original.txt")
         #expect(harness.pasteboard.contents == .userClipboard)
+    }
+
+    /// Return 後にシートが消えても、保存先を読めなければ成功にはしない。
+    @Test(arguments: [false, true], [nil, "/not-the-destination"] as [String?])
+    func closedSheetDoesNotProveDestination(secondary: Bool, observedPath: String?) async {
+        let log = InjectionEventLog(clock: VirtualClock())
+        let filename = PanelElementFake("filename", log: log)
+        filename.simulateTyping("original.txt")
+        let harness = FlowHarness(
+            sheetAppearsAt: secondary ? nil : .milliseconds(150),
+            saveFilename: SaveFilenamePreservation { _ in filename },
+            afterSubmit: { filename.simulateTyping("changed.txt") }
+        )
+        harness.saveLocation.updatesOnNavigation = false
+        harness.saveLocation.path = observedPath
+        await #expect(throws: InjectionError.saveNavigationUnverified) {
+            try await harness.flow.run(path: NSTemporaryDirectory(), autoConfirm: true, panelKind: .save)
+        }
+        #expect(filename.currentValue == "original.txt")
+        #expect(harness.pasteboard.contents == .userClipboard)
+        #expect(!harness.log.events.contains(.press(element: "open")))
     }
 
     @Test func missingFilenameStopsBeforeKeyboard() async {

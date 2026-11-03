@@ -86,6 +86,9 @@ public final class PanelInjector: PathInjecting {
             saveFilename: SaveFilenamePreservation { cutoff in
                 try await SaveFilenameLocator.locate(in: targetWindow(), cutoff: cutoff)
             },
+            saveDestination: SaveDestinationVerification(clock: clock) { cutoff in
+                try await SavePanelLocationReader.path(in: targetWindow(), cutoff: cutoff)
+            },
             clock: clock
         )
         self.targetWindow = targetWindow

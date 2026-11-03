@@ -26,9 +26,11 @@ public final class PathInjectionFlow {
     private let clock: any Clock<Duration>
     private let gate = InjectionSerialGate()
     private let saveFilename: SaveFilenamePreservation?
+    private let saveDestination: SaveDestinationVerification?
 
     /// - Parameters:
     ///   - targetGuard: primary・secondary と同じものを渡す。ここで記録した注入先を、それぞれが確かめる。
+    ///   - saveDestination: 保存先の実パスを確認する。保存パネルで未設定なら成功にせずエラーにする。
     ///   - clock: 注入先の記録の期限の計測に使う。
     public init(
         targetGuard: any InjectionTargetGuarding,
@@ -36,6 +38,7 @@ public final class PathInjectionFlow {
         secondary: GoToFieldDirectEntry,
         normalizer: InjectionPathNormalizer = InjectionPathNormalizer(),
         saveFilename: SaveFilenamePreservation? = nil,
+        saveDestination: SaveDestinationVerification? = nil,
         clock: any Clock<Duration> = ContinuousClock()
     ) {
         self.targetGuard = targetGuard
@@ -43,6 +46,7 @@ public final class PathInjectionFlow {
         self.secondary = secondary
         self.normalizer = normalizer
         self.saveFilename = saveFilename
+        self.saveDestination = saveDestination
         self.clock = clock
     }
 
@@ -97,6 +101,9 @@ public final class PathInjectionFlow {
         if let snapshot {
             try await restoreFilename(snapshot, on: timeline)
             try Task.checkCancellation()
+            guard let saveDestination else { throw InjectionError.saveNavigationUnverified }
+            try await saveDestination.verify(path: normalizedPath, targetGuard: targetGuard)
+            Log.debug("保存先への移動を確認しました")
         }
     }
 
@@ -114,7 +121,9 @@ public final class PathInjectionFlow {
         do {
             Log.debug("注入を主方式（⌘⇧G + ペースト）で始めます（auto_confirm: \(autoConfirm)）")
             try await primary.run(path: normalizedPath, autoConfirm: autoConfirm, panelKind: panelKind)
-            Log.debug("主方式で注入しました（+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
+            if panelKind == .open {
+                Log.debug("主方式で注入しました（+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
+            }
         } catch let error as InjectionError {
             guard case .timeout(let step) = error, Self.fallbackSteps.contains(step) else {
                 Log.debug("主方式の注入に失敗しました（\(error)、+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
@@ -134,7 +143,9 @@ public final class PathInjectionFlow {
                 Log.debug("副方式の注入に失敗しました（\(error)、+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
                 throw error
             }
-            Log.debug("副方式で注入しました（+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
+            if panelKind == .open {
+                Log.debug("副方式で注入しました（+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
+            }
         }
     }
 }
