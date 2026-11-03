@@ -6,8 +6,18 @@ public enum PaletteCandidateSearch {
     ///   - index: 候補の検索先。
     ///   - directPath: 検索語に打ったパスの扱い。
     public static func make(index: CandidateIndex, directPath: DirectPathEntry = DirectPathEntry()) -> PaletteQuerySession.Search {
-        { text, directoriesOnly, limit in
-            let rows = try await index.query(text, directoriesOnly: directoriesOnly, limit: limit).map(\.paletteRow)
+        let contextual = makeContextual(index: index, directPath: directPath)
+        return { text, directoriesOnly, limit in
+            try await contextual(text, directoriesOnly, limit, nil)
+        }
+    }
+
+    /// 呼び出し元アプリの履歴を加味して索引を検索する。直接入力の優先表示は通常検索と共通。
+    public static func makeContextual(index: CandidateIndex, directPath: DirectPathEntry = DirectPathEntry()) -> PaletteQuerySession.ContextualSearch {
+        { text, directoriesOnly, limit, applicationBundleID in
+            let rows = try await index.query(
+                text, directoriesOnly: directoriesOnly, limit: limit, applicationBundleID: applicationBundleID
+            ).map(\.paletteRow)
             // 打鍵が続いて不要になった検索では、パスの存在確認（stat）まで進めない
             try Task.checkCancellation()
             var exactRow: PaletteRow?

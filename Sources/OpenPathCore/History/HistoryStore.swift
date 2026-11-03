@@ -54,7 +54,12 @@ public final class HistoryStore: HistoryRecording {
 
     /// 確定を記録し、`saveDebounceInterval` 後に保存する。続けて記録された場合は最後の記録から数え直す。
     public func record(path: String) {
-        list.record(path: path, now: now())
+        record(path: path, applicationBundleID: nil)
+    }
+
+    /// 呼び出し元をパネル検知時の値で記録する。全体の実績も必ず更新する。
+    public func record(path: String, applicationBundleID: String?) {
+        list.record(path: path, now: now(), applicationBundleID: applicationBundleID)
         hasUnsavedChanges = true
         scheduleSave()
     }

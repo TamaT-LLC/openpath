@@ -18,12 +18,12 @@ struct HistoryLookup: Sendable {
 
     /// 履歴はパス文字列をそのままキーにしているため、候補と同じ正規化（CandidatePath）をかけてから候補を引く。
     /// 正規化すると同じパスになる履歴が複数あれば、frecency は合算し、最終使用日時は新しい方を採る。
-    init(entries: [HistoryEntry], now: Date, catalog: CandidateCatalog) {
+    init(entries: [HistoryEntry], now: Date, catalog: CandidateCatalog, applicationBundleID: String? = nil) {
         var usagesByPath: [String: Usage] = [:]
         usagesByPath.reserveCapacity(entries.count)
         for entry in entries {
             guard let path = CandidatePath.normalized(entry.path) else { continue }
-            let frecency = entry.frecency(now: now)
+            let frecency = entry.frecency(now: now, applicationBundleID: applicationBundleID)
             if let existing = usagesByPath[path] {
                 usagesByPath[path] = Usage(frecency: existing.frecency + frecency, lastUsed: max(existing.lastUsed, entry.lastUsed))
             } else {
