@@ -3,6 +3,7 @@ import OpenPathCore
 
 @MainActor
 enum SaveFilenameLocator {
+    /// 記録済みの注入先を AX キューで調べ、名前欄だけを操作アダプタとして返す。見つからなければ nil。
     static func locate(in window: AXUIElement?, cutoff: ScanCutoff) async throws -> (any PanelElementOperating)? {
         let window = try PanelControlAX.require(window)
         let field = try await onAXQueue {

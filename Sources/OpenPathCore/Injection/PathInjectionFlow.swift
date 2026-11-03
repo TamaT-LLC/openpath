@@ -62,6 +62,8 @@ public final class PathInjectionFlow {
         }
     }
 
+    /// 保存先の実在と種別を確かめ、保存時は名前を退避して移動前後の復元まで行う。
+    /// 移動失敗時もキャンセルされていなければ復元を試み、成功した移動だけを呼び出し元へ返す。
     private func inject(path: String, autoConfirm: Bool, panelKind: PanelKind) async throws {
         try Task.checkCancellation()
 
@@ -96,6 +98,7 @@ public final class PathInjectionFlow {
         }
     }
 
+    /// 主方式で移動し、シート出現・貼り付け・閉鎖のタイムアウトだけ副方式へ切り替える。
     private func navigate(path normalizedPath: String, autoConfirm: Bool, timeline: ElapsedTimeline) async throws {
         do {
             Log.debug("注入を主方式（⌘⇧G + ペースト）で始めます（auto_confirm: \(autoConfirm)）")

@@ -5,6 +5,7 @@ import Testing
 @Suite("保存先の注入: ファイル名保持と自動保存の禁止")
 @MainActor
 struct SavePanelInjectionTests {
+    /// 主方式と副方式のそれぞれで、移動中の名前変更が復元され、保存が確定されないことを確認する。
     @Test(arguments: [false, true])
     func preservesFilenameAndNeverConfirms(secondary: Bool) async throws {
         let log = InjectionEventLog(clock: VirtualClock())

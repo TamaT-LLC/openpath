@@ -17,6 +17,7 @@ struct OpenPanelLocatorTests {
             rawValue
         }
 
+        /// 言語ごとのアラートまたは通常ウィンドウを生成し、ファイルパネル以外の検知を検証する。
         func node(_ language: PanelUILanguage) -> StubNode {
             switch self {
             case .alertDialog:

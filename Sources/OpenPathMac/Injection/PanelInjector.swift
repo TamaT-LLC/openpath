@@ -95,6 +95,7 @@ public final class PanelInjector: PathInjecting {
         try await inject(path: path, autoConfirm: autoConfirm, panelKind: .open)
     }
 
+    /// 権限を確認して種別付きの注入を実行する。保存パネルは自動確定を抑止し、名前保持を伴う移動に限定する。
     public func inject(path: String, autoConfirm: Bool, panelKind: PanelKind) async throws {
         let autoConfirm = panelKind == .open && autoConfirm
         // 権限が無いと CGEvent は黙って捨てられ、600ms 待った末にシート待ちのタイムアウトになってしまうため先に判定する。

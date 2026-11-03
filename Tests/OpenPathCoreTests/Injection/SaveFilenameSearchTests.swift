@@ -21,6 +21,13 @@ struct SaveFilenameSearchTests {
         #expect(try locate(root)?.name == "filename")
     }
 
+    @Test("保存/選択ボタンの空白と改行を除いて名前欄を探す", arguments: [" Save ", "\n保存\t", " Open ", "\nChoose\n"])
+    func paddedButtonTitle(title: String) throws {
+        var button = save
+        button.title = title
+        #expect(try locate(.dialog([filename, button]))?.name == "filename")
+    }
+
     @Test func doesNotPairSaveButtonWithAnotherSheet() throws {
         #expect(try locate(.standardWindow([.sheet("one", [filename]), .sheet("two", [save])])) == nil)
     }

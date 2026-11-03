@@ -127,6 +127,7 @@ public final class PalettePresenter: PaletteDisplaying {
         revealWindow(.immediately)
     }
 
+    /// 同じパネルの情報だけを受け入れ、保存用フッター・配置・候補制限を最新のコンテキストへ合わせる。
     public func update(context: PanelContext) {
         guard let presentedPanel, presentedPanel.id == context.id else { return }
         viewModel.panelKind = context.kind

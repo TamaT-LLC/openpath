@@ -105,6 +105,7 @@ public enum OpenPanelClassifier {
         return OpenPanelClassification(verdict: verdict(from: findings), fileList: findings.fileList, details: details?.summary)
     }
 
+    /// 保存の識別を優先し、確定ボタンと一覧の有無から分類する。保存識別子がある場合だけ一覧を省略できる。
     private static func verdict<Node>(from findings: Findings<Node>) -> OpenPanelVerdict {
         if findings.isSavePanel {
             return (findings.hasSaveButton || findings.hasConfirmButton) && (findings.fileList != nil || findings.hasSaveIdentifier)
