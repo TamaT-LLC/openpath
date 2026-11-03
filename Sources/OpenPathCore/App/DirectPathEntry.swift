@@ -37,7 +37,10 @@ public struct DirectPathEntry: Sendable {
         guard let path = path(for: query) else { return rows }
         let lastUsed = rows.first { $0.path == path }?.lastUsed
         guard let directRow = row(for: query, directoriesOnly: directoriesOnly, lastUsed: lastUsed) else { return rows }
-        return Array(([directRow] + rows.filter { $0.path != path }).prefix(limit))
+        // 索引の行に別名があれば名前を保つ。通常の行は直接入力用のハイライトなしの表示にする。
+        let aliasRow = rows.first { $0.path == path && $0.name != CandidatePath.name(of: path) }
+        let preferredRow = aliasRow ?? directRow
+        return Array(([preferredRow] + rows.filter { $0.path != path }).prefix(limit))
     }
 
     /// 検索語を移動先のパスとして読めるときの、正規化した絶対パス。存在は確かめない。

@@ -4,7 +4,7 @@ import Foundation
 ///
 /// - 未指定のキーは既定値で補う。
 /// - 型不一致・範囲外などの値はキーパス付きの `ConfigDecodingError` にする。誤りが複数あっても結果が揺れないよう、
-///   roots → depth → include_files → auto_confirm → hotkey → disabled_apps → ignore → ghq の順で最初の 1 件を報告する。
+///   roots → depth → include_files → auto_confirm → hotkey → disabled_apps → ignore → ghq → favorites の順で最初の 1 件を報告する。
 /// - 未知のキーはエラーにせず `ConfigWarning` として返す。
 public struct ConfigDecoder: Sendable {
     private typealias TopLevelReader = ConfigTableReader<TopLevelConfigKey>
@@ -16,6 +16,7 @@ public struct ConfigDecoder: Sendable {
         rootPathResolver = RootPathResolver(homeDirectory: homeDirectory)
     }
 
+    /// 既知の値を順に検証し、省略値を補う。お気に入りの任意のキーは未知設定の警告に含めない。
     public func decode(_ table: TOMLTable) throws(ConfigDecodingError) -> ConfigDecodingResult {
         let reader = TopLevelReader(table: table)
 
@@ -28,6 +29,7 @@ public struct ConfigDecoder: Sendable {
         let ignore = try reader.stringArray(.ignore) ?? Config.defaultIgnore
         let ghqReader = try reader.subtable(.ghq, keys: GhqConfigKey.self)
         let ghq = GhqConfig(enabled: try ghqReader?.bool(.enabled) ?? GhqConfig.defaultEnabled)
+        let favorites = try decodeFavorites(reader)
 
         let config = Config(
             roots: roots,
@@ -37,7 +39,8 @@ public struct ConfigDecoder: Sendable {
             hotkey: hotkey,
             disabledApps: disabledApps,
             ignore: ignore,
-            ghq: ghq
+            ghq: ghq,
+            favorites: favorites
         )
         let unknownKeyPaths = reader.unknownKeyPaths + (ghqReader?.unknownKeyPaths ?? [])
         return ConfigDecodingResult(config: config, warnings: unknownKeyPaths.sorted().map(ConfigWarning.unknownKey))
@@ -75,5 +78,29 @@ public struct ConfigDecoder: Sendable {
         } catch {
             throw reader.error(.hotkey, .invalidHotkey(error))
         }
+    }
+
+    /// 引用符付きの別名をパスへ対応付ける。パスの重複や空の名前は黙って無視せず設定エラーにする。
+    private func decodeFavorites(_ reader: TopLevelReader) throws(ConfigDecodingError) -> [Favorite] {
+        guard let table = try reader.table(.favorites) else { return [] }
+        var seenPaths: Set<String> = []
+        var favorites: [Favorite] = []
+        for (name, value) in table.sorted(by: { $0.key < $1.key }) {
+            let key = "favorites.\(name)"
+            guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ConfigDecodingError(key: key, kind: .emptyFavoriteName)
+            }
+            guard case .string(let path) = value else {
+                throw ConfigDecodingError(key: key, kind: .typeMismatch(expected: .string, actual: ConfigValueType(of: value)))
+            }
+            guard let resolved = rootPathResolver.resolve(path) else {
+                throw ConfigDecodingError(key: key, kind: .invalidRootPath(path))
+            }
+            guard seenPaths.insert(resolved).inserted else {
+                throw ConfigDecodingError(key: key, kind: .duplicateFavoritePath(resolved))
+            }
+            favorites.append(Favorite(name: name, path: resolved))
+        }
+        return favorites
     }
 }

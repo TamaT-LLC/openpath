@@ -15,6 +15,8 @@ public struct Config: Sendable, Equatable {
     /// roots の走査で除外するディレクトリ名
     public let ignore: [String]
     public let ghq: GhqConfig
+    /// 別名を付けて優先表示するパス。設定の [favorites] から作る。
+    public let favorites: [Favorite]
 
     public init(
         roots: [String] = Config.defaultRoots,
@@ -24,7 +26,8 @@ public struct Config: Sendable, Equatable {
         hotkey: Hotkey = Config.defaultHotkey,
         disabledApps: Set<String> = Config.defaultDisabledApps,
         ignore: [String] = Config.defaultIgnore,
-        ghq: GhqConfig = .default
+        ghq: GhqConfig = .default,
+        favorites: [Favorite] = []
     ) {
         self.roots = roots
         self.depth = depth
@@ -34,6 +37,18 @@ public struct Config: Sendable, Equatable {
         self.disabledApps = disabledApps
         self.ignore = ignore
         self.ghq = ghq
+        self.favorites = favorites
+    }
+}
+
+/// お気に入りの表示名と正規化済みの絶対パス。
+public struct Favorite: Sendable, Equatable {
+    public let name: String
+    public let path: String
+
+    public init(name: String, path: String) {
+        self.name = name
+        self.path = path
     }
 }
 

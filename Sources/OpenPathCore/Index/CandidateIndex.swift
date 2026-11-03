@@ -120,7 +120,7 @@ public final class CandidateIndex: Sendable {
     /// 異なるソースの差し替えが並行しても、すべての差し替えを反映した候補が最後に残る。
     /// 同じソースの差し替えが並行した場合は後に反映した方が残るため、同じソースの走査は直列にすること。
     ///
-    /// 前処理した候補（パスと種別の並び）が今の `source` の候補と同じなら、何もせずに false を返す。
+    /// 前処理した候補（パス・種別・別名の並び）が今の `source` の候補と同じなら、何もせずに false を返す。
     /// 統合し直すと全ソースの候補数に比例した CPU と一時的なメモリを使うため、周期の再構築で前回と同じ候補を
     /// 返したソースでは省く（Issue #78）。
     /// - Returns: 候補を差し替えたか。
@@ -185,11 +185,11 @@ public final class CandidateIndex: Sendable {
         }
         guard let base else { return .superseded }
         // 大半は正規化済み・重複なしの同じ並びで届くため、前処理の前に比べて前処理も省く
-        if base.current.elementsEqual(items, by: { $0.path == $1.path && $0.isDirectory == $1.isDirectory }) {
+        if base.current.elementsEqual(items, by: { $0.path == $1.path && $0.isDirectory == $1.isDirectory && $0.displayName == $1.displayName }) {
             return .unchanged
         }
         let prepared = preparer.prepare(items, reusing: base.previous)
-        if base.current.elementsEqual(prepared, by: { $0.path == $1.path && $0.isDirectory == $1.isDirectory }) {
+        if base.current.elementsEqual(prepared, by: { $0.path == $1.path && $0.isDirectory == $1.isDirectory && $0.displayName == $1.displayName }) {
             return .unchanged
         }
         let updated: (sources: [CandidateSourceKind: [PreparedCandidate]], revision: Int)? = state.withLock { state in
