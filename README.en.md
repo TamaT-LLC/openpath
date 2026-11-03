@@ -213,7 +213,10 @@ and has not yet been verified on a real device (manual scenario ONB-20).
 
 - openpath makes no network connections and depends on no external service.
 - It reads only the part of the frontmost app's window hierarchy needed to
-  recognize a file dialog and verify its destination. Window contents and typed values are not stored.
+  recognize a file dialog and verify its destination. The filename entered in a
+  Save dialog is kept only in memory during navigation and restored if changed.
+  This filename is not stored in history, logs, or settings. Selected destination
+  paths may be stored in history and debug logs as described below.
 - The clipboard is used briefly to paste the path, and its previous contents
   are restored afterwards. Contents marked as concealed
   (`org.nspasteboard.ConcealedType`, used by password managers) are not saved;
