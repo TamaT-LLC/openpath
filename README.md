@@ -146,7 +146,7 @@ Enter でそのまま移動できます。
 メニューバーのアイコンから、次の操作ができます。
 
 - 「有効」：パネルの検知とホットキーを止める、または再開する。状態は次の起動にも引き継ぐ。
-- 「候補を再構築」：`roots` と ghq を走査し直す。走査は 5 分ごとにも行う。
+- 「候補を再構築」：`roots` と有効な ghq / zoxide を取得し直す。取得は 5 分ごとにも行う。
 - 「設定ファイルを開く…」（⌘,）：`config.toml` を開く。
 - 「履歴をクリア…」：確定したパスの履歴を消す。
 - 「ログイン時に起動」：`openpath.app` として起動したときだけ選べる。
@@ -169,12 +169,31 @@ Enter でそのまま移動できます。
 | `disabled_apps` | `[]` | パレットを出さないアプリの bundle id（例: `["com.apple.finder"]`） |
 | `ignore` | `["node_modules", ".git", "target", "DerivedData", ".build"]` | 走査で除外するディレクトリ名 |
 | `[ghq]` の `enabled` | `true` | `ghq list -p` のリポジトリを候補に含めるか |
+| `[zoxide]` の `enabled` | `false` | zoxide のディレクトリ履歴を候補に含めるか |
 
 `roots` の値は、初めて起動したときの環境で決まります。
 `ghq root` の結果を絶対パスに解決できればその root を書き、ghq が無い場合や実行に失敗した場合はホーム（`["~"]`）を書きます。
 ホームを検索対象にすると候補が多くなるため、よく使うディレクトリ（例: `roots = ["~/repos", "~/Documents"]`）に絞ることを勧めます。
 既存のファイルは上書きしないため、生成済みの `roots` は後から変わりません。
 キーごとの詳しい規則は [詳細設計: 候補インデックスと frecency](docs/40_arch_design/design-openpath-index-frecency.md) の「ConfigStore」にあります。
+
+### zoxide の履歴を使う
+
+[zoxide](https://github.com/ajeetdsouza/zoxide) で普段移動している場所も候補にする場合は、設定ファイルに次を追加します。
+
+```toml
+[zoxide]
+enabled = true
+```
+
+zoxide は login shell の PATH と Homebrew 等の既定 PATH から探します。
+履歴の保存先は openpath の起動環境の `_ZO_DATA_DIR`、未指定なら `~/Library/Application Support/zoxide` です。
+シェルの設定ファイルでのみ指定した `_ZO_DATA_DIR` は、GUI 起動の openpath には継承されません。
+
+元の履歴を変更しないよう、データファイルを一時コピーし、コピーに対して `zoxide query --list --all` を実行します。
+存在しない場所・ファイル・アプリのパッケージは候補にせず、同じパスは roots・ghq・openpath の履歴と統合します。
+zoxide のスコアは取り込まず、順位は openpath の使用履歴で決まります。
+未インストール・取得失敗・10 秒のタイムアウトでも他の候補は使えます。取得は起動時、再構築時、5 分ごとの更新で行います。
 
 ## 権限
 

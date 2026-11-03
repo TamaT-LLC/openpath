@@ -4,7 +4,7 @@ import Foundation
 ///
 /// - 未指定のキーは既定値で補う。
 /// - 型不一致・範囲外などの値はキーパス付きの `ConfigDecodingError` にする。誤りが複数あっても結果が揺れないよう、
-///   roots → depth → include_files → auto_confirm → hotkey → disabled_apps → ignore → ghq の順で最初の 1 件を報告する。
+///   roots → depth → include_files → auto_confirm → hotkey → disabled_apps → ignore → ghq → zoxide の順で最初の 1 件を報告する。
 /// - 未知のキーはエラーにせず `ConfigWarning` として返す。
 public struct ConfigDecoder: Sendable {
     private typealias TopLevelReader = ConfigTableReader<TopLevelConfigKey>
@@ -16,6 +16,7 @@ public struct ConfigDecoder: Sendable {
         rootPathResolver = RootPathResolver(homeDirectory: homeDirectory)
     }
 
+    /// 各テーブルを既定値付きで読み取り、既知のキーを設定へ、未知キーを警告へ分ける。
     public func decode(_ table: TOMLTable) throws(ConfigDecodingError) -> ConfigDecodingResult {
         let reader = TopLevelReader(table: table)
 
@@ -28,6 +29,8 @@ public struct ConfigDecoder: Sendable {
         let ignore = try reader.stringArray(.ignore) ?? Config.defaultIgnore
         let ghqReader = try reader.subtable(.ghq, keys: GhqConfigKey.self)
         let ghq = GhqConfig(enabled: try ghqReader?.bool(.enabled) ?? GhqConfig.defaultEnabled)
+        let zoxideReader = try reader.subtable(.zoxide, keys: ZoxideConfigKey.self)
+        let zoxide = ZoxideConfig(enabled: try zoxideReader?.bool(.enabled) ?? ZoxideConfig.defaultEnabled)
 
         let config = Config(
             roots: roots,
@@ -37,9 +40,10 @@ public struct ConfigDecoder: Sendable {
             hotkey: hotkey,
             disabledApps: disabledApps,
             ignore: ignore,
-            ghq: ghq
+            ghq: ghq,
+            zoxide: zoxide
         )
-        let unknownKeyPaths = reader.unknownKeyPaths + (ghqReader?.unknownKeyPaths ?? [])
+        let unknownKeyPaths = reader.unknownKeyPaths + (ghqReader?.unknownKeyPaths ?? []) + (zoxideReader?.unknownKeyPaths ?? [])
         return ConfigDecodingResult(config: config, warnings: unknownKeyPaths.sorted().map(ConfigWarning.unknownKey))
     }
 

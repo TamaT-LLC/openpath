@@ -1,8 +1,9 @@
 extension CandidateSourceKind {
-    /// 統合時の優先度の段（DSN-002 §3「history > ghq > roots」）。宣言順に優先する
+    /// 統合時の優先度の段（DSN-002 §3「history > ghq > zoxide > roots」）。宣言順に優先する
     private enum MergeTier: Int, Comparable {
         case history
         case ghq
+        case zoxide
         case root
 
         static func < (lhs: MergeTier, rhs: MergeTier) -> Bool {
@@ -14,6 +15,7 @@ extension CandidateSourceKind {
         switch self {
         case .history: .history
         case .ghq: .ghq
+        case .zoxide: .zoxide
         case .root: .root
         }
     }

@@ -15,6 +15,7 @@ struct CandidateIndexRebuilderConfigTests {
         case includeFiles
         case ignore
         case ghq
+        case zoxide
 
         var testDescription: String {
             switch self {
@@ -23,6 +24,7 @@ struct CandidateIndexRebuilderConfigTests {
             case .includeFiles: "include_files"
             case .ignore: "ignore"
             case .ghq: "ghq.enabled"
+            case .zoxide: "zoxide.enabled"
             }
         }
 
@@ -32,7 +34,8 @@ struct CandidateIndexRebuilderConfigTests {
                 depth: self == .depth ? base.depth + 1 : base.depth,
                 includeFiles: self == .includeFiles ? !base.includeFiles : base.includeFiles,
                 ignore: self == .ignore ? base.ignore + ["vendor"] : base.ignore,
-                ghq: self == .ghq ? GhqConfig(enabled: !base.ghq.enabled) : base.ghq
+                ghq: self == .ghq ? GhqConfig(enabled: !base.ghq.enabled) : base.ghq,
+                zoxide: self == .zoxide ? ZoxideConfig(enabled: !base.zoxide.enabled) : base.zoxide
             )
         }
     }
@@ -125,6 +128,23 @@ struct CandidateIndexRebuilderConfigTests {
         await harness.waitUntilIdle()
 
         #expect(try await harness.indexedPaths() == ["/rebuild/ghq/repo"])
+    }
+
+    @Test("zoxide の無効化で専用候補を取り除き、有効化すると再収集する")
+    func togglingZoxideUpdatesCandidates() async throws {
+        let harness = RebuilderHarness(config: F.config(zoxide: true))
+        harness.source(.root(F.firstRoot)).setSnapshot(items: [F.directory("/rebuild/first/a")])
+        harness.source(.zoxide).setSnapshot(items: [F.directory("/rebuild/zoxide/only")])
+        await harness.startAndWait()
+        #expect(try await harness.indexedPaths() == ["/rebuild/first/a", "/rebuild/zoxide/only"])
+        harness.rebuilder.apply(config: F.config(zoxide: false))
+        await harness.waitUntilIdle()
+        #expect(try await harness.indexedPaths() == ["/rebuild/first/a"])
+        #expect(harness.source(.zoxide).startedCount == 1)
+        harness.rebuilder.apply(config: F.config(zoxide: true))
+        await harness.waitUntilIdle()
+        #expect(try await harness.indexedPaths() == ["/rebuild/first/a", "/rebuild/zoxide/only"])
+        #expect(harness.source(.zoxide).startedCount == 2)
     }
 
     @Test("走査中に設定が変わると、走査を取り消して新しい設定で走査し直す。取り消した走査の結果では差し替えない")

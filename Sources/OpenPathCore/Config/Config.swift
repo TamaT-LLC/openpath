@@ -15,6 +15,8 @@ public struct Config: Sendable, Equatable {
     /// roots の走査で除外するディレクトリ名
     public let ignore: [String]
     public let ghq: GhqConfig
+    /// zoxide の履歴を候補に含めるか。明示的に有効にした場合だけ外部データを読む。
+    public let zoxide: ZoxideConfig
 
     public init(
         roots: [String] = Config.defaultRoots,
@@ -24,7 +26,8 @@ public struct Config: Sendable, Equatable {
         hotkey: Hotkey = Config.defaultHotkey,
         disabledApps: Set<String> = Config.defaultDisabledApps,
         ignore: [String] = Config.defaultIgnore,
-        ghq: GhqConfig = .default
+        ghq: GhqConfig = .default,
+        zoxide: ZoxideConfig = .default
     ) {
         self.roots = roots
         self.depth = depth
@@ -34,6 +37,7 @@ public struct Config: Sendable, Equatable {
         self.disabledApps = disabledApps
         self.ignore = ignore
         self.ghq = ghq
+        self.zoxide = zoxide
     }
 }
 
@@ -82,4 +86,16 @@ public struct GhqConfig: Sendable, Equatable {
 public extension GhqConfig {
     static let defaultEnabled = true
     static let `default` = GhqConfig()
+}
+
+/// `[zoxide]` テーブルの設定。既存利用者には候補ソースを追加しないよう既定は無効。
+public struct ZoxideConfig: Sendable, Equatable {
+    public let enabled: Bool
+
+    public init(enabled: Bool = ZoxideConfig.defaultEnabled) {
+        self.enabled = enabled
+    }
+
+    public static let defaultEnabled = false
+    public static let `default` = ZoxideConfig()
 }

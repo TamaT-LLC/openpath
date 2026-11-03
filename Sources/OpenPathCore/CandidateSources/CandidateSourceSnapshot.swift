@@ -18,6 +18,8 @@ public enum CandidateSourceWarning: Sendable, Equatable {
     case rootTruncated(root: String, limit: Int)
     /// ghq の一覧を取得できなかった（未インストールを含む）。ghq の候補は空になった
     case ghqFailed(GhqError)
+    /// zoxide の一覧を取得できなかった。他の候補ソースは利用を継続できる。
+    case zoxideFailed(ZoxideError)
 }
 
 /// ルートを走査できなかった理由。

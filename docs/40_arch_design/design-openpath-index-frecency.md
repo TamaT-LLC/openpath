@@ -27,7 +27,7 @@ struct Candidate: Hashable {
     let path: String          // 正規化済み絶対パス
     let name: String          // 表示名（lastPathComponent）
     let isDirectory: Bool
-    let source: Source        // .history / .root(String) / .ghq
+    let source: Source        // .history / .root(String) / .ghq / .zoxide
     let frecency: Double      // HistoryStore 由来。履歴なしは 0
     let lastUsed: Date?
 }
@@ -80,7 +80,7 @@ protocol ChangeTrackingCandidateSource: CandidateSource {
   - history: 現状どおり、確定のたびの `refreshHistory()` と周期のたびに取り直す。
   - `CandidateIndex.replace(source:with:)` は、前処理した候補（パスと種別の並び）が今のソースの候補と同じなら何もせず false を返す。統合し直すと全ソースの候補数に比例した CPU（候補 20,000 件で約 65ms。同じと分かれば約 0.9ms）と一時的なメモリを使うため。
 - 再構築のメモリのピークを抑える（Issue #78）: 走査の列挙で得る URL・リソース値は autorelease されるため、1 件ごとに `autoreleasepool` で解放する（スレッドのプールに任せると走査の後もしばらく全件分が残り、候補 20,000 件の走査の後の phys_footprint が約 6MB 多かった）。前処理済みの対象（`CandidateTargets`、64 バイト）は参照型にして、`PreparedCandidate` と `CandidateCatalog.Entry` には参照だけを持たせる（1 件あたり 96→32 バイト、112→48 バイト）。統合の配列と表は先に確保し、統合に使った表を並べ替えた後の添字に書き換えて使い回す（伸ばしながらの作り直しや表の作り直しで一時的に重なる分を避ける）。
-- 同一パスが複数ソースにある場合は 1 件に統合し、`source` は優先度 history > ghq > roots で決める。統合キーはファイルシステムを引かない字句的な正規化（末尾 `/`・`//`・`.`・`..`。`RootPathResolver` と同じ規則）を使う。isDirectory の判定が食い違う場合はファイル扱いにする（フォルダ選択のパネルにファイルを誤って出すより、ディレクトリを 1 件出し損ねる方が害が小さいため）。絶対パスにできない候補は含めない。frecency / `lastUsed` は同じ正規化をかけた上で `HistoryStore` から引く（PR #57）。
+- 同一パスが複数ソースにある場合は 1 件に統合し、`source` は優先度 history > ghq > zoxide > roots で決める。統合キーはファイルシステムを引かない字句的な正規化（末尾 `/`・`//`・`.`・`..`。`RootPathResolver` と同じ規則）を使う。isDirectory の判定が食い違う場合はファイル扱いにする（フォルダ選択のパネルにファイルを誤って出すより、ディレクトリを 1 件出し損ねる方が害が小さいため）。絶対パスにできない候補は含めない。frecency / `lastUsed` は同じ正規化をかけた上で `HistoryStore` から引く（PR #57）。
 - 空クエリで履歴（frecency > 0）が 8 件未満のときは、frecency 0 の候補をパスの昇順で補う（初回起動で履歴が空のときに「一致する候補がありません」を出さないため、PR #57）。
 - 候補数が 10,000 件以上のときの前置フィルタは「取りこぼさない」よう、先頭 2 文字（正規化後）のどちらかを含まない候補を外す判定として実装する（候補ごとに含む文字を 256 ビットへ畳んで 1 回の AND で判定。ファジーマッチはクエリを部分列として含む必要があるため結果は変わらない、PR #57）。
 - 履歴をクリアしたときは、`HistoryStore.clear()` の直後に `CandidateIndexRebuilder.historyDidClear(didRemove:)` を呼ぶ。履歴の候補は再構築の途中でもその場で取り除き（`CandidateIndex.invalidate(source: .history)`）、走査中の再構築は取り消さずに続ける（Issue #92）。
@@ -97,6 +97,16 @@ protocol ChangeTrackingCandidateSource: CandidateSource {
 - `DirectoryQuerySession.isListed(directory:ignoredNames:)` で同じキーの取得結果を保持しているかを判定する。Presenter は再列挙が必要なときだけ読み込み表示にし、取得済みの候補の絞り込みでは次の結果を待つ間も行を維持する。
 - 共有 `CandidateIndex` とは混ぜず、現在のフォルダのスナップショットだけを保持するため、他ソースの候補との重複や範囲外の混入はない。確定したパスは既存の仕組みで履歴に記録される。
 - 別フォルダへの移動・通常検索への復帰・パレットを閉じる際に列挙と検索を取り消し、保持した候補を破棄する。世代の照合で古い結果・案内の反映を防ぐ。同じパネルの再表示では範囲と選択パスだけを保って再列挙する。ignore の変更、再構築の完了、候補変更の通知でも列挙し直す。
+
+### zoxide の候補ソース（#133）
+
+- `[zoxide] enabled = true` のときだけ `ZoxideCandidateSource` を追加する。省略時と初回生成時は false。変更は候補ソースに関わる設定として扱い、有効化で収集、無効化で専用候補を除去する。
+- `ZoxideDirectoryLister` は ghq と同じ `LoginShellPathResolver` と `ProcessCommandRunner` を使い、`zoxide query --list --all` をバックグラウンドで実行する。上限は 10 秒で、キャンセル時はプロセスを停止し、キャンセル前の候補を空で上書きしない。未インストール・起動失敗・タイムアウト・非ゼロ終了は警告付きの空ソースにし、他のソースを継続する。stderr やパスは通常ログへ出さない。
+- 元 DB の変更を防ぐため、`ZoxideDatabaseCopy` が `_ZO_DATA_DIR`（openpath の起動環境）を優先し、なければ macOS の `~/Library/Application Support/zoxide` から `db.zo` / `db.txt` を一時ディレクトリへ読み取りコピーする。DB は解析せず、CLI に渡す `_ZO_DATA_DIR` だけをコピーへ差し替える。コピーはディレクトリ 0700・ファイル 0600 の通常ファイルにし、シンボリックリンクやハードリンクを共有しない。1 ファイル 32 MiB を上限に小さなチャンクでコピーし、終了・失敗・キャンセルで削除する。元が空なら CLI を実行せず空ソースとする。未知の将来形式は推測せず、対応する既知 DB がなければ空になる。
+- 公開 CLI の選択根拠: [公式 man](https://github.com/ajeetdsouza/zoxide/blob/main/man/man1/zoxide-query.1) の list / all を使用する。query は [v0.9.8 の実装](https://github.com/ajeetdsouza/zoxide/blob/v0.9.8/src/cmd/query.rs) でも保存を呼び、[DB のソート](https://github.com/ajeetdsouza/zoxide/blob/v0.9.8/src/db/mod.rs) が変更フラグを立てるため、読み取りのコマンド名だけでは元 DB の保護にならない。一時コピーはこの保存やバージョン移行を隔離する。
+- 出力は一行一絶対パスとして解釈し、空白・日本語を保持する。改行を含むパス名は CLI の一行形式では扱えない。字句正規化して重複を除き、ローカルの存在・ディレクトリ種別を確認する。ファイル・パッケージ・不存在のパスは含めず、ディレクトリへのリンクは候補にできる。
+- 他ソースと同じ正規化キーで統合し、ソースの優先度は history > ghq > zoxide > roots とする。zoxide のスコアや最終使用日時はインポートしないため、openpath の履歴順位を維持する。起動時・5 分ごと・手動再構築・設定変更で再取得し、前回と同じ候補なら共有索引の差し替えを省く。
+- `_ZO_DATA_DIR` が shell rc だけで設定されている場合は GUI の起動環境へ継承されない。設定を自動で読み取るために追加の shell 起動は行わない。
 
 ## 4. frecency スコア
 

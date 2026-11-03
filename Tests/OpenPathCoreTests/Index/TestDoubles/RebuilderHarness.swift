@@ -23,7 +23,8 @@ final class ScriptedSourceProvider: CandidateSourceProviding {
     func sources(for config: Config) -> [any CandidateSource] {
         let roots: [any CandidateSource] = config.roots.map { source(.root($0)) }
         let ghq: [any CandidateSource] = config.ghq.enabled ? [source(.ghq)] : []
-        return [source(.history)] + roots + ghq
+        let zoxide: [any CandidateSource] = config.zoxide.enabled ? [source(.zoxide)] : []
+        return [source(.history)] + roots + ghq + zoxide
     }
 }
 
@@ -35,8 +36,8 @@ enum RebuilderFixtures {
     /// 周期の境界の直前・直後を表すための僅かな時間
     static let tick: Duration = .seconds(1)
 
-    static func config(roots: [String] = [firstRoot], ghq: Bool = false) -> Config {
-        Config(roots: roots, ghq: GhqConfig(enabled: ghq))
+    static func config(roots: [String] = [firstRoot], ghq: Bool = false, zoxide: Bool = false) -> Config {
+        Config(roots: roots, ghq: GhqConfig(enabled: ghq), zoxide: ZoxideConfig(enabled: zoxide))
     }
 
     static func directory(_ path: String) -> SourceItem {
