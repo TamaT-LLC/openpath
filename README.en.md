@@ -212,7 +212,9 @@ file.
 
 ### Use zoxide history
 
-To include directories from [zoxide](https://github.com/ajeetdsouza/zoxide), add:
+To include directories from [zoxide](https://github.com/ajeetdsouza/zoxide),
+change `enabled` to `true` in the existing `[zoxide]` table. Only add the
+following if your configuration does not already contain `[zoxide]`:
 
 ```toml
 [zoxide]

@@ -199,7 +199,7 @@ Enter でそのまま移動できます。
 
 ### zoxide の履歴を使う
 
-[zoxide](https://github.com/ajeetdsouza/zoxide) で普段移動している場所も候補にする場合は、設定ファイルに次を追加します。
+[zoxide](https://github.com/ajeetdsouza/zoxide) で普段移動している場所も候補にする場合は、設定ファイルの `[zoxide]` にある `enabled` を `true` に変更します。`[zoxide]` がない場合だけ、次を追加します。
 
 ```toml
 [zoxide]
