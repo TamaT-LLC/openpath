@@ -43,6 +43,24 @@ struct StandardCandidateSourcesTests {
         #expect(kinds == [.history, .ghq])
     }
 
+    @Test("zoxide は有効にしたときだけ、他のソースに加えて取得する")
+    func zoxideIsOptIn() {
+        let config = Config(roots: [Self.firstRoot], zoxide: ZoxideConfig(enabled: true))
+        #expect(Self.makeSources().sources(for: config).map(\.kind) == [.history, .root(Self.firstRoot), .ghq, .zoxide])
+        #expect(!Self.makeSources().sources(for: .default).contains { $0.kind == .zoxide })
+    }
+
+    @Test("お気に入りと zoxide を同時に有効にしても、両方のソースを組み立てる")
+    func buildsFavoritesAndZoxideTogether() {
+        let config = Config(
+            roots: [Self.firstRoot], zoxide: ZoxideConfig(enabled: true),
+            favorites: [Favorite(name: "仕事", path: Self.secondRoot)]
+        )
+        #expect(Self.makeSources().sources(for: config).map(\.kind) == [
+            .history, .root(Self.firstRoot), .favorites, .ghq, .zoxide
+        ])
+    }
+
     @Test("roots のソースは設定の depth / include_files / ignore で走査する")
     func rootSourcesUseConfigScanOptions() async throws {
         let tree = try FileTreeFixture()

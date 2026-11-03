@@ -8,6 +8,8 @@ public enum CandidateSourceKind: Sendable, Hashable {
     case root(String)
     /// ghq 管理下のリポジトリ
     case ghq
+    /// zoxide のディレクトリ履歴。スコア・使用回数は取り込まない。
+    case zoxide
 }
 
 /// 候補ソース（history / roots / ghq 共通。DSN-002 §3）。

@@ -324,6 +324,7 @@ private struct CandidateSourceSettings: Equatable {
     let includeFiles: Bool
     let ignore: [String]
     let isGhqEnabled: Bool
+    let isZoxideEnabled: Bool
 
     init(_ config: Config) {
         favorites = config.favorites
@@ -332,5 +333,6 @@ private struct CandidateSourceSettings: Equatable {
         includeFiles = config.includeFiles
         ignore = config.ignore
         isGhqEnabled = config.ghq.enabled
+        isZoxideEnabled = config.zoxide.enabled
     }
 }

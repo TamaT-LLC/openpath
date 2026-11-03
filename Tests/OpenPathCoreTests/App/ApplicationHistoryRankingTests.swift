@@ -30,6 +30,30 @@ struct ApplicationHistoryRankingTests {
         #expect(try await index.query("no-match", directoriesOnly: true, limit: 50, applicationBundleID: Self.editor).isEmpty)
     }
 
+    @Test("zoxide の候補にもアプリ別順位を適用し、お気に入りの別名と優先表示を保つ", arguments: ["", "project"])
+    func zoxideRankingKeepsFavoritesFirst(query: String) async throws {
+        let paths = ["/example/project-a", "/example/project-b"]
+        let favoritePath = "/example/project-c"
+        let history = Self.history(paths)
+        let index = CandidateIndex(fileExistence: RecordingFileExistenceChecker(), now: { Self.now }, history: { history })
+        await index.replace(source: .zoxide, with: (paths + [favoritePath]).map { SourceItem(path: $0, isDirectory: true) })
+        await index.replace(source: .favorites, with: [SourceItem(path: favoritePath, isDirectory: true, displayName: "project 仕事")])
+
+        let editor = try await index.query(query, directoriesOnly: true, limit: 50, applicationBundleID: Self.editor)
+        let browser = try await index.query(query, directoriesOnly: true, limit: 50, applicationBundleID: Self.browser)
+        #expect(editor.map(\.candidate.path) == [favoritePath] + paths)
+        #expect(browser.map(\.candidate.path) == [favoritePath] + paths.reversed())
+        #expect(editor.map(\.candidate.source) == [.favorites, .zoxide, .zoxide])
+        #expect(editor.first?.candidate.name == "project 仕事")
+        #expect(index.count == 3)
+
+        await index.replace(source: .favorites, with: [])
+        let restored = try await index.query(query, directoriesOnly: true, limit: 50, applicationBundleID: Self.browser)
+        #expect(restored.map(\.candidate.path) == Array(paths.reversed()) + [favoritePath])
+        #expect(restored.last?.candidate.name == "project-c")
+        #expect(restored.last?.candidate.source == .zoxide)
+    }
+
     @Test("Tab で読み込む直下の候補にも同じアプリ別順位を適用する")
     func directorySearchUsesAppHistory() async throws {
         let tree = try FileTreeFixture()
