@@ -100,6 +100,7 @@ public final class PalettePresenter: PaletteDisplaying {
     /// パネルが変われば検索をリセットする。同じパネルでは検索語を保ち、動的な候補は再取得する。
     /// 初出では最初の検索結果を上限時間まで待ち、空状態のちらつきを防ぐ。
     public func show(context: PanelContext) {
+        viewModel.panelKind = context.kind
         let isSamePanel = context.id == lastPanelID
         cancelPendingReveal()
         // reset() による検索語の変更で、前のパネルの条件のまま候補を引かないよう、表示中の扱いを外してから戻す
@@ -128,6 +129,7 @@ public final class PalettePresenter: PaletteDisplaying {
 
     public func update(context: PanelContext) {
         guard let presentedPanel, presentedPanel.id == context.id else { return }
+        viewModel.panelKind = context.kind
         self.presentedPanel = context
         // まだ出していなければ、出すときに新しい位置を使う
         if presentedPanel.frame != context.frame, !isAwaitingInitialRows {

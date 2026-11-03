@@ -1,6 +1,11 @@
 import CoreGraphics
 
-/// 検知した NSOpenPanel の情報。
+public enum PanelKind: Equatable, Sendable {
+    case open
+    case save
+}
+
+/// 検知したファイルパネルの情報。
 /// Core をテスト可能な純 Swift に保つため、AX の型は持ち込まず値だけを持つ。
 public struct PanelContext: Identifiable, Equatable, Sendable {
     /// パネルの識別子。同じパネルの再検知（AXObserver とポーリングの重複等）を見分けるために使う。
@@ -13,6 +18,7 @@ public struct PanelContext: Identifiable, Equatable, Sendable {
         }
     }
 
+    public let kind: PanelKind
     public let id: ID
     /// フォルダのみ選択できるパネルと推定されたか（DSN-001 §2.3）。
     /// false（推定できない場合を含む）のときは設定 include_files に従う。
@@ -25,7 +31,8 @@ public struct PanelContext: Identifiable, Equatable, Sendable {
     /// true の間は、PanelWatcher がパレットの表示中も走査を続け、推定し直した結果を `panelContextChanged` で知らせる。
     public let isSelectionModeProvisional: Bool
 
-    public init(id: ID, isDirectoriesOnly: Bool, frame: CGRect, isSelectionModeProvisional: Bool = false) {
+    public init(id: ID, isDirectoriesOnly: Bool, frame: CGRect, isSelectionModeProvisional: Bool = false, kind: PanelKind = .open) {
+        self.kind = kind
         self.id = id
         self.isDirectoriesOnly = isDirectoriesOnly
         self.frame = frame
@@ -38,7 +45,8 @@ public struct PanelContext: Identifiable, Equatable, Sendable {
             id: id,
             isDirectoriesOnly: isDirectoriesOnly,
             frame: frame,
-            isSelectionModeProvisional: isSelectionModeProvisional
+            isSelectionModeProvisional: isSelectionModeProvisional,
+            kind: kind
         )
     }
 }

@@ -77,7 +77,7 @@ struct OpenPanelDiagnosticMessageTests {
             Fixtures.button("保存"),
         ]))
 
-        #expect(entry.logMessage.contains("result: rejected: looksLikeSavePanel,"))
+        #expect(entry.logMessage.contains("result: savePanel,"))
         #expect(entry.logMessage.contains("textFields: [AXTextField(desc: yes, title: no, saveKeyword: 保存 in desc)]"))
         #expect(!entry.logMessage.contains("/Users"))
         #expect(!entry.logMessage.contains("秘密"))

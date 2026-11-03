@@ -197,7 +197,7 @@ public final class AppCoordinator {
 
     private func confirm(path: String, openImmediately: Bool) {
         guard case .panelShown(let context, isPaletteVisible: true) = state, !path.isEmpty else { return }
-        startInjection(context: context, path: path, autoConfirm: openImmediately || isAutoConfirmEnabled())
+        startInjection(context: context, path: path, autoConfirm: context.kind == .open && (openImmediately || isAutoConfirmEnabled()))
     }
 
     private func escape() {
@@ -286,7 +286,7 @@ public final class AppCoordinator {
         activeInjection = ActiveInjection(
             id: injectionID,
             isAutoConfirm: autoConfirm,
-            work: makeInjectionTask(id: injectionID, path: path, autoConfirm: autoConfirm),
+            work: makeInjectionTask(id: injectionID, path: path, autoConfirm: autoConfirm, panelKind: context.kind),
             timeout: Self.makeTimeoutTask(on: clock) { [weak self] in
                 self?.finishInjection(id: injectionID, outcome: .timedOut)
             }
@@ -296,14 +296,14 @@ public final class AppCoordinator {
         palette.showStatus(PaletteMessage.injecting)
     }
 
-    private func makeInjectionTask(id: Int, path: String, autoConfirm: Bool) -> Task<Void, Never> {
+    private func makeInjectionTask(id: Int, path: String, autoConfirm: Bool, panelKind: PanelKind) -> Task<Void, Never> {
         Task { [weak self, injector] in
             // confirm 直後にパネル消滅等で取り消された場合、無関係なウィンドウへキー入力を送らない
             guard !Task.isCancelled else { return }
             self?.injectionDidStart(id: id)
             let outcome: InjectionOutcome
             do {
-                try await injector.inject(path: path, autoConfirm: autoConfirm)
+                try await injector.inject(path: path, autoConfirm: autoConfirm, panelKind: panelKind)
                 outcome = .succeeded
             } catch {
                 outcome = .failed(error)

@@ -60,11 +60,13 @@ https://github.com/user-attachments/assets/a81d53cc-956b-448f-a34d-6268721421eb
 ## How it works
 
 1. The Accessibility API detects a file dialog (NSOpenPanel) in the frontmost
-   app. Save dialogs are ignored.
+   app. Save dialogs (NSSavePanel) can also navigate to a destination folder.
 2. The palette is placed over the dialog's top-right corner without taking
    focus from the dialog.
 3. Candidates from history, ghq, and `roots` are fuzzy-matched as you type.
 4. The chosen path is entered through "Go to Folder" (⌘⇧G).
+
+In Save dialogs, only folders are offered. The existing filename and extension are preserved. Neither `auto_confirm = true` nor Cmd+Enter saves the document: press the standard Save button yourself after navigation. Esc closes only the palette. If the filename field cannot be read, navigation stops with an error; press Esc to continue using the standard dialog.
 
 ## Install
 

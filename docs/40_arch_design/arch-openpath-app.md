@@ -111,7 +111,7 @@ Idle ─────────────▶ PanelShown ───────
 1. 対象ウィンドウの `AXSubrole` が `AXDialog` または `AXSheet`（サンドボックス時は `AXSheet` としてホストアプリの子に現れる）
 2. 子孫に `AXButton` で title が `開く` / `Open` / `選択` / `Choose` のいずれか
 3. 子孫に `AXBrowser` / `AXOutline` / `AXTable`（ファイルリスト）が存在する
-4. 子孫に `AXTextField` で `AXDescription` が「保存」「Save As」を含まない（NSSavePanel の除外）
+4. `save-panel` 識別子、または検索欄以外の名前欄（「Save」「保存」「名前」）を持つものは保存パネルとして区別する。保存パネルでは「保存」/「Save」も確定ボタンの検出対象とするが、押下しない。一覧を持たないコンパクト表示は `save-panel` 識別子を必須とする（#134）。
 
 ## 7. 注入方式の選定
 

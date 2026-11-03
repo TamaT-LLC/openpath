@@ -1,3 +1,5 @@
+import Foundation
+
 /// NSOpenPanel へのパス注入の全体（DSN-001 §3〜§4）。
 ///
 /// 1. パスを正規化する（§4）
@@ -23,6 +25,7 @@ public final class PathInjectionFlow {
     private let normalizer: InjectionPathNormalizer
     private let clock: any Clock<Duration>
     private let gate = InjectionSerialGate()
+    private let saveFilename: SaveFilenamePreservation?
 
     /// - Parameters:
     ///   - targetGuard: primary・secondary と同じものを渡す。ここで記録した注入先を、それぞれが確かめる。
@@ -32,23 +35,26 @@ public final class PathInjectionFlow {
         primary: GoToFolderPasteSequencer,
         secondary: GoToFieldDirectEntry,
         normalizer: InjectionPathNormalizer = InjectionPathNormalizer(),
+        saveFilename: SaveFilenamePreservation? = nil,
         clock: any Clock<Duration> = ContinuousClock()
     ) {
         self.targetGuard = targetGuard
         self.primary = primary
         self.secondary = secondary
         self.normalizer = normalizer
+        self.saveFilename = saveFilename
         self.clock = clock
     }
 
     /// NSOpenPanel を path へ移動させ、autoConfirm なら「開く」も押す。
     /// - Throws: 失敗時は `InjectionError`、キャンセル時は `CancellationError`。
     ///   autoConfirm で「開く」を押す前にパネルが消えた場合は、`.panelGone` ではなく `.panelGoneBeforeConfirm`。
-    public func run(path: String, autoConfirm: Bool) async throws {
+    public func run(path: String, autoConfirm: Bool, panelKind: PanelKind = .open) async throws {
+        let autoConfirm = panelKind == .open && autoConfirm
         await gate.enter()
         defer { gate.leave() }
         do {
-            try await inject(path: path, autoConfirm: autoConfirm)
+            try await inject(path: path, autoConfirm: autoConfirm, panelKind: panelKind)
         } catch InjectionError.panelGone where autoConfirm {
             // 自動確定中の panelGone は、AppCoordinator が「開く」で閉じた成功とみなして履歴に残す。
             // 「開く」を押した後の消滅はここまで届かず成功で返るため、届いたものは押す前の消滅として区別する
@@ -56,7 +62,7 @@ public final class PathInjectionFlow {
         }
     }
 
-    private func inject(path: String, autoConfirm: Bool) async throws {
+    private func inject(path: String, autoConfirm: Bool, panelKind: PanelKind) async throws {
         try Task.checkCancellation()
 
         let normalizedPath = normalizer.normalize(path)
@@ -64,8 +70,33 @@ public final class PathInjectionFlow {
         if normalizedPath != path {
             Log.debugPath("注入するパス（正規化後）", path: normalizedPath)
         }
-        let timeline = ElapsedTimeline(clock: clock)
+        if panelKind == .save {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: normalizedPath, isDirectory: &isDirectory), isDirectory.boolValue else {
+                throw InjectionError.saveDestinationNotDirectory
+            }
+        }
+        let timeline = ElapsedTimeline(clock: self.clock)
         try await InjectionTargetCheck.capture(targetGuard, on: timeline)
+        var snapshot: (any PanelElementOperating, String)?
+        if panelKind == .save {
+            guard let saveFilename else { throw InjectionError.saveFilenameUnavailable }
+            snapshot = try await saveFilename.capture(on: timeline)
+        }
+        do {
+            try await navigate(path: normalizedPath, autoConfirm: autoConfirm, timeline: timeline)
+        } catch {
+            if let snapshot, !Task.isCancelled {
+                try await saveFilename?.restore(snapshot, targetGuard: targetGuard, on: timeline)
+            }
+            throw error
+        }
+        if let snapshot {
+            try await saveFilename?.restore(snapshot, targetGuard: targetGuard, on: timeline)
+        }
+    }
+
+    private func navigate(path normalizedPath: String, autoConfirm: Bool, timeline: ElapsedTimeline) async throws {
         do {
             Log.debug("注入を主方式（⌘⇧G + ペースト）で始めます（auto_confirm: \(autoConfirm)）")
             try await primary.run(path: normalizedPath, autoConfirm: autoConfirm)

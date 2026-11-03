@@ -143,7 +143,7 @@ struct OpenPanelDiagnosticTests {
         #expect(!hasConfirmButton)
     }
 
-    @Test("保存パネルは looksLikeSavePanel で、どの入力欄のどの属性がどの語に一致したかを記録する")
+    @Test("保存パネルは受け入れられ、どの入力欄のどの属性がどの語に一致したかを記録する")
     func savePanelIsReportedWithKeyword() throws {
         let harness = OpenPanelLocatorHarness()
         let window = harness.add(Fixtures.dialog(id: "save", Fixtures.savePanelBody(.japanese)))
@@ -151,7 +151,7 @@ struct OpenPanelDiagnosticTests {
         let entry = try #require(harness.locateDiagnosing(window).report.entries.first)
 
         #expect(entry.result == .savePanel)
-        #expect(entry.rejectionReasons == ["looksLikeSavePanel"])
+        #expect(entry.rejectionReasons == [])
         let match = try #require(entry.details?.textFields.compactMap(\.saveKeywordMatch).first)
         #expect(match == OpenPanelClassificationDetails.SaveKeywordMatch(source: .description, keyword: "名前"))
     }
@@ -167,7 +167,7 @@ struct OpenPanelDiagnosticTests {
 
         let entry = try #require(harness.locateDiagnosing(window).report.entries.first)
 
-        #expect(entry.rejectionReasons == ["looksLikeSavePanel"])
+        #expect(entry.rejectionReasons == [])
         let field = try #require(entry.details?.textFields.first)
         #expect(field.subrole == "AXSearchField")
         #expect(field.hasDescription)

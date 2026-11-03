@@ -13,6 +13,7 @@ extension OpenPanelLocator {
         var isUnreadableReported = false
         /// パネルの候補（ダイアログ・シート・AXIdentifier が open-panel のウィンドウ）でだけ持つ
         var verdict: CachedVerdict?
+        var kind: PanelKind = .open
         /// 開くパネルと判定した候補でだけ持つ
         var selectionMode: SelectionModeState<Node>?
         /// トップレベルのウィンドウで最後に見つけたパネル。読み取りに失敗したときに引き継ぐ
@@ -47,7 +48,7 @@ struct CachedAttribute<Value> {
 /// パネルの候補の判定結果。
 enum CachedVerdict {
     case openPanel(PanelContext.ID)
-    /// 開くパネルではないと確定した（保存パネル、または判定し直しても要素が欠けていた）
+    /// ファイルパネルではないと確定した（判定し直しても要素が欠けていた）
     case rejected
     /// 要素が欠けていた。notBefore 以降に判定し直す
     case awaitingRecheck(completedRechecks: Int, notBefore: ContinuousClock.Instant)

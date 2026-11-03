@@ -130,7 +130,7 @@ struct OpenPanelIconViewLocatorTests {
             )),
         ]))
 
-        #expect(harness.locate(window) == .notFound)
+        #expect(harness.panel(in: window)?.context.kind == .save)
     }
 
     @Test(

@@ -189,7 +189,7 @@ struct OpenPanelClassifierTests {
         }
     }
 
-    @Test("ロールは 1 要素につき 1 回だけ読み、サブロールは読まない")
+    @Test("ロールは 1 要素につき 1 回だけ読み、入力欄のサブロールだけ読む")
     func readsEachRoleOnce() throws {
         let tree = StubPanelTree()
         let sheet = tree.add(Fixtures.remoteSheet(id: "remote", Fixtures.openPanelBody(.english)))
@@ -198,20 +198,20 @@ struct OpenPanelClassifierTests {
 
         let roleReads = tree.reads.filter { $0.attribute == .role }.map(\.element)
         #expect(roleReads.count == Set(roleReads).count)
-        #expect(tree.readCount(of: .subrole) == 0)
+        #expect(tree.readCount(of: .subrole) == 1)
         #expect(tree.readCount(of: .frame) == 0)
     }
 
-    @Test("保存パネルと分かった時点で以降の要素を読まない")
-    func stopsReadingAfterSaveField() throws {
+    @Test("保存の名前欄だけではパネルとせず、一覧とボタンを確認する")
+    func saveFieldAloneIsNotEnough() throws {
         let tree = StubPanelTree()
         let dialog = tree.add(Fixtures.dialog(id: "save", [
             Fixtures.textField(description: "Save As:"),
             StubNode(id: "later", role: "AXGroup", children: [Fixtures.button("Open")]),
         ]))
 
-        #expect(try OpenPanelClassifier.classify(dialog, reader: tree) == .savePanel)
-        #expect(!tree.reads.contains(StubPanelTree.Read(element: StubElement("later"), attribute: .children)))
+        #expect(try OpenPanelClassifier.classify(dialog, reader: tree) == .missingElements(hasConfirmButton: true, hasFileList: false))
+        #expect(tree.reads.contains(StubPanelTree.Read(element: StubElement("later"), attribute: .children)))
     }
 
     @Test("探索の上限（6 階層）より深い確定ボタンは見ない")

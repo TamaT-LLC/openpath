@@ -38,7 +38,8 @@ final class FlowHarness {
         sheetAppearsAt: Duration? = .milliseconds(150),
         clipboard: PasteboardSnapshot = .userClipboard,
         fallsBackWhenSheetMissing: Bool = false,
-        routeMemory: GoToSheetRouteMemory? = nil
+        routeMemory: GoToSheetRouteMemory? = nil,
+        saveFilename: SaveFilenamePreservation? = nil
     ) {
         let log = InjectionEventLog(clock: clock)
         let pasteboard = FakePasteboard(contents: clipboard)
@@ -111,6 +112,7 @@ final class FlowHarness {
                 clock: clock
             ),
             normalizer: normalizer,
+            saveFilename: saveFilename,
             clock: clock
         )
         keyboard.onPostForSheet = { [unowned self] keyStroke, route in

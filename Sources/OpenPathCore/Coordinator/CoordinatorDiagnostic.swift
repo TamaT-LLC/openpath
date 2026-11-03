@@ -37,6 +37,10 @@ public enum CoordinatorDiagnostic: Equatable, Sendable {
                 return "pasteboardRestoreFailed"
             case .targetNotFrontmost:
                 return "targetNotFrontmost"
+            case .saveFilenameUnavailable:
+                return "saveFilenameUnavailable"
+            case .saveDestinationNotDirectory:
+                return "saveDestinationNotDirectory"
             case .panelGoneBeforeConfirm:
                 return "panelGoneBeforeConfirm"
             }

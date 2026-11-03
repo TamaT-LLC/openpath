@@ -15,6 +15,8 @@ public enum InjectionError: Error, Equatable, Sendable {
     /// 自動確定（auto_confirm / Cmd+Enter）の注入で、「開く」を押す前にパネルが消えた。
     /// 自動確定中の panelGone は「開く」で閉じた成功とみなされるため、押す前の消滅はこちらで伝えて履歴に残さない。
     case panelGoneBeforeConfirm
+    case saveFilenameUnavailable
+    case saveDestinationNotDirectory
 }
 
 /// タイムアウトした注入ステップ（DSN-001 §3.1）。
@@ -50,6 +52,10 @@ extension InjectionError {
             PaletteMessage.pasteboardRestoreFailed
         case .targetNotFrontmost:
             PaletteMessage.injectionFailed(reason: "パネルが最前面でなくなりました")
+        case .saveFilenameUnavailable:
+            PaletteMessage.injectionFailed(reason: "保存するファイル名を保持できません")
+        case .saveDestinationNotDirectory:
+            PaletteMessage.injectionFailed(reason: "保存先のフォルダが見つかりません")
         case .panelGoneBeforeConfirm:
             PaletteMessage.injectionFailed(reason: "パネルが閉じられました")
         }

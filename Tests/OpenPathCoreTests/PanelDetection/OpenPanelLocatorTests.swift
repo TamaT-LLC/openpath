@@ -9,8 +9,6 @@ struct OpenPanelLocatorTests {
 
     /// パネルでないウィンドウ。
     enum NonPanelWindow: String, CaseIterable, CustomStringConvertible {
-        case saveDialog
-        case saveSheet
         case alertDialog
         case alertSheet
         case documentWindow
@@ -21,10 +19,6 @@ struct OpenPanelLocatorTests {
 
         func node(_ language: PanelUILanguage) -> StubNode {
             switch self {
-            case .saveDialog:
-                Fixtures.dialog(id: "window", Fixtures.savePanelBody(language))
-            case .saveSheet:
-                Fixtures.documentWindow(id: "window", sheets: [Fixtures.sheet(id: "sheet", Fixtures.savePanelBody(language))])
             case .alertDialog:
                 Fixtures.dialog(id: "window", Fixtures.alertBody(language))
             case .alertSheet:
@@ -85,7 +79,7 @@ struct OpenPanelLocatorTests {
     }
 
     @Test(
-        "保存パネル・アラート・通常のウィンドウでは見つからない",
+        "アラート・通常のウィンドウでは見つからない",
         arguments: NonPanelWindow.allCases, PanelUILanguage.allCases
     )
     func nonPanelWindowsAreNotFound(window: NonPanelWindow, language: PanelUILanguage) {

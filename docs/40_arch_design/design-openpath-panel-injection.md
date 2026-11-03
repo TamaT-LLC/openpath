@@ -52,37 +52,27 @@ final class PanelWatcher {
 
 ### 2.2 パネル判定
 
-```swift
-func isOpenPanel(_ window: AXUIElement) -> Bool {
-    guard isDialogOrSheet(window) || window.identifier == "open-panel" else { return false }  // AXSubrole in [AXDialog, AXSheet] または AXRole == AXSheet、または AXIdentifier == "open-panel"（非モーダル、Issue #83）
-    let confirmTitles: Set<String> = ["開く", "Open", "選択", "Choose", "追加", "Add", "アップロード", "Upload"]
-    let hasConfirm = window.descendants(role: kAXButtonRole, maxDepth: 6)
-        .contains { confirmTitles.contains($0.title ?? "") }
-    let hasFileList = window.descendants(roles: [kAXBrowserRole, kAXOutlineRole, kAXTableRole], maxDepth: 6).isEmpty == false
-        || window.descendants(role: kAXListRole, maxDepth: 6)
-            .contains { ($0.attr(kAXSubroleAttribute) as String?) == "AXCollectionList" }  // アイコン表示
-    let isSavePanel = window.descendants(role: kAXTextFieldRole, maxDepth: 6)
-        .contains {
-            [$0.attr(kAXDescriptionAttribute) as String?, $0.title].contains {
-                $0?.contains("Save") == true || $0?.contains("保存") == true || $0?.contains("名前") == true
-            }
-        }
-    return hasConfirm && hasFileList && !isSavePanel
-}
-```
+判定は `OpenPanelClassifier` が `.openPanel` / `.savePanel` / `.missingElements` を返す（#134）。
+
+- ダイアログ・シート、または `open-panel` / `save-panel` 識別子のウィンドウを候補にする。
+- 開くパネルは、既知の開く/選択ボタンとファイル一覧を必須とする。
+- 保存パネルは、`save-panel` 識別子、または検索欄以外の名前欄（説明/タイトルが「Save」「保存」「名前」を含む）で区別する。保存/開く/選択ボタンと一覧を必須とし、`save-panel` 識別子があるコンパクト表示だけ一覧を省略できる。
+- `save-panel` 識別子は候補を分類するたびに読み、名前欄を読めなくても開くパネルには戻さない。要素不足は再確認、読み取りエラーは未確定として扱う。
+- `PanelContext.kind` をパレット・注入へ渡す。保存パネルの選択モードはフォルダのみで、推定の再試行は行わない。
+
 
 - ロールが `AXSheet` の要素も候補にする（サブロールだけでなく、シートは通常ロールも `AXSheet` のため。当初案のコードはサブロールのみ比較していた、PR #56）。
-- `AXIdentifier` が `open-panel` のトップレベルのウィンドウも候補にする。非モーダルの NSOpenPanel（NSDocumentController の「ファイル > 開く…」。TextEdit の ⌘O など書類ベースのアプリ、`begin(completionHandler:)`）は、ホストのウィンドウ一覧に AXWindow として現れるが、サブロールが `AXDialog` ではなく `AXStandardWindow`（`AXModal` は false）になり、当初の条件 1 で弾かれていた。`runModal`（`choose folder` など）は `AXDialog`。識別子はモーダルでも同じ `open-panel`、保存パネルは `save-panel` で、ローカライズされない（macOS 27 の自プロセスのパネルで確認。ウィンドウの所有者はホストのプロセスで、中身はリモートビュー）。通常のウィンドウ全般は、これまでどおり候補にしない。`AXIdentifier` は、ロール・サブロールで候補にならないトップレベルのウィンドウでだけ、ウィンドウごとに 1 回読んでキャッシュする（Issue #83）。ロール・サブロールと同じく、識別子もアプリが決める属性で、パネルであることの証明にはならない（候補にする手がかりとしてだけ使い、条件 2〜4 の判定を経る）。偽のパネルでパレットが出ても、注入は利用者の確定と注入先の確認（§3）を経る点は、`AXDialog` による既存の条件と変わらない。
+- `AXIdentifier` が `open-panel` のトップレベルのウィンドウも候補にする。非モーダルの NSOpenPanel（NSDocumentController の「ファイル > 開く…」。TextEdit の ⌘O など書類ベースのアプリ、`begin(completionHandler:)`）は、ホストのウィンドウ一覧に AXWindow として現れるが、サブロールが `AXDialog` ではなく `AXStandardWindow`（`AXModal` は false）になり、当初の条件 1 で弾かれていた。`runModal`（`choose folder` など）は `AXDialog`。識別子はモーダルでも同じ `open-panel`、保存パネルは `save-panel` で、ローカライズされない（macOS 27 の自プロセスのパネルで確認。ウィンドウの所有者はホストのプロセスで、中身はリモートビュー）。通常のウィンドウ全般は、これまでどおり候補にしない。候補を選ぶ際はロール・サブロールで候補にならないウィンドウの識別子をキャッシュする。分類時にも保存種別を確実に保持するため識別子を読む（#134）。ロール・サブロールと同じく、識別子もアプリが決める属性で、パネルであることの証明にはならない（候補にする手がかりとしてだけ使い、条件 2〜4 の判定を経る）。偽のパネルでパレットが出ても、注入は利用者の確定と注入先の確認（§3）を経る点は、`AXDialog` による既存の条件と変わらない。
 - 確定ボタンに「アップロード」/「Upload」を追加した（Safari の `input[type=file]` パネル対策。TST-001 S-06）。
 - ファイル一覧の条件（判定条件 3）に、アイコン表示（ロールが `AXList` でサブロールが `AXCollectionList` の要素）を加えた。`AXList` 全般ではなくサブロールを `AXCollectionList` に限定したのは、`AXList` が設定シートの一覧などファイル一覧でない要素にも使われ、限定しないと確定ボタンを持つ設定シート等を開くパネルと誤判定するため（`AXCollectionList` は `NSCollectionView` の公開サブロールでローカライズされない）。サブロールは `AXList` の要素だけ読むため、リスト表示・カラム表示の判定では AX 呼び出しは増えない（PR #64）。
 - 子のシートを 2 段まで探す（リモートビューが外側のシートの下にさらにシートを重ねる構成に対応）。ただし、ファイル一覧の行（ファイル名を保存欄と誤認しないため）と、子のシート自体の中（開くパネルでないダイアログをパネルと誤判定しないため）へは降りない。
-- 保存パネルの除外条件は `AXDescription` とタイトルの両方を「Save」「保存」「名前」で調べる（当初案のコードは説明を「Save」、タイトルを「名前」でしか見ておらず、ARCH-001 §6 の「保存」「Save As」とも食い違っていたため統一した、PR #56）。検索フィールドは対象外。
+- 保存パネルの分類条件は `AXDescription` とタイトルの両方を「Save」「保存」「名前」で調べる（当初案のコードは説明を「Save」、タイトルを「名前」でしか見ておらず、ARCH-001 §6 の「保存」「Save As」とも食い違っていたため統一した、PR #56）。検索フィールドは対象外。
 - `descendants` は幅優先で最大 6 階層、1 パネルあたり 400 要素で打ち切る（サンドボックスパネルはリモート要素のため往復コストが高い）。
 - 判定結果は **パネルの要素（ダイアログ・シート）をキーに** キャッシュする（ホストのウィンドウはシートの有無で変わらないため。ウィンドウにはロールと直前のパネルだけを持たせる、PR #56）。要素が欠けていて判定できなかった候補は、間隔を倍々に空けて判定し直す（サンドボックスアプリのパネルは別プロセス描画のため、出現直後は中身がまだ無いことがある）。
 - 判定はクロージャ（`PanelDetector`）ではなく `PanelDetecting` プロトコル（既定実装 `OpenPanelDetector()`）として持つ（PR #56。#17 時点のクロージャ API は削除）。`AXApplicationObserver` の破棄通知は対象要素も判定側へ渡し、走査で見つけたパネルの要素にも `kAXUIElementDestroyedNotification` を追加登録する（最大 8 要素、古いものから解除。PR #46 で見送った対処案を PR #56 で採用）。
 - AX の要素参照には 1 回 0.25 秒のメッセージングタイムアウトを設定する（既定の約 6 秒のままだと応答しないアプリで `axQueue` が止まるため）。タイムアウトした要素は子なしとして扱い、一時的な失敗としてパネルを消えたとはみなさない。
 - `panelAppeared` を送るとき `panel detected` を、パネルの消滅では `panel gone` を info でログに出す（`Log.configure` が必須。TST-001 §4 のスモークスクリプトが grep する。Idle に戻った後の再通知でも出す）。判定のコスト（AX 呼び出し回数・所要ミリ秒）は debug で出す。どちらもパスは含まない（PR #56）。
-- 判定の診断を debug で出す（`logLevel debug`、Issue #83）。ウィンドウを初めて見たときと候補を判定したとき（判定し直しを含む）だけ、`panel check (…)` を 1 行ずつ出す: 対象（ウィンドウ / シート）、role・subrole・AXIdentifier、候補にした理由、弾いた条件（`notCandidate` / `noConfirmButton` / `noFileList` / `looksLikeSavePanel`、探索の上限で打ち切ったら `truncated`。中身を読めなかった候補は `unreadable` を候補ごとに 1 回だけ）、子孫の要約（ボタンの表題と有効状態、一覧の role・subrole、入力欄の説明・タイトルの有無と一致した保存パネルの語、訪問数と深さ、role ごとの数）。走査の要約 `panel scan (pid, bundleId, windows)` は変わったときだけ、張り付け・AXObserver の失敗・ウィンドウ生成とフォーカス移動の通知は `panel watch …` で出す。パス・ファイル名・ウィンドウタイトル・入力欄の文字列は出さない（アプリが決める文字列は、決まった値だけをそのまま出し、それ以外は分類だけを出す。ファイル名などを含み得るため。role・subrole は SDK が定めた AX の定数（`KnownAXRoles`。「AX で始まる」などの形では見分けない）だけ、AXIdentifier は `open-panel` / `save-panel` だけ、ボタンの表題はパネルでよく使う表題（確定ボタン・キャンセル・新規フォルダなど）だけ。それ以外は `<other len: 3, contains: 開く>` のように長さと、含む確定ボタンの表題（AXIdentifier は `panel`）だけ）。要約のための AX の読み取りは debug のときだけ行い、失敗しても判定の結果を変えない。`open panel classified` の `axCalls` からは除き、`diagnosticAXCalls` として別に出す（`elapsedMs` には含まれる）。
+- 判定の診断を debug で出す（`logLevel debug`、Issue #83）。ウィンドウを初めて見たときと候補を判定したとき（判定し直しを含む）だけ、`panel check (…)` を 1 行ずつ出す: 対象（ウィンドウ / シート）、role・subrole・AXIdentifier、候補にした理由、弾いた条件（`notCandidate` / `noConfirmButton` / `noFileList`、探索の上限で打ち切ったら `truncated`。中身を読めなかった候補は `unreadable` を候補ごとに 1 回だけ）、子孫の要約（ボタンの表題と有効状態、一覧の role・subrole、入力欄の説明・タイトルの有無と一致した保存パネルの語、訪問数と深さ、role ごとの数）。走査の要約 `panel scan (pid, bundleId, windows)` は変わったときだけ、張り付け・AXObserver の失敗・ウィンドウ生成とフォーカス移動の通知は `panel watch …` で出す。パス・ファイル名・ウィンドウタイトル・入力欄の文字列は出さない（アプリが決める文字列は、決まった値だけをそのまま出し、それ以外は分類だけを出す。ファイル名などを含み得るため。role・subrole は SDK が定めた AX の定数（`KnownAXRoles`。「AX で始まる」などの形では見分けない）だけ、AXIdentifier は `open-panel` / `save-panel` だけ、ボタンの表題はパネルでよく使う表題（確定ボタン・キャンセル・新規フォルダなど）だけ。それ以外は `<other len: 3, contains: 開く>` のように長さと、含む確定ボタンの表題（AXIdentifier は `panel`）だけ）。要約のための AX の読み取りは debug のときだけ行い、失敗しても判定の結果を変えない。`open panel classified` の `axCalls` からは除き、`diagnosticAXCalls` として別に出す（`elapsedMs` には含まれる）。
 - パレットを表示するたびに `palette shown (id: …)` を info でログに出す（`PalettePresenter` がウィンドウを出した直後。同じパネルの再表示・ホットキーでの再表示でも出す）。`panel detected (id: …)` と同じパネル ID を含むため、同じ ID の `panel detected` の後の最初の `palette shown` とのタイムスタンプ（ミリ秒）の差を検知レイテンシ（FR-DETECT-03）として計測できる（#30）。パスは含まない。
 - サンドボックスアプリでは、パネルは `openAndSavePanelService` のプロセスで描画されるが、AX ツリー上はホストアプリのウィンドウの `AXSheet` 子要素（シート型）か、ホストのウィンドウ一覧の AXWindow（ダイアログ型・非モーダル。上記）として見える。ホスト側の観測だけで検知できるが、要素アクセスの往復が遅いため判定は `axQueue` 上で同期的に行う（各ウィンドウに判定関数を適用する形。DSN-001 の当初案は判定関数を async にする想定だったが、axQueue 上の 1 ジョブにまとめる方が単純で速い、PR #46）。
 
@@ -235,3 +225,13 @@ func isOpenPanel(_ window: AXUIElement) -> Bool {
 - 起動時・ポーリングとも `AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt: false])` に統一する（`AccessibilityPermission.currentStatus()`。当初案はポーリングに `AXIsProcessTrusted()` としていたが、意味は同じで「プロンプトを出さない」ことをコード上で明示するため統一した、PR #37）。未付与なら StatusItem にバッジを出し、`PanelWatcher.start()` は呼ばない。
 - 権限変更の検知: 5 秒間隔でポーリングする（付与直後に自動で有効化するため）。実装は `DispatchSourceTimer` ではなく `Task.sleep` のループ（`ValueChangePoller`）で、生成時に状態を読み、以降は変化があったときだけ通知する。
 - 権限のないプロセスから他アプリへ AX を呼ぶと、`apiDisabled` ではなく `cannotComplete (-25204)` が返る（macOS 26 で実機確認済み）。エラーコードでは権限の有無を判定できないため、PanelInjector は注入開始時に `AccessibilityPermission.currentStatus()` で直接確認する（DSN-001 §3.1、PR #37 / #45）。
+
+## 保存先への移動（#134）
+
+`AppCoordinator`、`PanelInjector`、`PathInjectionFlow` の各段階で、保存パネルの `autoConfirm` を false にする。Cmd+Enter も同じ制御を通す。パレットは `include_files` に関わらずフォルダのみを表示し、注入直前にも移動先が実在するディレクトリかを確認する。
+
+注入先を記録した後、`SaveFilenameSearch` が同一パネル内の名前欄と保存/選択ボタンの組を探す。検索欄・別シート・ファイル一覧内のリネーム欄は対象外とし、複数の名前欄が一致する場合は中断する。元のファイル名（拡張子を含む）はメモリにだけ保持する。欄や値を読めなければキー送出前にエラーにする。
+
+既存の主方式（⌘⇧G / ペースト）・副方式（移動先欄の AX セット）でフォルダへ移動し、元の名前欄の値が変わっていれば AXValue で復元する。復元前にも同じ注入先が最前面かを確かめ、復元後の値を検証する。移動の失敗時にも、キャンセルされておらず同じ注入先が有効なら復元を試みる。キャンセル・別アプリへの切り替え後は追加の書き込みをしない。復元に失敗した場合も成功や履歴記録とはせずエラーを表示する。保存ボタンの押下や名前欄への Return は行わない。
+
+制約: ローカライズされた未知のボタン/名前ラベル、識別子の無いコンパクト表示、独自の保存 UI は検知または名前取得に失敗し得る。標準の保存操作は利用者が継続できる。実機の TextEdit・サンドボックス経由・日本語名・既存ファイルと同名の挙動は SAVE-01〜05 で確認する。
