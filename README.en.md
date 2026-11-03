@@ -182,6 +182,24 @@ effect.
 | `disabled_apps` | `[]` | Bundle IDs of apps where the palette never appears (for example `["com.apple.finder"]`) |
 | `ignore` | `["node_modules", ".git", "target", "DerivedData", ".build"]` | Directory names skipped while scanning |
 | `enabled` in `[ghq]` | `true` | Include repositories listed by `ghq list -p` |
+| `enabled` in `[zoxide]` | `false` | Include directories from zoxide history |
+| `[favorites]` | Empty table | Map aliases to paths and prioritize matching favorites |
+
+Add favorites at the end of the configuration file:
+
+```toml
+[favorites]
+"Work" = "~/repos/my-project"
+"Invoices" = "~/Documents/invoices"
+```
+
+Both the alias and the actual path are searchable. Favorites appear first in
+an empty search; while typing, only matching favorites receive priority.
+Duplicate paths from history, roots, ghq, and zoxide are merged into one row. Missing
+paths stay hidden, and folder-only dialogs exclude files and packages.
+Within favorites, the usual frecency, last-used time, and path order apply.
+Use one alias per path. Invalid settings (including blank aliases, relative
+paths, or duplicate paths) keep the previous configuration active.
 
 The initial `roots` depends on your environment at first launch: the ghq root
 when `ghq root` resolves to an absolute path, otherwise your home directory
@@ -189,6 +207,24 @@ when `ghq root` resolves to an absolute path, otherwise your home directory
 consider narrowing `roots` to the directories you use most, for example
 `roots = ["~/repos", "~/Documents"]`. openpath never overwrites an existing
 file.
+
+### Use zoxide history
+
+To include directories from [zoxide](https://github.com/ajeetdsouza/zoxide), add:
+
+```toml
+[zoxide]
+enabled = true
+```
+
+openpath searches the login shell PATH and standard paths such as Homebrew.
+It reads `_ZO_DATA_DIR` from its launch environment, defaulting to
+`~/Library/Application Support/zoxide`. A value set only in shell rc files
+is not inherited by GUI launches. To protect the original history, openpath
+copies the database to a temporary directory and runs `zoxide query --list --all`
+against the copy. Only existing directories are included; duplicate paths are
+merged with favorites, roots, ghq, and openpath history. zoxide scores are not
+imported, so openpath history determines ranking below matching favorites.
 
 ## Permissions
 

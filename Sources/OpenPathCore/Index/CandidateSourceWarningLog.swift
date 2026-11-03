@@ -62,6 +62,7 @@ extension CandidateSourceKind {
     /// ログのメッセージに使うソースの種別名。ルートのパスは含めない（パスは `logPath` を debugPath で出す）
     var logLabel: String {
         switch self {
+        case .favorites: "favorites"
         case .history: "history"
         case .root: "roots"
         case .ghq: "ghq"

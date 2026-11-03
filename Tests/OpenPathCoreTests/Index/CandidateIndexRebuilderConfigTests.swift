@@ -37,7 +37,8 @@ struct CandidateIndexRebuilderConfigTests {
                 includeFiles: self == .includeFiles ? !base.includeFiles : base.includeFiles,
                 ignore: self == .ignore ? base.ignore + ["vendor"] : base.ignore,
                 ghq: self == .ghq ? GhqConfig(enabled: !base.ghq.enabled) : base.ghq,
-                zoxide: self == .zoxide ? ZoxideConfig(enabled: !base.zoxide.enabled) : base.zoxide
+                zoxide: self == .zoxide ? ZoxideConfig(enabled: !base.zoxide.enabled) : base.zoxide,
+                favorites: base.favorites
             )
         }
     }

@@ -19,6 +19,25 @@ struct ZoxideConfigTests {
         #expect(result.warnings == [.unknownKey("zoxide.extra")])
     }
 
+    @Test("お気に入りと zoxide を同じ設定から読み、別名を未知キーにしない")
+    func decodesAlongsideFavorites() throws {
+        let source = """
+            [zoxide]
+            enabled = true
+            extra = 1
+            [favorites]
+            "仕事" = "~/repos/project"
+            "zoxide" = "~/Documents"
+            """
+        let result = try ConfigDecoder(homeDirectory: "/Users/example").decode(TOMLParser.parse(source))
+        #expect(result.config.zoxide.enabled)
+        #expect(result.config.favorites == [
+            Favorite(name: "zoxide", path: "/Users/example/Documents"),
+            Favorite(name: "仕事", path: "/Users/example/repos/project")
+        ])
+        #expect(result.warnings == [.unknownKey("zoxide.extra")])
+    }
+
     @Test("不正な型を zoxide のキーパス付きで報告する")
     func reportsInvalidTypes() throws {
         try ConfigErrorCase("zoxide = true", key: "zoxide", .typeMismatch(expected: .table, actual: .bool)).verify()

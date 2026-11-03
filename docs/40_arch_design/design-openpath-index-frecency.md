@@ -25,9 +25,9 @@ FR-PALETTE-02/03/06、FR-SOURCE-01〜05、FR-HISTORY-01〜04、FR-CONFIG-01。
 ```swift
 struct Candidate: Hashable {
     let path: String          // 正規化済み絶対パス
-    let name: String          // 表示名（lastPathComponent）
+    let name: String          // 表示名（お気に入りは別名、それ以外は lastPathComponent）
     let isDirectory: Bool
-    let source: Source        // .history / .root(String) / .ghq / .zoxide
+    let source: Source        // .favorites / .history / .root(String) / .ghq / .zoxide
     let frecency: Double      // HistoryStore 由来。履歴なしは 0
     let lastUsed: Date?
 }
@@ -66,21 +66,23 @@ protocol ChangeTrackingCandidateSource: CandidateSource {
 | ソース | 収集方法 | 更新契機 |
 | --- | --- | --- |
 | history | `HistoryCandidateSource(store:)` → `HistoryStore.entries` | 確定のたび（`CandidateIndexRebuilder.refreshHistory()` 経由。全件再構築のカウントには含めない） |
+| favorites | `FavoriteCandidateSource` が設定のパス自身を存在・種別確認し、別名付きの `SourceItem` を返す。配下を走査しない | 起動時、周期、手動再構築、favorites の変更 |
 | roots | `RootCandidateSource.sources(for: config)` が **ルートごとに 1 ソース**を生成。`RootDirectoryScanner`（`FileManager.enumerator` を同期 API でラップ）で `config.depth` まで走査。`.skipsHiddenFiles`（名前が `.` で始まる項目と、隠し属性 UF_HIDDEN の項目。ホームの `~/Library` も後者として配下ごと除外される）、`node_modules` / `.git` / `target` / `DerivedData` / `.build` は既定で除外（`config.ignore` で変更可） | 起動時、全件再構築が終わってから 5 分後（変更が無ければ走査しない。下記）、メニューの「候補を再構築」、`roots` / `depth` / `ignore` / `ghq.enabled` の設定変更 |
+| zoxide | 有効時だけ `ZoxideCandidateSource` が一時 DB コピーへ `zoxide query --list --all` を実行。スコアは取り込まず、存在するディレクトリだけを返す（詳細は下記） | 起動時、周期、手動再構築、設定変更 |
 | ghq | `GhqCandidateSource(lister:)` → `GhqRepositoryLister` が `Process` で `ghq root` → `ghq list -p` を実行。`PATH` は `LoginShellPathResolver`（login shell から取得するキャッシュ持ちの actor）で解決し、候補ソースと ConfigStore（§6）で 1 インスタンスを共有する | 起動時、全件再構築が終わってから 5 分後（結果が前回と同じなら差し替えない。下記）、メニューの「候補を再構築」、設定変更 |
 
 - 走査は `Task.detached(priority: .utility)` から `snapshot()` を呼び、完了した時点で `CandidateIndex.replace(source:with:)` によりアトミックに差し替える（同一ソースの走査は直列）。ルートが設定から外れた場合は空配列で `replace` する。
 - roots は 1 ルートあたり 20,000 件で打ち切る（`RootDirectoryScanner` が発生元で警告ログを出す）。パッケージ（`.app` 等）判定は `includingPropertiesForKeys: [.isPackageKey]` を先読みせず、**拡張子のあるディレクトリにだけ個別に問い合わせる**（先読みは LaunchServices を引くため 5,000 件の列挙だけで数百 ms かかった。ベンチの最小値が 289ms → 45ms に改善、PR #51）。
 - ghq: login shell から取れた PATH に既定 PATH（`/opt/homebrew/bin` 等）の不足分を補う。`ghq root` が空なら `emptyRoot` として失敗扱いにし、`ghq list -p` は実行しない（`ghq list -p` の出力が空なのは失敗ではなく空の一覧として返す）。login shell 起動のフォールバック結果はキャッシュする（5 分ごとの再構築のたびに待たないため）。既定 config 生成（§6）には、`ghq root` だけを実行する `root()` を `GhqRootProviding` として使う（`ghq list -p` は実行しない。PR #43 / #50）。
-- 全件の再構築は「5 分ごと」の固定時刻ではなく「前回の再構築を終えてから 5 分」で数える。設定の変更ではどの設定に依存するソースかを問わず全ソースを走査し直す（対応表を持つ複雑さを避けるため。候補ソースに関わらない設定（hotkey・auto_confirm・disabled_apps）では再構築しない）。roots から外れたルート・無効にした ghq の除去は、次の再構築の冒頭で直列に行う（設定変更時に即座に `replace(source:with: [])` すると、走査中の差し替えと並行して後勝ちで候補が復活しうるため、PR #61）。
+- 全件の再構築は「5 分ごと」の固定時刻ではなく「前回の再構築を終えてから 5 分」で数える。設定の変更ではどの設定に依存するソースかを問わず全ソースを走査し直す（対応表を持つ複雑さを避けるため。候補ソースに関わらない設定（hotkey・auto_confirm・disabled_apps）では再構築しない）。roots から外れたルート・削除したお気に入り・無効にした ghq / zoxide の除去は、次の再構築の冒頭で直列に行う（設定変更時に即座に `replace(source:with: [])` すると、走査中の差し替えと並行して後勝ちで候補が復活しうるため、PR #61）。
 - **周期の再構築では、変更の無いソースを走査も差し替えもしない**（Issue #78。FR-SOURCE-04 の 5 分間隔は維持する）。起動時・手動の「候補を再構築」・設定変更では従来どおり全ソースを必ず走査し直す。判定はソース単位で、再構築 1 回で収集するソースの決定と直近の記録の保持は `CandidateSourceMarkers` が行う。
   - roots: 走査のときに、中身を読むディレクトリ（ルートと depth 未満の各ディレクトリ。除外・隠し・パッケージ・シンボリックリンクは中身を読まないため含まない）の状態を、中身を読む前に `stat` で記録する（`RootScanMarker`。デバイス・inode・mtime・ctime）。周期のたびにそれらだけを `stat` し直し、どれも同じなら走査しない。ディレクトリの mtime は直下の追加・削除・改名で変わり、ctime は権限・隠し属性の変更でも変わるため、候補（depth までの一覧）が変わりうる変化はここに現れる。検知しないのは、シンボリックリンクのリンク先の中や種別の変化と、depth の階層の項目の隠し属性の変化（手動の「候補を再構築」で反映する）。
   - roots の記録の数と上限: 記録するディレクトリはルートを除けば候補に含まれるディレクトリの一部なので、ルートあたりの上限（20,000 件）で数が抑えられる。`stat` は 1 回約 1.3µs で、最悪（depth 未満のディレクトリだけで 20,000 件）でも約 25ms と、全件の走査（約 90ms）と差し替え（約 65ms）より軽いため、別の上限は設けない（計測はいずれも Apple M5 Pro・リリースビルド、PROJ-TST-003 §3.2）。ホームを depth 2 で走査する既定の roots（`["~"]`、§6）では、記録するのはホームと直下の表示されるディレクトリだけで、その数は候補の数（開発者のホームで 147 件、§6）より少なく、確認は 1 回 1ms 未満。上限で打ち切った走査も、読んだディレクトリが同じなら同じ候補になるため記録する。ルートを走査できなかったときと、中身を読めないディレクトリがあったとき（権限が無い、プライバシーの許可が無い `~/Documents` 等）は記録を作らず、次の周期も走査する（読めるようになってもディレクトリの状態が変わるとは限らないため）。隠しファイルの置き換え（ホーム直下の dotfile 等）でもルートの mtime は変わるため走査し直すが、候補が同じなら差し替えない（下記）。
   - ghq: `ghq list -p` の結果の比較で判定し、`ghq root` 配下の構造（host/owner/repo）の mtime は使わない。リポジトリかどうかは ghq が VCS のディレクトリ（`.git` 等）の有無で決め、階層も任意（サブグループ等）のため、既存のディレクトリをリポジトリにした場合などを構造の mtime では捉えられないため。子プロセス（`ghq root` → `ghq list -p`）の CPU 時間は 1 回約 37ms（リポジトリ 104 件）、本体側は約 1.4ms で、5 分ごとなら 0.02% 未満。
   - history: 現状どおり、確定のたびの `refreshHistory()` と周期のたびに取り直す。
-  - `CandidateIndex.replace(source:with:)` は、前処理した候補（パスと種別の並び）が今のソースの候補と同じなら何もせず false を返す。統合し直すと全ソースの候補数に比例した CPU（候補 20,000 件で約 65ms。同じと分かれば約 0.9ms）と一時的なメモリを使うため。
+  - `CandidateIndex.replace(source:with:)` は、前処理した候補（パス・種別・別名の並び）が今のソースの候補と同じなら何もせず false を返す。別名だけが変わった場合も名前の前処理と前置フィルタを更新する。統合し直すと全ソースの候補数に比例した CPU と一時的なメモリを使うため。
 - 再構築のメモリのピークを抑える（Issue #78）: 走査の列挙で得る URL・リソース値は autorelease されるため、1 件ごとに `autoreleasepool` で解放する（スレッドのプールに任せると走査の後もしばらく全件分が残り、候補 20,000 件の走査の後の phys_footprint が約 6MB 多かった）。前処理済みの対象（`CandidateTargets`、64 バイト）は参照型にして、`PreparedCandidate` と `CandidateCatalog.Entry` には参照だけを持たせる（1 件あたり 96→32 バイト、112→48 バイト）。統合の配列と表は先に確保し、統合に使った表を並べ替えた後の添字に書き換えて使い回す（伸ばしながらの作り直しや表の作り直しで一時的に重なる分を避ける）。
-- 同一パスが複数ソースにある場合は 1 件に統合し、`source` は優先度 history > ghq > zoxide > roots で決める。統合キーはファイルシステムを引かない字句的な正規化（末尾 `/`・`//`・`.`・`..`。`RootPathResolver` と同じ規則）を使う。isDirectory の判定が食い違う場合はファイル扱いにする（フォルダ選択のパネルにファイルを誤って出すより、ディレクトリを 1 件出し損ねる方が害が小さいため）。絶対パスにできない候補は含めない。frecency / `lastUsed` は同じ正規化をかけた上で `HistoryStore` から引く（PR #57）。
+- 同一パスが複数ソースにある場合は 1 件に統合し、`source` は優先度 favorites > history > ghq > zoxide > roots で決める。統合キーはファイルシステムを引かない字句的な正規化（末尾 `/`・`//`・`.`・`..`。`RootPathResolver` と同じ規則）を使う。isDirectory の判定が食い違う場合はファイル扱いにする（フォルダ選択のパネルにファイルを誤って出すより、ディレクトリを 1 件出し損ねる方が害が小さいため）。絶対パスにできない候補は含めない。frecency / `lastUsed` は同じ正規化をかけた上で `HistoryStore` から引く（PR #57）。
 - 空クエリで履歴（frecency > 0）が 8 件未満のときは、frecency 0 の候補をパスの昇順で補う（初回起動で履歴が空のときに「一致する候補がありません」を出さないため、PR #57）。
 - 候補数が 10,000 件以上のときの前置フィルタは「取りこぼさない」よう、先頭 2 文字（正規化後）のどちらかを含まない候補を外す判定として実装する（候補ごとに含む文字を 256 ビットへ畳んで 1 回の AND で判定。ファジーマッチはクエリを部分列として含む必要があるため結果は変わらない、PR #57）。
 - 履歴をクリアしたときは、`HistoryStore.clear()` の直後に `CandidateIndexRebuilder.historyDidClear(didRemove:)` を呼ぶ。履歴の候補は再構築の途中でもその場で取り除き（`CandidateIndex.invalidate(source: .history)`）、走査中の再構築は取り消さずに続ける（Issue #92）。
@@ -105,8 +107,16 @@ protocol ChangeTrackingCandidateSource: CandidateSource {
 - 元 DB の変更を防ぐため、`ZoxideDatabaseCopy` が `_ZO_DATA_DIR`（openpath の起動環境）を優先し、なければ macOS の `~/Library/Application Support/zoxide` から `db.zo` / `db.txt` を一時ディレクトリへ読み取りコピーする。DB は解析せず、CLI に渡す `_ZO_DATA_DIR` だけをコピーへ差し替える。コピーはディレクトリ 0700・ファイル 0600 の通常ファイルにし、シンボリックリンクやハードリンクを共有しない。1 ファイル 32 MiB を上限に小さなチャンクでコピーし、終了・失敗・キャンセルで削除する。元が空なら CLI を実行せず空ソースとする。未知の将来形式は推測せず、対応する既知 DB がなければ空になる。
 - 公開 CLI の選択根拠: [公式 man](https://github.com/ajeetdsouza/zoxide/blob/main/man/man1/zoxide-query.1) の list / all を使用する。query は [v0.9.8 の実装](https://github.com/ajeetdsouza/zoxide/blob/v0.9.8/src/cmd/query.rs) でも保存を呼び、[DB のソート](https://github.com/ajeetdsouza/zoxide/blob/v0.9.8/src/db/mod.rs) が変更フラグを立てるため、読み取りのコマンド名だけでは元 DB の保護にならない。一時コピーはこの保存やバージョン移行を隔離する。
 - 出力は一行一絶対パスとして解釈し、空白・日本語を保持する。改行を含むパス名は CLI の一行形式では扱えない。字句正規化して重複を除き、ローカルの存在・ディレクトリ種別を確認する。ファイル・パッケージ・不存在のパスは含めず、ディレクトリへのリンクは候補にできる。
-- 他ソースと同じ正規化キーで統合し、ソースの優先度は history > ghq > zoxide > roots とする。zoxide のスコアや最終使用日時はインポートしないため、openpath の履歴順位を維持する。起動時・5 分ごと・手動再構築・設定変更で再取得し、前回と同じ候補なら共有索引の差し替えを省く。
+- 他ソースと同じ正規化キーで統合し、ソースの優先度は favorites > history > ghq > zoxide > roots とする。zoxide のスコアや最終使用日時はインポートしないため、openpath の履歴順位を維持する。起動時・5 分ごと・手動再構築・設定変更で再取得し、前回と同じ候補なら共有索引の差し替えを省く。
 - `_ZO_DATA_DIR` が shell rc だけで設定されている場合は GUI の起動環境へ継承されない。設定を自動で読み取るために追加の shell 起動は行わない。
+
+### お気に入りと別名（#130）
+
+- `[favorites]` のキーを表示名、文字列の値をパスとして読み、`Favorite(name:path:)` を作る。パスは roots と同じ字句的な正規化と `~` 展開を行う。空白だけの別名・相対パス・非文字列・正規化後のパス重複は設定エラー。テーブルに出現順がないため、デコードの順番は別名の昇順で決定的にする。
+- `SourceItem.displayName` は通常ソースでは nil、お気に入りでは別名。統合の優先度は favorites > history > ghq > zoxide > roots とし、同じパスの候補を一件にする。種別が食い違う場合のファイル優先は従来どおり。別名は `Candidate.name` と行の表示名へ引き継ぎ、注入する値は実パスを保つ。
+- 名前のマッチ対象に別名、パスのマッチ対象に実パスを使う。前置フィルタには両方の文字を含める。マッチしないお気に入りは候補にならず、一致したお気に入りを通常候補より前に並べる。空検索でもお気に入りを先にし、各グループでは既存の frecency・最終使用日時・パス順を保つ。空検索は合計最大8件。
+- 名前のマッチ位置は表示中の別名へハイライトする。実パスがマッチした場合は場所欄に末尾要素まで含めた実パスを出してハイライトする（通常名では末尾要素を名前欄に表示する）。直接入力は `~` 展開・字句正規化したパスで索引を正確に引くため、ファジー検索や件数制限で対象行が落ちても別名と最終使用日時を維持する。存在・現在の種別は直接入力用の検証で確かめる。
+- favorite の変更は候補ソースに関わる設定変更として再構築する。お気に入りを外すと別名と優先表示を取り除き、他ソースに同じパスがあれば通常の名前へ戻る。履歴のクリアは設定済みのお気に入りを消さない。
 
 ## 4. frecency スコア
 
@@ -165,13 +175,17 @@ ignore = ["node_modules", ".git", "target", "DerivedData", ".build"]
 
 [ghq]
 enabled = true
+
+[favorites]
+"仕事" = "~/repos/my-project"
+"請求書" = "~/Documents/invoices"
 ```
 
 - **既定値**（キーを省略したときの値）: `roots` は空配列（環境によっては `~/repos` 等が存在しないため。初回に生成するファイルには ghq root かホームを明示して書く。省略時の値をそれに合わせない理由は「既定値の生成」を参照）。`disabled_apps` も空（REQ-001 FR-DETECT-04「既定は全アプリ有効」のため。サンプルの `com.apple.finder` は記入例）。`disabledApps` は `Set<String>`（包含判定にしか使わないため）、`ignore` は `[String]` のまま（PR #41）。
 - `roots` の正規化は字句的（空要素・`.`・`..`・末尾 `/` を除く。ファイルシステムは参照せずシンボリックリンクも解決しない）。相対パス・`~user` 形式・空文字は `invalidRootPath` エラーにする。正規化後の重複は先に書かれたものを残す。`depth` は下限 0（負値はエラー）、上限なし（roots 走査自体が 1 ルート 20,000 件で打ち切られるため、PR #41）。
 - **ホットキーの文法**: 修飾キーは `ctrl`/`control`、`shift`、`opt`/`option`/`alt`、`cmd`/`command`。キーは A–Z・0–9・記号 11 種（`-` `=` `[` `]` `\` `;` `'` `,` `.` `/` とグレーブアクセント）・`space`・`return`/`enter`・`tab`・`delete`/`backspace`・`escape`/`esc`・矢印・`f1`–`f12`。大文字小文字・順序・前後の空白は区別しない。**修飾キーが shift だけの場合はエラー**（`shiftOnlyModifier`。大文字入力そのものを奪うため）。値は Carbon の `kVK_*` / 修飾キー定数と同じ表現で持ち（`RegisterEventHotKey` に変換なしで渡せる）、`Hotkey.description` は `ctrl+opt+shift+cmd+<key>` の順で正規表記を返す（PR #41）。
 - 読み込み: 起動時 + ファイルのディレクトリ監視（`DispatchSource`、メインキューで配送）。`rename` / `delete` 後にまだファイルが無ければ 200ms 間隔で最大 10 回（約 2 秒）リトライし、それでも無ければ `lastError = .fileNotFound` を公開する。以降の再作成は親ディレクトリの書き込みイベントで拾う。デバウンスは 100ms（PR #50）。
-- パース失敗時: 直前の有効設定を維持し、StatusItem にバッジ + ログ出力。エラーはキーパス（`ghq.enabled` 等。`TOMLTable` は出現位置を持たないため行番号の代わり）で示す。複数の誤りがあれば `roots → depth → include_files → auto_confirm → hotkey → disabled_apps → ignore → ghq` の順で最初の 1 件を報告する。未知のキーはエラーにせず `ConfigWarning.unknownKey(キーパス)` として警告する（PR #41）。
+- パース失敗時: 直前の有効設定を維持し、StatusItem にバッジ + ログ出力。エラーはキーパス（`ghq.enabled` 等。`TOMLTable` は出現位置を持たないため行番号の代わり）で示す。複数の誤りがあれば `roots → depth → include_files → auto_confirm → hotkey → disabled_apps → ignore → ghq → zoxide → favorites` の順で最初の 1 件を報告する。未知のキーはエラーにせず `ConfigWarning.unknownKey(キーパス)` として警告する（PR #41）。
 - 既定値の生成: ファイルが無い場合に生成する（UX-001 §7）。既存ファイルは上書きしない（`.withoutOverwriting`）ため、生成済みの環境の `roots` は、生成の規則が変わっても変わらない。
   - `roots` は、`ghq root` が絶対パスに解決できればそれにする。ホーム配下なら `~` で書く（dotfiles で別マシンと共有しやすくするため）。
   - ghq が無効・未インストール・失敗した場合と、`ghq root` の結果が絶対パスに解決できない場合（相対パス・`~user`）は `["~"]` にし、ホーム配下を検索対象にする。ghq を使わない利用者でも、初回から候補が 0 件にならないようにするため（2026-09-24 オーナー判断。それまでは空で生成していた）。`~` を絶対パスに展開できないホーム（通常は起きない）では、生成したファイルが読めなくならないよう空にする。
@@ -212,6 +226,15 @@ enabled = true
   [ghq]
   # ghq 管理下のリポジトリ（ghq list -p）を候補に含めるか
   enabled = true
+
+  [zoxide]
+  # ターミナルで使う zoxide のディレクトリ履歴を候補に含めるか
+  enabled = false
+
+  # よく使うパスを別名で検索・優先表示します。名前は引用符で囲んでください
+  [favorites]
+  # "仕事" = "~/repos"
+  # "請求書" = "~/Documents/invoices"
   ```
 
 - ホームを検索対象にしたときの走査（macOS 27 で確認）:

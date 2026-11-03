@@ -1,6 +1,7 @@
 extension CandidateSourceKind {
-    /// 統合時の優先度の段（DSN-002 §3「history > ghq > zoxide > roots」）。宣言順に優先する
+    /// 統合時の優先度の段（favorites > history > ghq > zoxide > roots）。宣言順に優先する
     private enum MergeTier: Int, Comparable {
+        case favorites
         case history
         case ghq
         case zoxide
@@ -13,6 +14,7 @@ extension CandidateSourceKind {
 
     private var mergeTier: MergeTier {
         switch self {
+        case .favorites: .favorites
         case .history: .history
         case .ghq: .ghq
         case .zoxide: .zoxide

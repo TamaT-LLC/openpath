@@ -13,6 +13,7 @@ enum TopLevelConfigKey: String, ConfigKeySet {
     case ignore
     case ghq
     case zoxide
+    case favorites
 }
 
 /// `[ghq]` テーブルのキー
@@ -52,6 +53,11 @@ struct ConfigTableReader<Key: ConfigKeySet> {
 
     func stringArray(_ key: Key) throws(ConfigDecodingError) -> [String]? {
         try value(of: key, expected: .stringArray, \.stringArrayValue)
+    }
+
+    /// 任意の別名をキーにできる設定用に、型だけ確認してテーブルを返す。
+    func table(_ key: Key) throws(ConfigDecodingError) -> TOMLTable? {
+        try value(of: key, expected: .table, \.tableValue)
     }
 
     func subtable<SubKey: ConfigKeySet>(

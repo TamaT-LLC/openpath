@@ -17,6 +17,8 @@ public struct Config: Sendable, Equatable {
     public let ghq: GhqConfig
     /// zoxide の履歴を候補に含めるか。明示的に有効にした場合だけ外部データを読む。
     public let zoxide: ZoxideConfig
+    /// 別名を付けて優先表示するパス。設定の [favorites] から作る。
+    public let favorites: [Favorite]
 
     public init(
         roots: [String] = Config.defaultRoots,
@@ -27,7 +29,8 @@ public struct Config: Sendable, Equatable {
         disabledApps: Set<String> = Config.defaultDisabledApps,
         ignore: [String] = Config.defaultIgnore,
         ghq: GhqConfig = .default,
-        zoxide: ZoxideConfig = .default
+        zoxide: ZoxideConfig = .default,
+        favorites: [Favorite] = []
     ) {
         self.roots = roots
         self.depth = depth
@@ -38,6 +41,18 @@ public struct Config: Sendable, Equatable {
         self.ignore = ignore
         self.ghq = ghq
         self.zoxide = zoxide
+        self.favorites = favorites
+    }
+}
+
+/// お気に入りの表示名と正規化済みの絶対パス。
+public struct Favorite: Sendable, Equatable {
+    public let name: String
+    public let path: String
+
+    public init(name: String, path: String) {
+        self.name = name
+        self.path = path
     }
 }
 
