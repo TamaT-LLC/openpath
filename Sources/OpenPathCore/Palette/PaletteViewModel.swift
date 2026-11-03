@@ -13,12 +13,19 @@ public final class PaletteViewModel {
     public var query = "" {
         didSet {
             guard query != oldValue else { return }
+            if let expandedDirectory, !query.hasPrefix(PaletteQueryExpansion.query(expanding: expandedDirectory, isDirectory: true)) {
+                self.expandedDirectory = nil
+            }
             onQueryChange?(query)
         }
     }
     /// 検索語が変わるたびに呼ばれる。候補を引き直して `replaceRows(_:)` するのは配線側の責務。
-    /// 値が変わったときだけ呼ぶため、初回表示の候補は配線側で別途引くこと
+    /// 語または Tab の検索範囲が変わったときに呼ぶ。初回表示の候補は配線側で別途引くこと
     @ObservationIgnored public var onQueryChange: ((String) -> Void)?
+    /// Tab で明示的に開いた検索範囲。単にパスを入力しただけでは設定しない。
+    public internal(set) var expandedDirectory: String?
+    /// フォルダの読み込み・空・失敗の案内。注入の状態表示とは独立して扱う。
+    public var directoryMessage: String?
     public private(set) var rows: [PaletteRow] = []
     /// 候補（検索の結果）を受け取ったか。`reset()` から最初の `replaceRows(_:keepingSelection:)` までは false。
     /// 結果が届く前の空の `rows` を「一致する候補がありません」と区別するために使う（#91）
@@ -44,10 +51,10 @@ public final class PaletteViewModel {
     /// 候補を受け取って 0 件だったときにリストへ出す案内。候補があるとき・まだ候補を受け取っていないときは nil
     /// （パレットの初出で結果が届く前に「一致する候補がありません」を出さない、#91）
     public var emptyMessage: String? {
-        hasReceivedRows && rows.isEmpty ? PaletteText.noMatches : nil
+        hasReceivedRows && rows.isEmpty ? (directoryMessage ?? PaletteText.noMatches) : nil
     }
 
-    /// フッターの表示。エラー・状態表示 > 構築中 > キーヒントの順に優先する。
+    /// フッターの表示。注入のエラー・状態表示 > フォルダの案内 > 構築中 > キーヒントの順。
     public var footer: PaletteFooterContent {
         switch status {
         case .error(let message):
@@ -55,6 +62,7 @@ public final class PaletteViewModel {
         case .info(let message):
             return .status(message)
         case nil:
+            if let directoryMessage { return .status(directoryMessage) }
             return isBuildingCandidates ? .status(PaletteText.buildingCandidates) : .keyHints
         }
     }
@@ -118,6 +126,8 @@ public final class PaletteViewModel {
         selectedIndex = nil
         isLocked = false
         status = nil
+        expandedDirectory = nil
+        directoryMessage = nil
         // onQueryChange は同期で呼ばれるため、他の状態を戻した後に代入する（通知の中で入れ直した候補を消さない）
         query = ""
     }

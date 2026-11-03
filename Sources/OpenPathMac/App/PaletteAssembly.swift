@@ -18,16 +18,22 @@ final class PaletteAssembly {
 
     /// - Parameters:
     ///   - index: 候補の検索先。クエリと、検索語に打ったパスの存在確認は MainActor の外で走る。
-    ///   - includeFiles: 設定 include_files。候補を引くたびに読む。
-    init(index: CandidateIndex, includeFiles: @escaping @MainActor @Sendable () -> Bool) {
+    ///   - config: include_files と ignore。候補を引くたびに読む。
+    ///   - history: 動的に取得した候補の順位と最終使用日時に使う。
+    init(
+        index: CandidateIndex, config: @escaping @MainActor @Sendable () -> Config,
+        history: @escaping @MainActor @Sendable () -> [HistoryEntry]
+    ) {
         let viewModel = PaletteViewModel()
         let window = PaletteWindow(viewModel: viewModel)
         self.window = window
         presenter = PalettePresenter(
             viewModel: viewModel,
             window: window,
-            includeFiles: includeFiles,
-            search: PaletteCandidateSearch.make(index: index)
+            includeFiles: { config().includeFiles },
+            search: PaletteCandidateSearch.make(index: index),
+            ignoredNames: { Set(config().ignore) },
+            history: history
         )
         keyController = PaletteKeyController(window: window.window, viewModel: viewModel)
     }

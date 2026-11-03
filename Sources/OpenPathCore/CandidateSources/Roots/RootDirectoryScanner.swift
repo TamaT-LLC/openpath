@@ -84,6 +84,8 @@ public struct RootDirectoryScanner: Sendable {
         return RootScanResult(snapshot: collector.snapshot(), marker: recorder.marker())
     }
 
+    /// ルートのリンク先を列挙し、指定された深さと上限まで候補を集める。
+    /// 一覧取得の失敗では変更検知用の記録を無効にし、ルート自身の失敗なら利用不可として返す。
     private func collectDescendants(
         of root: String,
         into collector: inout RootItemCollector,
@@ -92,16 +94,22 @@ public struct RootDirectoryScanner: Sendable {
         // シンボリックリンクのルートはそのままでは列挙できないため、リンク先を列挙する
         let rootURL = URL(filePath: root, directoryHint: .isDirectory).resolvingSymlinksInPath()
         let hasListingFailure = OSAllocatedUnfairLock(initialState: false)
+        let hasRootListingFailure = OSAllocatedUnfairLock(initialState: false)
         guard let enumerator = FileManager.default.enumerator(
             at: rootURL,
             includingPropertiesForKeys: Self.resourceKeys,
             options: Self.enumerationOptions,
             // 読めないサブディレクトリがあっても残りの走査は続ける
-            errorHandler: { _, _ in
+            errorHandler: { url, _ in
                 hasListingFailure.withLock { $0 = true }
+                if url.standardizedFileURL == rootURL.standardizedFileURL {
+                    hasRootListingFailure.withLock { $0 = true }
+                }
                 return true
             }
         ) else {
+            recorder.invalidate()
+            collector.unavailableReason = Self.unavailableReason(ofRoot: root) ?? .unreadable
             return
         }
         defer {
@@ -109,6 +117,9 @@ public struct RootDirectoryScanner: Sendable {
             // 記録を作らず、周期の再構築でも走査し直させる（読めない間は周期のたびに走査する）
             if hasListingFailure.withLock({ $0 }) {
                 recorder.invalidate()
+            }
+            if hasRootListingFailure.withLock({ $0 }) {
+                collector.unavailableReason = Self.unavailableReason(ofRoot: root) ?? .unreadable
             }
         }
 

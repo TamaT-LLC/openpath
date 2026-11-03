@@ -47,7 +47,7 @@ final class AppServices {
                 searchPathProvider: searchPathResolver
             )
         )
-        let palette = PaletteAssembly(index: index) { configStore.config.includeFiles }
+        let palette = PaletteAssembly(index: index, config: { configStore.config }, history: { historyStore.entries })
         let presenter = palette.presenter
         let coordinator = AppCoordinator(
             palette: presenter,

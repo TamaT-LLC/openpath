@@ -2,8 +2,8 @@ import Foundation
 
 /// Tab で選択候補のパスを検索語に展開するときの検索語（UX-001 §4「サブディレクトリを掘る」）。
 ///
-/// 展開後の検索語はそのままファジーマッチに使われるため、候補の `path` と同じ絶対パスで展開する
-/// （"~" に縮めると、絶対パスを持つ候補にマッチしなくなる）。
+/// 候補の `path` と同じ絶対パスで展開する。ディレクトリでは、この接頭辞より後ろだけを
+/// DirectoryQuerySession が直下の名前へマッチさせる（#132）。
 public enum PaletteQueryExpansion {
     private static let separator: Character = "/"
 
