@@ -318,6 +318,7 @@ public final class CandidateIndexRebuilder {
 
 /// 設定のうち、候補ソースの組み立てに関わる値。これが変わったときだけ再構築する
 private struct CandidateSourceSettings: Equatable {
+    let favorites: [Favorite]
     let roots: [String]
     let depth: Int
     let includeFiles: Bool
@@ -325,6 +326,7 @@ private struct CandidateSourceSettings: Equatable {
     let isGhqEnabled: Bool
 
     init(_ config: Config) {
+        favorites = config.favorites
         roots = config.roots
         depth = config.depth
         includeFiles = config.includeFiles

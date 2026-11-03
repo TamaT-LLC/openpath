@@ -60,6 +60,11 @@ public enum DefaultConfigFile {
             # ghq 管理下のリポジトリ（ghq list -p）を候補に含めるか
             enabled = \(GhqConfig.defaultEnabled)
 
+            # よく使うパスを別名で検索・優先表示します。名前は引用符で囲んでください
+            [favorites]
+            # "仕事" = "~/repos"
+            # "請求書" = "~/Documents/invoices"
+
             """
     }
 

@@ -120,7 +120,7 @@ public final class CandidateIndex: Sendable {
     /// 異なるソースの差し替えが並行しても、すべての差し替えを反映した候補が最後に残る。
     /// 同じソースの差し替えが並行した場合は後に反映した方が残るため、同じソースの走査は直列にすること。
     ///
-    /// 前処理した候補（パスと種別の並び）が今の `source` の候補と同じなら、何もせずに false を返す。
+    /// 前処理した候補（パス・種別・別名の並び）が今の `source` の候補と同じなら、何もせずに false を返す。
     /// 統合し直すと全ソースの候補数に比例した CPU と一時的なメモリを使うため、周期の再構築で前回と同じ候補を
     /// 返したソースでは省く（Issue #78）。
     /// - Returns: 候補を差し替えたか。
@@ -185,11 +185,11 @@ public final class CandidateIndex: Sendable {
         }
         guard let base else { return .superseded }
         // 大半は正規化済み・重複なしの同じ並びで届くため、前処理の前に比べて前処理も省く
-        if base.current.elementsEqual(items, by: { $0.path == $1.path && $0.isDirectory == $1.isDirectory }) {
+        if base.current.elementsEqual(items, by: { $0.path == $1.path && $0.isDirectory == $1.isDirectory && $0.displayName == $1.displayName }) {
             return .unchanged
         }
         let prepared = preparer.prepare(items, reusing: base.previous)
-        if base.current.elementsEqual(prepared, by: { $0.path == $1.path && $0.isDirectory == $1.isDirectory }) {
+        if base.current.elementsEqual(prepared, by: { $0.path == $1.path && $0.isDirectory == $1.isDirectory && $0.displayName == $1.displayName }) {
             return .unchanged
         }
         let updated: (sources: [CandidateSourceKind: [PreparedCandidate]], revision: Int)? = state.withLock { state in
@@ -213,6 +213,21 @@ public final class CandidateIndex: Sendable {
             state.catalog = catalog
             state.catalogRevision = revision
         }
+    }
+
+    /// 直接入力の解決済みパスを索引から正確に引き、検索語や結果の件数に依存せず別名と履歴を返す。
+    /// 存在・現在の種別の検証は DirectPathEntry に任せるため、ここではファイルシステムを読まない。
+    func row(atPath path: String) async throws -> PaletteRow? {
+        let entries = await history()
+        try Task.checkCancellation()
+        let catalog = state.withLock { $0.catalog }
+        guard let index = catalog.index(ofPath: path) else { return nil }
+        let entry = catalog.entries[index]
+        let usage = HistoryLookup(entries: entries, now: now(), catalog: catalog).usage(at: index)
+        return PaletteRow(
+            name: entry.displayName ?? CandidatePath.name(of: path), path: path,
+            lastUsed: usage?.lastUsed, isDirectory: entry.isDirectory
+        )
     }
 
     /// `text` にマッチする候補を、総合スコア `fuzzyScore × (1 + log1p(frecency))` の降順で最大 `limit` 件返す。

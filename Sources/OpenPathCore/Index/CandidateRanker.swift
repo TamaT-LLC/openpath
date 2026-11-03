@@ -2,8 +2,8 @@ import Foundation
 
 /// クエリ 1 回分の順位付け（DSN-002 §4〜§5）。`CandidateIndex.query` のうち、履歴を取得した後の同期部分。
 ///
-/// 1. 空クエリ: マッチを行わず frecency の降順。履歴が足りなければ履歴のない候補をパスの昇順で補う
-/// 2. それ以外: name / path へのファジーマッチのスコア × (1 + log1p(frecency)) の降順
+/// 1. 空クエリ: お気に入りを先頭に、各グループでは frecency 順。履歴が足りなければ未使用候補で補う
+/// 2. それ以外: マッチしたお気に入りを先頭に、各グループでは fuzzyScore × (1 + log1p(frecency)) 順
 /// 3. 並べた順に存在を確かめ、存在しない候補を飛ばして `limit` 件まで集める（FR-HISTORY-03）
 ///
 /// 同点は最終使用日時の新しい順（履歴にない候補は後ろ）、さらにパスの昇順とし、順序を決定的にする
@@ -14,6 +14,7 @@ struct CandidateRanker: Sendable {
     /// 候補数がこれ以上なら前置フィルタを使う
     let prefilterThreshold: Int
 
+    /// 空検索または名前・パスの一致から並びを作り、存在する候補を上限まで返す。
     func rank(
         _ text: String,
         in catalog: CandidateCatalog,
@@ -31,14 +32,22 @@ struct CandidateRanker: Sendable {
         return try existingCandidates(ordered, in: catalog, history: history, matches: matches, limit: limit)
     }
 
+    /// 空検索ではお気に入り、使用履歴あり、未使用の順に並べ、各段の順序を決定的にする。
     private func orderByFrecency(
         _ catalog: CandidateCatalog,
         history: HistoryLookup,
         directoriesOnly: Bool
     ) throws -> some Sequence<RankKey> {
         let isEligible = { (index: Int) in !directoriesOnly || catalog.entries[index].isDirectory }
+        var favorites: [RankKey] = []
+        for index in catalog.entries.indices where isEligible(index) && catalog.entries[index].source == .favorites {
+            try Task.checkCancellation()
+            let usage = history.usage(at: index)
+            favorites.append(RankKey(score: usage?.frecency ?? 0, usage: usage, index: index, matchSlot: nil, isFavorite: true))
+        }
+        favorites.sort(by: RankKey.ranksHigher)
         var used: [RankKey] = []
-        for index in history.usedIndices where isEligible(index) {
+        for index in history.usedIndices where isEligible(index) && catalog.entries[index].source != .favorites {
             try Task.checkCancellation()
             guard let usage = history.usage(at: index) else { continue }
             used.append(RankKey(score: usage.frecency, usage: usage, index: index, matchSlot: nil))
@@ -47,9 +56,9 @@ struct CandidateRanker: Sendable {
         // 履歴のない候補は frecency 0・最終使用日時なしで同点のため、添字の昇順（パスの昇順）がそのまま順位になる。
         // 存在確認で必要になった分だけ取り出すよう遅延させる
         let unused = catalog.entries.indices.lazy
-            .filter { isEligible($0) && history.usage(at: $0) == nil }
+            .filter { isEligible($0) && catalog.entries[$0].source != .favorites && history.usage(at: $0) == nil }
             .map { RankKey(score: 0, usage: nil, index: $0, matchSlot: nil) }
-        return [AnySequence(used), AnySequence(unused)].joined()
+        return [AnySequence(favorites), AnySequence(used), AnySequence(unused)].joined()
     }
 
     /// マッチした候補の順位と、マッチ結果（`RankKey.matchSlot` で指す）を返す。
@@ -75,7 +84,7 @@ struct CandidateRanker: Sendable {
             }
             let usage = history.usage(at: index)
             let score = Double(match.score) * (1 + log1p(usage?.frecency ?? 0))
-            keys.append(RankKey(score: score, usage: usage, index: index, matchSlot: matches.count))
+            keys.append(RankKey(score: score, usage: usage, index: index, matchSlot: matches.count, isFavorite: entry.source == .favorites))
             matches.append(match)
         }
         keys.sort(by: RankKey.ranksHigher)
@@ -98,7 +107,7 @@ struct CandidateRanker: Sendable {
             let usage = history.usage(at: key.index)
             let candidate = Candidate(
                 path: entry.path,
-                name: CandidatePath.name(of: entry.path),
+                name: entry.displayName ?? CandidatePath.name(of: entry.path),
                 isDirectory: entry.isDirectory,
                 source: entry.source,
                 frecency: usage?.frecency ?? 0,
@@ -123,15 +132,19 @@ private struct RankKey {
     let lastUsed: Double
     let index: Int
     let matchSlot: Int?
+    let isFavorite: Bool
 
-    init(score: Double, usage: HistoryLookup.Usage?, index: Int, matchSlot: Int?) {
+    init(score: Double, usage: HistoryLookup.Usage?, index: Int, matchSlot: Int?, isFavorite: Bool = false) {
         self.score = score
         lastUsed = usage?.lastUsed.timeIntervalSinceReferenceDate ?? Self.neverUsed
         self.index = index
         self.matchSlot = matchSlot
+        self.isFavorite = isFavorite
     }
 
+    /// お気に入りを優先し、その段の中ではスコア・最終使用日時・パス順を比較する。
     static func ranksHigher(_ lhs: RankKey, _ rhs: RankKey) -> Bool {
+        if lhs.isFavorite != rhs.isFavorite { return lhs.isFavorite }
         if lhs.score != rhs.score {
             return lhs.score > rhs.score
         }

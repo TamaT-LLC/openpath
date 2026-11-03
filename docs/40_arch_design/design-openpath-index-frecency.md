@@ -66,6 +66,7 @@ protocol ChangeTrackingCandidateSource: CandidateSource {
 | ソース | 収集方法 | 更新契機 |
 | --- | --- | --- |
 | history | `HistoryCandidateSource(store:)` → `HistoryStore.entries` | 確定のたび（`CandidateIndexRebuilder.refreshHistory()` 経由。全件再構築のカウントには含めない） |
+| favorites | `FavoriteCandidateSource` が設定のパス自身を存在・種別確認し、別名付きの `SourceItem` を返す。配下を走査しない | 起動時、周期、手動再構築、favorites の変更 |
 | roots | `RootCandidateSource.sources(for: config)` が **ルートごとに 1 ソース**を生成。`RootDirectoryScanner`（`FileManager.enumerator` を同期 API でラップ）で `config.depth` まで走査。`.skipsHiddenFiles`（名前が `.` で始まる項目と、隠し属性 UF_HIDDEN の項目。ホームの `~/Library` も後者として配下ごと除外される）、`node_modules` / `.git` / `target` / `DerivedData` / `.build` は既定で除外（`config.ignore` で変更可） | 起動時、全件再構築が終わってから 5 分後（変更が無ければ走査しない。下記）、メニューの「候補を再構築」、`roots` / `depth` / `ignore` / `ghq.enabled` の設定変更 |
 | ghq | `GhqCandidateSource(lister:)` → `GhqRepositoryLister` が `Process` で `ghq root` → `ghq list -p` を実行。`PATH` は `LoginShellPathResolver`（login shell から取得するキャッシュ持ちの actor）で解決し、候補ソースと ConfigStore（§6）で 1 インスタンスを共有する | 起動時、全件再構築が終わってから 5 分後（結果が前回と同じなら差し替えない。下記）、メニューの「候補を再構築」、設定変更 |
 
@@ -78,7 +79,7 @@ protocol ChangeTrackingCandidateSource: CandidateSource {
   - roots の記録の数と上限: 記録するディレクトリはルートを除けば候補に含まれるディレクトリの一部なので、ルートあたりの上限（20,000 件）で数が抑えられる。`stat` は 1 回約 1.3µs で、最悪（depth 未満のディレクトリだけで 20,000 件）でも約 25ms と、全件の走査（約 90ms）と差し替え（約 65ms）より軽いため、別の上限は設けない（計測はいずれも Apple M5 Pro・リリースビルド、PROJ-TST-003 §3.2）。ホームを depth 2 で走査する既定の roots（`["~"]`、§6）では、記録するのはホームと直下の表示されるディレクトリだけで、その数は候補の数（開発者のホームで 147 件、§6）より少なく、確認は 1 回 1ms 未満。上限で打ち切った走査も、読んだディレクトリが同じなら同じ候補になるため記録する。ルートを走査できなかったときと、中身を読めないディレクトリがあったとき（権限が無い、プライバシーの許可が無い `~/Documents` 等）は記録を作らず、次の周期も走査する（読めるようになってもディレクトリの状態が変わるとは限らないため）。隠しファイルの置き換え（ホーム直下の dotfile 等）でもルートの mtime は変わるため走査し直すが、候補が同じなら差し替えない（下記）。
   - ghq: `ghq list -p` の結果の比較で判定し、`ghq root` 配下の構造（host/owner/repo）の mtime は使わない。リポジトリかどうかは ghq が VCS のディレクトリ（`.git` 等）の有無で決め、階層も任意（サブグループ等）のため、既存のディレクトリをリポジトリにした場合などを構造の mtime では捉えられないため。子プロセス（`ghq root` → `ghq list -p`）の CPU 時間は 1 回約 37ms（リポジトリ 104 件）、本体側は約 1.4ms で、5 分ごとなら 0.02% 未満。
   - history: 現状どおり、確定のたびの `refreshHistory()` と周期のたびに取り直す。
-  - `CandidateIndex.replace(source:with:)` は、前処理した候補（パスと種別の並び）が今のソースの候補と同じなら何もせず false を返す。統合し直すと全ソースの候補数に比例した CPU（候補 20,000 件で約 65ms。同じと分かれば約 0.9ms）と一時的なメモリを使うため。
+  - `CandidateIndex.replace(source:with:)` は、前処理した候補（パス・種別・別名の並び）が今のソースの候補と同じなら何もせず false を返す。別名だけが変わった場合も名前の前処理と前置フィルタを更新する。統合し直すと全ソースの候補数に比例した CPU と一時的なメモリを使うため。
 - 再構築のメモリのピークを抑える（Issue #78）: 走査の列挙で得る URL・リソース値は autorelease されるため、1 件ごとに `autoreleasepool` で解放する（スレッドのプールに任せると走査の後もしばらく全件分が残り、候補 20,000 件の走査の後の phys_footprint が約 6MB 多かった）。前処理済みの対象（`CandidateTargets`、64 バイト）は参照型にして、`PreparedCandidate` と `CandidateCatalog.Entry` には参照だけを持たせる（1 件あたり 96→32 バイト、112→48 バイト）。統合の配列と表は先に確保し、統合に使った表を並べ替えた後の添字に書き換えて使い回す（伸ばしながらの作り直しや表の作り直しで一時的に重なる分を避ける）。
 - 同一パスが複数ソースにある場合は 1 件に統合し、`source` は優先度 history > ghq > roots で決める。統合キーはファイルシステムを引かない字句的な正規化（末尾 `/`・`//`・`.`・`..`。`RootPathResolver` と同じ規則）を使う。isDirectory の判定が食い違う場合はファイル扱いにする（フォルダ選択のパネルにファイルを誤って出すより、ディレクトリを 1 件出し損ねる方が害が小さいため）。絶対パスにできない候補は含めない。frecency / `lastUsed` は同じ正規化をかけた上で `HistoryStore` から引く（PR #57）。
 - 空クエリで履歴（frecency > 0）が 8 件未満のときは、frecency 0 の候補をパスの昇順で補う（初回起動で履歴が空のときに「一致する候補がありません」を出さないため、PR #57）。
@@ -97,6 +98,14 @@ protocol ChangeTrackingCandidateSource: CandidateSource {
 - `DirectoryQuerySession.isListed(directory:ignoredNames:)` で同じキーの取得結果を保持しているかを判定する。Presenter は再列挙が必要なときだけ読み込み表示にし、取得済みの候補の絞り込みでは次の結果を待つ間も行を維持する。
 - 共有 `CandidateIndex` とは混ぜず、現在のフォルダのスナップショットだけを保持するため、他ソースの候補との重複や範囲外の混入はない。確定したパスは既存の仕組みで履歴に記録される。
 - 別フォルダへの移動・通常検索への復帰・パレットを閉じる際に列挙と検索を取り消し、保持した候補を破棄する。世代の照合で古い結果・案内の反映を防ぐ。同じパネルの再表示では範囲と選択パスだけを保って再列挙する。ignore の変更、再構築の完了、候補変更の通知でも列挙し直す。
+
+### お気に入りと別名（#130）
+
+- `[favorites]` のキーを表示名、文字列の値をパスとして読み、`Favorite(name:path:)` を作る。パスは roots と同じ字句的な正規化と `~` 展開を行う。空白だけの別名・相対パス・非文字列・正規化後のパス重複は設定エラー。テーブルに出現順がないため、デコードの順番は別名の昇順で決定的にする。
+- `SourceItem.displayName` は通常ソースでは nil、お気に入りでは別名。統合の優先度は favorites > history > ghq > roots とし、同じパスの候補を一件にする。種別が食い違う場合のファイル優先は従来どおり。別名は `Candidate.name` と行の表示名へ引き継ぎ、注入する値は実パスを保つ。
+- 名前のマッチ対象に別名、パスのマッチ対象に実パスを使う。前置フィルタには両方の文字を含める。マッチしないお気に入りは候補にならず、一致したお気に入りを通常候補より前に並べる。空検索でもお気に入りを先にし、各グループでは既存の frecency・最終使用日時・パス順を保つ。空検索は合計最大8件。
+- 名前のマッチ位置は表示中の別名へハイライトする。実パスがマッチした場合は場所欄に末尾要素まで含めた実パスを出してハイライトする（通常名では末尾要素を名前欄に表示する）。直接入力は `~` 展開・字句正規化したパスで索引を正確に引くため、ファジー検索や件数制限で対象行が落ちても別名と最終使用日時を維持する。存在・現在の種別は直接入力用の検証で確かめる。
+- favorite の変更は候補ソースに関わる設定変更として再構築する。お気に入りを外すと別名と優先表示を取り除き、他ソースに同じパスがあれば通常の名前へ戻る。履歴のクリアは設定済みのお気に入りを消さない。
 
 ## 4. frecency スコア
 
@@ -155,6 +164,10 @@ ignore = ["node_modules", ".git", "target", "DerivedData", ".build"]
 
 [ghq]
 enabled = true
+
+[favorites]
+"仕事" = "~/repos/my-project"
+"請求書" = "~/Documents/invoices"
 ```
 
 - **既定値**（キーを省略したときの値）: `roots` は空配列（環境によっては `~/repos` 等が存在しないため。初回に生成するファイルには ghq root かホームを明示して書く。省略時の値をそれに合わせない理由は「既定値の生成」を参照）。`disabled_apps` も空（REQ-001 FR-DETECT-04「既定は全アプリ有効」のため。サンプルの `com.apple.finder` は記入例）。`disabledApps` は `Set<String>`（包含判定にしか使わないため）、`ignore` は `[String]` のまま（PR #41）。

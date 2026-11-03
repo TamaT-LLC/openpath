@@ -18,6 +18,8 @@ public struct ConfigDecodingError: Error, Equatable, Sendable {
         /// `roots` の要素が絶対パスに解決できない（相対パス、`~user` 形式など）
         case invalidRootPath(String)
         case invalidHotkey(HotkeyParseError)
+        case emptyFavoriteName
+        case duplicateFavoritePath(String)
     }
 }
 
@@ -70,6 +72,10 @@ private extension ConfigDecodingError.Kind {
             "'\(path)' は / で始まる絶対パス、~、または ~/ で始まるパスで指定してください（~user 形式は使えません）"
         case .invalidHotkey(let error):
             error.description
+        case .emptyFavoriteName:
+            "お気に入りには空でない表示名を指定してください"
+        case .duplicateFavoritePath(let path):
+            "お気に入りのパス '\(path)' が重複しています（1 パスにつき別名は 1 つです）"
         }
     }
 }

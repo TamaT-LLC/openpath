@@ -18,9 +18,13 @@ public struct StandardCandidateSources: CandidateSourceProviding {
         self.searchPathProvider = searchPathProvider
     }
 
+    /// 設定に応じて各ソースを作る。空のお気に入りテーブルからはソースを作らない。
     public func sources(for config: Config) -> [any CandidateSource] {
         let roots: [any CandidateSource] = RootCandidateSource.sources(for: config)
         var sources: [any CandidateSource] = [history] + roots
+        if !config.favorites.isEmpty {
+            sources.append(FavoriteCandidateSource(favorites: config.favorites))
+        }
         if config.ghq.enabled {
             let lister = GhqRepositoryLister(isEnabled: true, searchPathProvider: searchPathProvider)
             sources.append(GhqCandidateSource(lister: lister))

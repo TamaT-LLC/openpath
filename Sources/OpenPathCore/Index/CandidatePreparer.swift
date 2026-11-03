@@ -1,5 +1,5 @@
 /// マッチに使う前処理済みの対象（name / path）と、前置フィルタ用の文字集合。
-/// パスだけで決まるため、同じパスを持つ別のソースや再走査の結果で共有する。
+/// パスと表示名で決まるため、その両方が同じ別ソースや再走査の結果で共有する。
 ///
 /// 参照型にして、ソースごとの前処理済みの候補（PreparedCandidate）と統合後の候補（CandidateCatalog.Entry）には
 /// 参照（8 バイト）だけを持たせる。値（64 バイト）で持つと、差し替えのたびに作り直す両方の配列が
@@ -21,6 +21,7 @@ struct PreparedCandidate: Sendable {
     /// 正規化済みの絶対パス（CandidatePath）
     let path: String
     let isDirectory: Bool
+    let displayName: String?
     let targets: CandidateTargets
 }
 
@@ -30,6 +31,7 @@ struct CandidatePreparer: Sendable {
     let matcher: FuzzyMatcher
 
     /// パスを正規化し、絶対パスでないものを除き、ソース内の重複を 1 件にまとめる。
+    /// 別名が変わった候補は名前のマッチ対象と前置フィルタを作り直す。
     /// 重複で isDirectory が食い違う場合は、統合時（CandidateCatalog）と同じくファイルとして扱う。
     func prepare(_ items: [SourceItem], reusing previous: CandidateCatalog = .empty) -> [PreparedCandidate] {
         var prepared: [PreparedCandidate] = []
@@ -48,19 +50,21 @@ struct CandidatePreparer: Sendable {
                 prepared[index] = PreparedCandidate(
                     path: existing.path,
                     isDirectory: existing.isDirectory && item.isDirectory,
+                    displayName: existing.displayName,
                     targets: existing.targets
                 )
                 continue
             }
             indexByPath[path] = prepared.count
-            let targets = previous.targets(forPath: path) ?? makeTargets(path: path)
-            prepared.append(PreparedCandidate(path: path, isDirectory: item.isDirectory, targets: targets))
+            let targets = previous.targets(forPath: path, displayName: item.displayName) ?? makeTargets(path: path, displayName: item.displayName)
+            prepared.append(PreparedCandidate(path: path, isDirectory: item.isDirectory, displayName: item.displayName, targets: targets))
         }
         return prepared
     }
 
-    private func makeTargets(path: String) -> CandidateTargets {
-        let name = matcher.prepareTarget(CandidatePath.name(of: path))
+    /// 表示中の名前と実パスを前処理し、両方の文字を前置フィルタへ含める。
+    private func makeTargets(path: String, displayName: String?) -> CandidateTargets {
+        let name = matcher.prepareTarget(displayName ?? CandidatePath.name(of: path))
         let pathTarget = matcher.prepareTarget(path)
         var signature = CharacterSignature(pathTarget.elements.lazy.map(\.code))
         // 表示名はパスの末尾要素なので通常はパスの文字に含まれるが、書記素の区切りが変わる場合に備えて合わせる
