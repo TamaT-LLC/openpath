@@ -83,18 +83,30 @@ public final class PanelInjector: PathInjecting {
                 didSubmit: autoConfirm.hook,
                 clock: clock
             ),
+            saveFilename: SaveFilenamePreservation { cutoff in
+                try await SaveFilenameLocator.locate(in: targetWindow(), cutoff: cutoff)
+            },
+            saveDestination: SaveDestinationVerification(clock: clock) { cutoff in
+                try await SavePanelLocationReader.path(in: targetWindow(), cutoff: cutoff)
+            },
             clock: clock
         )
         self.targetWindow = targetWindow
     }
 
     public func inject(path: String, autoConfirm: Bool) async throws {
+        try await inject(path: path, autoConfirm: autoConfirm, panelKind: .open)
+    }
+
+    /// 権限を確認して種別付きの注入を実行する。保存パネルは自動確定を抑止し、名前保持を伴う移動に限定する。
+    public func inject(path: String, autoConfirm: Bool, panelKind: PanelKind) async throws {
+        let autoConfirm = panelKind == .open && autoConfirm
         // 権限が無いと CGEvent は黙って捨てられ、600ms 待った末にシート待ちのタイムアウトになってしまうため先に判定する。
         // 他アプリへの AX 呼び出しは権限が無くても apiDisabled ではなく cannotComplete を返すため、エラーコードでなく状態で判定する。
         guard AccessibilityPermission.currentStatus().isGranted else {
             throw InjectionError.axError(code: AXError.apiDisabled.rawValue)
         }
-        try await flow.run(path: path, autoConfirm: autoConfirm)
+        try await flow.run(path: path, autoConfirm: autoConfirm, panelKind: panelKind)
         if Log.isDebugEnabled, !autoConfirm {
             logLocationAfterInjection()
         }

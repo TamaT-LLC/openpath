@@ -23,6 +23,7 @@ final class FlowHarness {
     /// ⌘⇧G でシートが出なかったときの代替が読む、フォーカス中の要素（fallsBackWhenSheetMissing のときだけ使う）。
     let focusReader: FocusReaderFake
     let flow: PathInjectionFlow
+    let saveLocation = SaveLocationFake()
     /// Return が届いて移動先シートを閉じるか（送った経路ごと）。既定はどの経路でも閉じる（Issue #95）。
     /// 「移動」の押下は常に閉じる。
     var returnClosesSheet: (InjectionKeyRoute) -> Bool = { _ in true }
@@ -38,7 +39,9 @@ final class FlowHarness {
         sheetAppearsAt: Duration? = .milliseconds(150),
         clipboard: PasteboardSnapshot = .userClipboard,
         fallsBackWhenSheetMissing: Bool = false,
-        routeMemory: GoToSheetRouteMemory? = nil
+        routeMemory: GoToSheetRouteMemory? = nil,
+        saveFilename: SaveFilenamePreservation? = nil,
+        afterSubmit: @escaping @MainActor () -> Void = {}
     ) {
         let log = InjectionEventLog(clock: clock)
         let pasteboard = FakePasteboard(contents: clipboard)
@@ -71,6 +74,7 @@ final class FlowHarness {
         let didSubmit: PathInjectionHooks.DidSubmitGoToSheet = { isAutoConfirm, elapsedSinceSubmit in
             log.record(.didSubmitGoToSheet(autoConfirm: isAutoConfirm))
             try await autoConfirm.confirm(autoConfirm: isAutoConfirm, elapsedSinceSubmit: elapsedSinceSubmit)
+            afterSubmit()
         }
         let prepareForKeyEvents: PathInjectionHooks.PrepareForKeyEvents = { log.record(.prepareForKeyEvents) }
         let normalizer = InjectionPathNormalizer(homeDirectory: Self.homeDirectory)
@@ -111,12 +115,18 @@ final class FlowHarness {
                 clock: clock
             ),
             normalizer: normalizer,
+            saveFilename: saveFilename,
+            saveDestination: SaveDestinationVerification(clock: clock) { [saveLocation] cutoff in
+                try cutoff.throwIfReached()
+                if let error = saveLocation.error { throw error }
+                return saveLocation.path
+            },
             clock: clock
         )
         keyboard.onPostForSheet = { [unowned self] keyStroke, route in
             switch keyStroke {
             case .returnKey where returnClosesSheet(route):
-                closeGoToSheet(after: sheetCloseDelay)
+                completeNavigation()
             case .goToFolder, .slash:
                 // 次の注入の ⌘⇧G・/ で、閉じた移動先シートが開き直す
                 reopenGoToSheet()
@@ -125,8 +135,14 @@ final class FlowHarness {
             }
         }
         goButton.onActivate = { [unowned self] in
-            closeGoToSheet(after: sheetCloseDelay)
+            completeNavigation()
         }
+    }
+
+    /// 確定による移動と、ユーザーによるシートの却下を分けて再現する。
+    func completeNavigation() {
+        if saveLocation.updatesOnNavigation { saveLocation.path = goToField.currentValue }
+        closeGoToSheet(after: sheetCloseDelay)
     }
 
     /// 移動先シートを閉じる（delay 後に入力欄が消え、主方式・副方式のどちらから探しても見つからなくなる）。
@@ -174,4 +190,12 @@ final class FlowHarness {
             }
         }
     }
+}
+
+/// 保存パネルの現在地の観測値。シートが閉じても、却下なら変化しない。
+@MainActor
+final class SaveLocationFake {
+    var path: String?
+    var updatesOnNavigation = true
+    var error: (any Error)?
 }

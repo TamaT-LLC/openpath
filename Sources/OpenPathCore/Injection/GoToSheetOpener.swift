@@ -7,14 +7,21 @@ struct InjectionKeySender {
     /// 送る直前に注入先がまだ有効かを確かめる。注入中に別のアプリへ切り替わると、システム経由のキーはそのアプリに届いてしまう
     /// （チャットアプリでの送信など）。注入先のプロセスへ送るキーは別のアプリには届かないが、注入先の別のウィンドウに届くため同じく確かめる。
     /// 送り先を決める（AX の読み取りを伴う）準備は確認の前に済ませ、確認とキャンセルの確認の後は待ちを挟まずに送る。
+    /// - Parameter requiresSheetKeyFocus: 保存パネルへの Return では、注入先の確認後に移動先シートのキー入力先も確認する。
     func post(
         _ keyStroke: InjectionKeyStroke,
         via route: InjectionKeyRoute,
         failingAs step: InjectionStep,
+        requiresSheetKeyFocus: Bool = false,
         on timeline: ElapsedTimeline
     ) async throws {
         let prepared = try await prepare(keyStroke, via: route, failingAs: step)
         try await InjectionTargetCheck.ensureAvailable(targetGuard, on: timeline)
+        if requiresSheetKeyFocus {
+            guard try await InjectionTargetCheck.goToSheetHasFocus(targetGuard, on: timeline) == true else {
+                throw InjectionError.saveNavigationUnverified
+            }
+        }
         try Task.checkCancellation()
         prepared.post()
     }

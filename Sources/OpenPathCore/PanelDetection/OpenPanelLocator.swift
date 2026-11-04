@@ -165,9 +165,10 @@ public struct OpenPanelLocator<Node: Hashable> {
             element: candidate,
             context: PanelContext(
                 id: id,
-                isDirectoriesOnly: selectionMode.isDirectoriesOnly,
+                isDirectoriesOnly: entries[candidate]?.kind == .save || selectionMode.isDirectoriesOnly,
                 frame: frame,
-                isSelectionModeProvisional: selectionModeState?.isProvisional ?? false
+                isSelectionModeProvisional: selectionModeState?.isProvisional ?? false,
+                kind: entries[candidate]?.kind ?? .open
             ),
             selectionEstimate: selectionEstimate,
             isNewlyClassified: isNewlyClassified
@@ -223,7 +224,10 @@ public struct OpenPanelLocator<Node: Hashable> {
             return (id, true)
         case .savePanel:
             recordClassification(of: candidate, diagnosticTarget, classification, result: .savePanel, attempt: attempt, reader: reader)
-            entries[candidate]?.verdict = .rejected
+            let id = makePanelID()
+            entries[candidate]?.verdict = .openPanel(id)
+            entries[candidate]?.kind = .save
+            return (id, true)
         case .missingElements(let hasConfirmButton, let hasFileList):
             let verdict = verdictAfterMissingElements(completedRechecks: completedRechecks ?? 0, now: now)
             let result = OpenPanelDiagnostic.Result.missingElements(

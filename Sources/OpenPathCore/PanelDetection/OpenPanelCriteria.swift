@@ -41,6 +41,8 @@ public enum OpenPanelCriteria {
     /// サブロールが AXDialog ではなく AXStandardWindow になるため、この識別子で候補にする（Issue #83。macOS 27 の
     /// 自プロセスのパネルで、非モーダル・モーダルとも `open-panel` であることを確認）。ローカライズされない。
     public static let openPanelIdentifier = "open-panel"
+    public static let savePanelIdentifier = "save-panel"
+    public static let saveButtonTitles: Set<String> = ["保存", "Save"]
 
     /// パネルの候補（条件 1）か。ダイアログのウィンドウ、シート、AXIdentifier が `open-panel` のウィンドウが対象。
     public static func isPanelCandidate(role: String?, subrole: String?, identifier: String? = nil) -> Bool {
@@ -54,6 +56,9 @@ public enum OpenPanelCriteria {
         }
         if subrole == dialogSubrole {
             return .dialog
+        }
+        if identifier == savePanelIdentifier {
+            return .savePanelIdentifier
         }
         if identifier == openPanelIdentifier {
             return .openPanelIdentifier

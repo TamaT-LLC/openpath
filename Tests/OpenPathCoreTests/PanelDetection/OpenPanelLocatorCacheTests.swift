@@ -71,14 +71,14 @@ struct OpenPanelLocatorCacheTests {
         #expect(harness.tree.reads == [Read(element: window, attribute: .children)])
     }
 
-    @Test("保存パネルは時間が経っても判定し直さない（確定的にパネルではない）")
+    @Test("保存パネルは時間が経っても判定し直さない")
     func savePanelIsNeverReclassified() {
         let harness = OpenPanelLocatorHarness()
         let window = harness.add(Self.documentWithSheet(Fixtures.sheet(id: "save", Fixtures.savePanelBody(.japanese))))
         _ = harness.locate(window)
         harness.tree.resetReads()
 
-        #expect(harness.locate(window, at: .seconds(60)) == .notFound)
+        #expect(harness.panel(in: window, at: .seconds(60))?.context.kind == .save)
         #expect(!harness.didClassify(StubElement("save")))
     }
 

@@ -1,6 +1,11 @@
 import CoreGraphics
 
-/// 検知した NSOpenPanel の情報。
+public enum PanelKind: Equatable, Sendable {
+    case open
+    case save
+}
+
+/// 検知したファイルパネルの情報。
 /// Core をテスト可能な純 Swift に保つため、AX の型は持ち込まず値だけを持つ。
 public struct PanelContext: Identifiable, Equatable, Sendable {
     /// パネルの識別子。同じパネルの再検知（AXObserver とポーリングの重複等）を見分けるために使う。
@@ -13,6 +18,7 @@ public struct PanelContext: Identifiable, Equatable, Sendable {
         }
     }
 
+    public let kind: PanelKind
     public let id: ID
     /// パネルを呼び出したアプリ。AX 要素の所属する XPC サービスではなく、観測していたアプリの ID。
     public let callingApplicationBundleID: String?
@@ -29,8 +35,9 @@ public struct PanelContext: Identifiable, Equatable, Sendable {
 
     public init(
         id: ID, isDirectoriesOnly: Bool, frame: CGRect, isSelectionModeProvisional: Bool = false,
-        callingApplicationBundleID: String? = nil
+        kind: PanelKind = .open, callingApplicationBundleID: String? = nil
     ) {
+        self.kind = kind
         self.id = id
         self.callingApplicationBundleID = Self.historyApplicationID(callingApplicationBundleID)
         self.isDirectoriesOnly = isDirectoriesOnly
@@ -45,6 +52,7 @@ public struct PanelContext: Identifiable, Equatable, Sendable {
             isDirectoriesOnly: isDirectoriesOnly,
             frame: frame,
             isSelectionModeProvisional: isSelectionModeProvisional,
+            kind: kind,
             callingApplicationBundleID: callingApplicationBundleID
         )
     }
@@ -53,7 +61,8 @@ public struct PanelContext: Identifiable, Equatable, Sendable {
     public func withCallingApplication(_ bundleID: String?) -> PanelContext {
         PanelContext(
             id: id, isDirectoriesOnly: isDirectoriesOnly, frame: frame,
-            isSelectionModeProvisional: isSelectionModeProvisional, callingApplicationBundleID: bundleID
+            isSelectionModeProvisional: isSelectionModeProvisional, kind: kind,
+            callingApplicationBundleID: bundleID
         )
     }
 

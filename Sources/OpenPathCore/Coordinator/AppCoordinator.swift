@@ -197,9 +197,10 @@ public final class AppCoordinator {
         }
     }
 
+    /// 表示中のパレットの確定を受け取り、保存パネルでは設定や Cmd+Enter に関わらず自動確定を無効にする。
     private func confirm(path: String, openImmediately: Bool) {
         guard case .panelShown(let context, isPaletteVisible: true) = state, !path.isEmpty else { return }
-        startInjection(context: context, path: path, autoConfirm: openImmediately || isAutoConfirmEnabled())
+        startInjection(context: context, path: path, autoConfirm: context.kind == .open && (openImmediately || isAutoConfirmEnabled()))
     }
 
     private func escape() {
@@ -277,7 +278,7 @@ public final class AppCoordinator {
 
     // MARK: - 注入
 
-    /// 新しい注入と全体タイムアウトを作り、パネルの入力をロックする。
+    /// 再試行の失敗表示を消してパレットをロックし、パネル種別を保持した注入と全体タイムアウトを開始する。
     /// 履歴の帰属はこの時点の呼び出し元に固定し、その後のパネル情報更新から切り離す。
     private func startInjection(context: PanelContext, path: String, autoConfirm: Bool) {
         // 失敗を表示しているパレットからの確定は、再試行
@@ -291,7 +292,7 @@ public final class AppCoordinator {
             id: injectionID,
             isAutoConfirm: autoConfirm,
             applicationBundleID: context.callingApplicationBundleID,
-            work: makeInjectionTask(id: injectionID, path: path, autoConfirm: autoConfirm),
+            work: makeInjectionTask(id: injectionID, path: path, autoConfirm: autoConfirm, panelKind: context.kind),
             timeout: Self.makeTimeoutTask(on: clock) { [weak self] in
                 self?.finishInjection(id: injectionID, outcome: .timedOut)
             }
@@ -301,14 +302,15 @@ public final class AppCoordinator {
         palette.showStatus(PaletteMessage.injecting)
     }
 
-    private func makeInjectionTask(id: Int, path: String, autoConfirm: Bool) -> Task<Void, Never> {
+    /// キャンセル済みなら注入せず、指定されたパネル種別で実行した結果を同じ注入 ID の状態遷移へ戻す。
+    private func makeInjectionTask(id: Int, path: String, autoConfirm: Bool, panelKind: PanelKind) -> Task<Void, Never> {
         Task { [weak self, injector] in
             // confirm 直後にパネル消滅等で取り消された場合、無関係なウィンドウへキー入力を送らない
             guard !Task.isCancelled else { return }
             self?.injectionDidStart(id: id)
             let outcome: InjectionOutcome
             do {
-                try await injector.inject(path: path, autoConfirm: autoConfirm)
+                try await injector.inject(path: path, autoConfirm: autoConfirm, panelKind: panelKind)
                 outcome = .succeeded
             } catch {
                 outcome = .failed(error)

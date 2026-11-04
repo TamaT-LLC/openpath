@@ -23,7 +23,7 @@ struct OpenPanelNonModalWindowTests {
 
     @Test(
         "open-panel 以外の AXIdentifier の通常のウィンドウは候補にしない",
-        arguments: [nil, "save-panel", "Open-Panel", "open-panel-2", ""] as [String?]
+        arguments: [nil, "Open-Panel", "open-panel-2", ""] as [String?]
     )
     func otherIdentifiersAreNotCandidates(identifier: String?) {
         #expect(!OpenPanelCriteria.isPanelCandidate(role: "AXWindow", subrole: "AXStandardWindow", identifier: identifier))
@@ -67,27 +67,25 @@ struct OpenPanelNonModalWindowTests {
         #expect(!second.isNewlyClassified)
     }
 
-    @Test("非モーダルの保存パネル（AXIdentifier が save-panel）は見つからない", arguments: PanelUILanguage.allCases)
-    func nonModalSavePanelIsNotFound(language: PanelUILanguage) {
+    @Test("非モーダルの保存パネルを見つける", arguments: PanelUILanguage.allCases)
+    func nonModalSavePanelIsFound(language: PanelUILanguage) {
         let harness = OpenPanelLocatorHarness()
         let window = harness.add(Fixtures.nonModalPanelWindow(id: "save", identifier: "save-panel", Fixtures.savePanelBody(language)))
 
-        #expect(harness.locate(window) == .notFound)
-        // 候補でないウィンドウは判定しない（中身を読まない）
-        #expect(harness.tree.readCount(of: .title) == 0)
+        #expect(harness.panel(in: window)?.context.kind == .save)
     }
 
-    @Test("AXIdentifier が open-panel でも、保存パネルの中身なら見つからない（条件 4 は変えない）")
-    func openPanelIdentifierWithSaveBodyIsRejected() {
+    @Test("AXIdentifier が open-panel でも、保存パネルの中身なら保存として扱う")
+    func openPanelIdentifierWithSaveBodyIsSave() {
         let harness = OpenPanelLocatorHarness()
         let window = harness.add(Fixtures.nonModalPanelWindow(id: "save", Fixtures.savePanelBody(.japanese)))
 
-        #expect(harness.locate(window) == .notFound)
+        #expect(harness.panel(in: window)?.context.kind == .save)
     }
 
     // MARK: - AX の読み取り
 
-    @Test("AXIdentifier は候補でないウィンドウでだけ、ウィンドウごとに 1 回だけ読む")
+    @Test("AXIdentifier は初回の候補分類で読み、キャッシュ中は読まない")
     func identifierIsReadOncePerNonCandidateWindow() {
         let harness = OpenPanelLocatorHarness()
         let document = harness.add(Fixtures.documentWindow(id: "document"))
@@ -103,7 +101,7 @@ struct OpenPanelNonModalWindowTests {
         }
 
         let identifierReads = harness.tree.reads.filter { $0.attribute == .identifier }.map(\.element)
-        #expect(identifierReads == [document, sheetHost])
+        #expect(identifierReads == [document, dialog, sheetHost, StubElement("sheet")])
     }
 
     @Test("キャッシュが効いた後の非モーダルのパネルの走査は、矩形の読み取りだけ")

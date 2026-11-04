@@ -2,7 +2,7 @@
 public enum OpenPanelVerdict: Equatable, Sendable {
     /// NSOpenPanel（条件 2〜4 を満たす）。
     case openPanel
-    /// 保存パネル（条件 4 に反する）。保存パネルが開くパネルに変わることはないため、確定的な判定。
+    /// 保存パネル。保存先のフォルダへ移動するが、保存ボタンは押さない。
     case savePanel
     /// 確定ボタンかファイル一覧が見つからなかった。アラートなどのほか、描画途中のパネル
     /// （サンドボックスアプリのパネルは別プロセスで描画される）の可能性もある。
@@ -42,8 +42,8 @@ public enum OpenPanelClassifier {
     /// candidate の子孫を幅優先で調べる。
     ///
     /// AX の往復を減らすため、ロールは 1 要素につき 1 回だけ読み、タイトルはボタンと入力欄、説明は入力欄、
-    /// サブロールは AXList（アイコン表示のファイル一覧か見分ける）にだけ読む。
-    /// ファイル一覧など `OpenPanelCriteria.prunedRoles` の要素の中へは降りない。保存パネルと分かった時点で以降の読み取りをやめる。
+    /// サブロールは AXList（アイコン表示）と入力欄（検索欄の除外）にだけ読む。
+    /// ファイル一覧など `OpenPanelCriteria.prunedRoles` の要素の中へは降りない。保存パネルでも確定ボタンと一覧（または save-panel 識別子）を確かめる。
     /// - Parameters:
     ///   - candidate: パネルの候補。条件 1（ロール・サブロール）は呼び出し側で確かめておくこと。
     ///   - search: 探索の上限。既定は DSN-001 §2.2 の 6 階層・400 要素。
@@ -68,12 +68,13 @@ public enum OpenPanelClassifier {
         collectingDetails: Bool = false
     ) throws -> OpenPanelClassification<Reader.Node> {
         var findings = Findings<Reader.Node>()
+        findings.hasSaveIdentifier = try reader.identifier(of: candidate) == OpenPanelCriteria.savePanelIdentifier
+        findings.isSavePanel = findings.hasSaveIdentifier
         var details = collectingDetails ? ClassificationDetailsRecorder(search: search) : nil
         // ロールの読み取り（AX の往復）を 1 要素 1 回にするため、子を列挙するときにロールも読んで組にする
         _ = try search.descendants(
             of: ClassifiedNode(node: candidate, role: nil, depth: 0, isCandidate: true),
             children: { element in
-                guard !findings.isSavePanel else { return [] }
                 if let role = element.role, OpenPanelCriteria.prunedRoles.contains(role) {
                     return []
                 }
@@ -94,7 +95,7 @@ public enum OpenPanelClassifier {
                     element.node,
                     role: element.role,
                     depth: element.depth,
-                    isSearchStopped: findings.isSavePanel,
+                    isSearchStopped: false,
                     reader: reader
                 )
                 try readingDescendant { try inspect(element, reader: reader, findings: &findings, details: &details) }
@@ -104,9 +105,12 @@ public enum OpenPanelClassifier {
         return OpenPanelClassification(verdict: verdict(from: findings), fileList: findings.fileList, details: details?.summary)
     }
 
+    /// 保存の識別を優先し、確定ボタンと一覧の有無から分類する。保存識別子がある場合だけ一覧を省略できる。
     private static func verdict<Node>(from findings: Findings<Node>) -> OpenPanelVerdict {
         if findings.isSavePanel {
-            return .savePanel
+            return (findings.hasSaveButton || findings.hasConfirmButton) && (findings.fileList != nil || findings.hasSaveIdentifier)
+                ? .savePanel
+                : .missingElements(hasConfirmButton: findings.hasSaveButton || findings.hasConfirmButton, hasFileList: findings.fileList != nil)
         }
         let hasFileList = findings.fileList != nil
         guard findings.hasConfirmButton, hasFileList else {
@@ -122,22 +126,24 @@ public enum OpenPanelClassifier {
         findings: inout Findings<Reader.Node>,
         details: inout ClassificationDetailsRecorder?
     ) throws {
-        guard !findings.isSavePanel, let role = element.role else { return }
+        guard let role = element.role else { return }
         switch role {
         case OpenPanelCriteria.buttonRole:
             // 確定ボタンが見つかった後は、タイトルを読まない（要約を集めるときは、要約の側で読む）
             var readTitle: String??
-            if !findings.hasConfirmButton {
+            if !findings.hasConfirmButton && (!findings.isSavePanel || !findings.hasSaveButton) {
                 let title = try reader.title(of: element.node)
                 readTitle = .some(title)
                 if let title {
-                    findings.hasConfirmButton = OpenPanelCriteria.isConfirmButtonTitle(title)
+                    findings.hasConfirmButton = findings.hasConfirmButton || OpenPanelCriteria.isConfirmButtonTitle(title)
+                    findings.hasSaveButton = findings.hasSaveButton || OpenPanelCriteria.saveButtonTitles.contains(title.trimmingCharacters(in: .whitespacesAndNewlines))
                 }
             }
             details?.recordButton(element.node, readTitle: readTitle, reader: reader)
         case OpenPanelCriteria.textFieldRole:
             let labels = try saveFieldLabels(of: element.node, reader: reader)
-            findings.isSavePanel = labels.isSaveField
+            let isSearchField = try reader.subrole(of: element.node) == "AXSearchField"
+            findings.isSavePanel = findings.isSavePanel || (labels.isSaveField && !isSearchField)
             details?.recordTextField(element.node, labels: labels, reader: reader)
         default:
             // サブロールで見分けるのはアイコン表示（AXList）だけなので、それ以外の要素ではサブロールを読まない
@@ -171,6 +177,8 @@ public enum OpenPanelClassifier {
 /// 判定の途中で見つかった条件。
 private struct Findings<Node> {
     var hasConfirmButton = false
+    var hasSaveButton = false
+    var hasSaveIdentifier = false
     /// 最後に見つけたファイル一覧
     var fileList: FileListElement<Node>?
     var isSavePanel = false

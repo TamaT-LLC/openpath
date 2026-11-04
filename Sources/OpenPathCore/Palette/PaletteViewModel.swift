@@ -36,6 +36,7 @@ public final class PaletteViewModel {
     public private(set) var isLocked = false
     /// 候補ソース（roots / ghq）を構築中か。パレットの表示をまたいで保つ
     public private(set) var isBuildingCandidates = false
+    public var panelKind: PanelKind = .open
     public private(set) var status: PaletteStatus?
     /// 場所の列でホームディレクトリを "~" と表すための基準
     public let homeDirectory: String
@@ -63,6 +64,7 @@ public final class PaletteViewModel {
             return .status(message)
         case nil:
             if let directoryMessage { return .status(directoryMessage) }
+            if panelKind == .save { return .status("Enter: 保存先へ移動 · Esc: 閉じる（保存は手動）") }
             return isBuildingCandidates ? .status(PaletteText.buildingCandidates) : .keyHints
         }
     }

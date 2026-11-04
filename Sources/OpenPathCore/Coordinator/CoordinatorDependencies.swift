@@ -24,6 +24,13 @@ public protocol PathInjecting {
     /// パネルを path へ移動させ、autoConfirm なら「開く」も押す。
     /// 失敗時は InjectionError を投げる。キャンセルされたら速やかに戻り、ペーストボードは復元すること。
     func inject(path: String, autoConfirm: Bool) async throws
+    func inject(path: String, autoConfirm: Bool, panelKind: PanelKind) async throws
+}
+
+extension PathInjecting {
+    public func inject(path: String, autoConfirm: Bool, panelKind: PanelKind) async throws {
+        try await inject(path: path, autoConfirm: panelKind == .open && autoConfirm)
+    }
 }
 
 /// 確定したパスの履歴記録（HistoryStore）。

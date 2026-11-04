@@ -6,6 +6,7 @@ public enum PanelCandidateReason: String, Equatable, Sendable {
     case dialog
     /// AXIdentifier が `open-panel`（非モーダルのパネル。サブロールは AXStandardWindow になる、Issue #83）。
     case openPanelIdentifier
+    case savePanelIdentifier
 }
 
 /// パネル判定の診断 1 件（debug ログ用、Issue #83）。

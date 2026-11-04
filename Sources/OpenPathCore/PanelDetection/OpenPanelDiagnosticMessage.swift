@@ -30,8 +30,8 @@ extension OpenPanelDiagnostic {
         lhs.count != rhs.count ? lhs.count > rhs.count : lhs < rhs
     }
 
-    /// 弾いた条件（`notCandidate` / `noConfirmButton` / `noFileList` / `looksLikeSavePanel` / `truncated`）と、
-    /// 判定できなかったこと（`unreadable`）。開くパネルなら空。
+    /// 弾いた条件（`notCandidate` / `noConfirmButton` / `noFileList` / `truncated`）と、
+    /// 判定できなかったこと（`unreadable`）。開く・保存パネルなら空。
     /// `truncated` は、確定ボタンかファイル一覧が見つからず、探索を上限で打ち切っていた場合に添える。
     public var rejectionReasons: [String] {
         switch result {
@@ -40,7 +40,7 @@ extension OpenPanelDiagnostic {
         case .openPanel:
             []
         case .savePanel:
-            ["looksLikeSavePanel"]
+            []
         case .unreadable:
             ["unreadable"]
         case .missingElements(let hasConfirmButton, let hasFileList, _):
@@ -88,7 +88,9 @@ extension OpenPanelDiagnostic {
 
     private var resultText: String {
         switch result {
-        case .notCandidate, .savePanel:
+        case .savePanel:
+            "savePanel"
+        case .notCandidate:
             "rejected: \(rejectionReasons.joined(separator: "+"))"
         case .openPanel:
             "openPanel"

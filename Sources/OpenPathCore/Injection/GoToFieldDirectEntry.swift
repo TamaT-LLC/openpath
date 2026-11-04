@@ -76,7 +76,8 @@ public final class GoToFieldDirectEntry {
         path: String,
         autoConfirm: Bool,
         fallingBackFrom primaryError: InjectionError,
-        keyRoute: InjectionKeyRoute = .targetProcess
+        keyRoute: InjectionKeyRoute = .targetProcess,
+        panelKind: PanelKind = .open
     ) async throws {
         try Task.checkCancellation()
         let timeline = ElapsedTimeline(clock: clock)
@@ -110,7 +111,8 @@ public final class GoToFieldDirectEntry {
             try await submitByReturnKey(
                 controls: controls,
                 via: keyRoute,
-                requiresSheetKeyFocus: primaryError == .timeout(step: .waitSheetClose),
+                requiresSheetKeyFocus: panelKind == .save || primaryError == .timeout(step: .waitSheetClose),
+                sheetFocusFailure: panelKind == .save ? .saveNavigationUnverified : .timeout(step: .waitSheetClose),
                 on: timeline
             )
         }
@@ -140,11 +142,12 @@ public final class GoToFieldDirectEntry {
 
     /// キー入力は注入先のキーウィンドウ（移動先シート）に届く。Return を送れなければ入力欄を確定する。
     /// - Parameter requiresSheetKeyFocus: 送る直前に、移動先シートがキーウィンドウかを確かめるか（主方式の Return の後にシートが
-    ///   閉じなかった場合。`ensureSheetHasKeyFocus`）。
+    ///   閉じなかった場合、または保存パネル。`ensureSheetHasKeyFocus`）。
     private func submitByReturnKey(
         controls: GoToFieldControls,
         via route: InjectionKeyRoute,
         requiresSheetKeyFocus: Bool,
+        sheetFocusFailure: InjectionError,
         on timeline: ElapsedTimeline
     ) async throws {
         await prepareForKeyEvents()
@@ -160,7 +163,7 @@ public final class GoToFieldDirectEntry {
         }
         // 注入先の確認はパネル自体にフォーカスがあっても通るため、移動先シートの確認は最後に行い、その後は待たずに送る
         if requiresSheetKeyFocus {
-            try await ensureSheetHasKeyFocus(on: timeline)
+            try await ensureSheetHasKeyFocus(failingAs: sheetFocusFailure, on: timeline)
         }
         try Task.checkCancellation()
         prepared.post()
@@ -172,13 +175,14 @@ public final class GoToFieldDirectEntry {
     /// 入力欄の kAXFocused はシートがキーウィンドウかを反映せず、注入先の確認はパネル自体にフォーカスがあっても通る。
     /// 主方式の Return が遅れて届いてシートが閉じかけている・キーウィンドウでなくなっていると、システム経由の Return が
     /// 後ろのパネルの「開く」に届き、移動していない元の場所で開いてしまうため（PR #118 のレビュー）。
-    /// 移動先シートでない・確かめられなければ、Return を送らずに `timeout(.waitSheetClose)` を投げる。
-    private func ensureSheetHasKeyFocus(on timeline: ElapsedTimeline) async throws {
+    /// 保存パネルでは主方式の失敗箇所によらず同じ確認を行う。
+    /// 移動先シートでない・確かめられなければ、Return を送らずに指定された失敗を投げる。
+    private func ensureSheetHasKeyFocus(failingAs error: InjectionError, on timeline: ElapsedTimeline) async throws {
         let hasKeyFocus = try await InjectionTargetCheck.goToSheetHasFocus(targetGuard, on: timeline)
         Log.debug("副方式: 移動先シートがキーウィンドウかを確かめました（\(hasKeyFocus.map(String.init) ?? "確かめられない")、+\(InjectionLogFormat.milliseconds(timeline.elapsed))）")
         guard hasKeyFocus != true else { return }
         Log.warning("副方式: 移動先シートがキーウィンドウでない・確かめられないため、Return を送らずに失敗とします")
-        throw InjectionError.timeout(step: .waitSheetClose)
+        throw error
     }
 
     /// - Returns: Return を送れない（キーイベントを作れない・送り先を決められない）場合は nil。
