@@ -4,14 +4,14 @@ public protocol CandidateSourceProviding: Sendable {
     func sources(for config: Config) -> [any CandidateSource]
 }
 
-/// 本番の候補ソース: 確定履歴・設定の roots（1 ルート 1 ソース）・ghq（`ghq.enabled` のときだけ）。DSN-002 §3。
+/// 本番の候補ソース: お気に入り・確定履歴・設定の roots・有効化された ghq / zoxide。DSN-002 §3。
 public struct StandardCandidateSources: CandidateSourceProviding {
     private let history: HistoryCandidateSource
     private let searchPathProvider: any SearchPathProviding
 
     /// - Parameters:
     ///   - history: 確定履歴のソース。
-    ///   - searchPathProvider: ghq を探す検索パスの取得元。login shell の起動を繰り返さないよう、
+    ///   - searchPathProvider: ghq / zoxide を探す検索パスの取得元。login shell の起動を繰り返さないよう、
     ///     ConfigStore の ghq root の取得などと共有すること。
     public init(history: HistoryCandidateSource, searchPathProvider: any SearchPathProviding) {
         self.history = history
@@ -28,6 +28,10 @@ public struct StandardCandidateSources: CandidateSourceProviding {
         if config.ghq.enabled {
             let lister = GhqRepositoryLister(isEnabled: true, searchPathProvider: searchPathProvider)
             sources.append(GhqCandidateSource(lister: lister))
+        }
+        if config.zoxide.enabled {
+            let lister = ZoxideDirectoryLister(isEnabled: true, searchPathProvider: searchPathProvider)
+            sources.append(ZoxideCandidateSource(lister: lister))
         }
         return sources
     }

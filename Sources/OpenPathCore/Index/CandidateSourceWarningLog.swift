@@ -1,6 +1,6 @@
 /// 候補ソースの警告 1 件分のログ（DSN-002 §3「失敗時は警告ログのみ」）。
 ///
-/// ルートの打ち切り（RootDirectoryScanner）と ghq の失敗（GhqRepositoryLister）は発生元が記録するため、
+/// ルートの打ち切りと ghq / zoxide の失敗は発生元が記録するため、
 /// ここで扱うのは発生元が記録しない「ルートを走査できなかった」警告だけにする。
 /// info 以上のメッセージは統合ログで公開扱いになるため（NFR-05）、ルートのパスはメッセージに含めず
 /// `detail` として debugPath で別に出す。
@@ -22,7 +22,7 @@ struct CandidateSourceWarningLog: Equatable, Sendable {
         switch warning {
         case .rootUnavailable(let root, let reason):
             self.init(level: .warning, message: "候補のルートを走査できませんでした（\(Self.describe(reason))）", detail: root)
-        case .rootTruncated, .ghqFailed:
+        case .rootTruncated, .ghqFailed, .zoxideFailed:
             return nil
         }
     }
@@ -66,6 +66,7 @@ extension CandidateSourceKind {
         case .history: "history"
         case .root: "roots"
         case .ghq: "ghq"
+        case .zoxide: "zoxide"
         }
     }
 

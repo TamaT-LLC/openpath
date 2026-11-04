@@ -32,7 +32,7 @@ struct CandidateCatalog: Sendable {
 
     /// ソースごとの候補を、同じパスは 1 件にまとめて統合する（DSN-002 §3）。
     ///
-    /// source と表示名は優先度 favorites > history > ghq > roots（`CandidateSourceKind.mergesBefore`）で最も高いものにする。
+    /// source と表示名は優先度 favorites > history > ghq > zoxide > roots（`CandidateSourceKind.mergesBefore`）で最も高いものにする。
     /// isDirectory が食い違う場合はファイルとして扱う。種別が走査の間に変わった可能性があり、
     /// フォルダ選択のパネル（FR-SOURCE-05）にファイルを出すより、ディレクトリを 1 件出し損ねる方が害が小さいため。
     init(merging sources: [CandidateSourceKind: [PreparedCandidate]]) {

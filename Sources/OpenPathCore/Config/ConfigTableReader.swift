@@ -12,11 +12,17 @@ enum TopLevelConfigKey: String, ConfigKeySet {
     case disabledApps = "disabled_apps"
     case ignore
     case ghq
+    case zoxide
     case favorites
 }
 
 /// `[ghq]` テーブルのキー
 enum GhqConfigKey: String, ConfigKeySet {
+    case enabled
+}
+
+/// `[zoxide]` テーブルのキー
+enum ZoxideConfigKey: String, ConfigKeySet {
     case enabled
 }
 

@@ -60,6 +60,10 @@ public enum DefaultConfigFile {
             # ghq 管理下のリポジトリ（ghq list -p）を候補に含めるか
             enabled = \(GhqConfig.defaultEnabled)
 
+            [zoxide]
+            # ターミナルで使う zoxide のディレクトリ履歴を候補に含めるか
+            enabled = \(ZoxideConfig.defaultEnabled)
+
             # よく使うパスを別名で検索・優先表示します。名前は引用符で囲んでください
             [favorites]
             # "仕事" = "~/repos"

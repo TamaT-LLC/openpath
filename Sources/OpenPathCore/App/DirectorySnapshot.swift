@@ -41,7 +41,7 @@ public struct DirectorySnapshot: Sendable {
                 return DirectorySnapshot(items: [], message: message)
             case .rootTruncated:
                 message = PaletteText.directoryTruncated
-            case .ghqFailed:
+            case .ghqFailed, .zoxideFailed:
                 break
             }
         }

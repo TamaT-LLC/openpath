@@ -4,7 +4,7 @@ import os
 
 /// 設定から ScriptedCandidateSource を組み立てる CandidateSourceProviding。
 /// 同じ kind には常に同じソースを返すため、設定が変わっても kind ごとの呼び出しを追える。
-/// 並びは本番（StandardCandidateSources）と同じく history → roots → ghq。
+/// 並びは本番（StandardCandidateSources）と同じく history → roots → ghq → zoxide。
 final class ScriptedSourceProvider: CandidateSourceProviding {
     private let sources = OSAllocatedUnfairLock<[CandidateSourceKind: ScriptedCandidateSource]>(initialState: [:])
 
@@ -20,10 +20,12 @@ final class ScriptedSourceProvider: CandidateSourceProviding {
         }
     }
 
+    /// 設定で有効なソースだけを返し、無効化したソースの候補が再構築で除去されることを検証する。
     func sources(for config: Config) -> [any CandidateSource] {
         let roots: [any CandidateSource] = config.roots.map { source(.root($0)) }
         let ghq: [any CandidateSource] = config.ghq.enabled ? [source(.ghq)] : []
-        return [source(.history)] + roots + ghq
+        let zoxide: [any CandidateSource] = config.zoxide.enabled ? [source(.zoxide)] : []
+        return [source(.history)] + roots + ghq + zoxide
     }
 }
 
@@ -35,8 +37,8 @@ enum RebuilderFixtures {
     /// 周期の境界の直前・直後を表すための僅かな時間
     static let tick: Duration = .seconds(1)
 
-    static func config(roots: [String] = [firstRoot], ghq: Bool = false) -> Config {
-        Config(roots: roots, ghq: GhqConfig(enabled: ghq))
+    static func config(roots: [String] = [firstRoot], ghq: Bool = false, zoxide: Bool = false) -> Config {
+        Config(roots: roots, ghq: GhqConfig(enabled: ghq), zoxide: ZoxideConfig(enabled: zoxide))
     }
 
     static func directory(_ path: String) -> SourceItem {

@@ -43,6 +43,28 @@ struct CandidateIndexMergeTests {
         #expect(sources == [shared: .history, ghqAndRoot: .ghq])
     }
 
+    @Test("全ソースの統合は favorites > history > ghq > zoxide > roots で、削除すると次のソースへ戻る", arguments: [false, true])
+    func allSourcePrioritiesAndFavoriteRemoval(reverseOrder: Bool) async throws {
+        let index = F.makeIndex()
+        let path = "/Users/me/repos/app"
+        let priority: [CandidateSourceKind] = [.favorites, .history, .ghq, .zoxide, .root("/Users/me/repos")]
+        let insertionOrder = reverseOrder ? Array(priority.reversed()) : priority
+        for source in insertionOrder {
+            let item = SourceItem(path: path, isDirectory: true, displayName: source == .favorites ? "仕事" : nil)
+            await index.replace(source: source, with: [item])
+        }
+
+        for source in priority {
+            let candidates = try await Self.allCandidates(in: index)
+            #expect(index.count == 1)
+            #expect(candidates.map(\.path) == [path])
+            #expect(candidates.map(\.source) == [source])
+            #expect(candidates.map(\.name) == [source == .favorites ? "仕事" : "app"])
+            await index.replace(source: source, with: [])
+        }
+        #expect(index.count == 0)
+    }
+
     @Test("入れ子のルートで同じパスが出た場合は 1 件にし、source はルートの文字列の昇順で先のルート")
     func mergesNestedRoots() async throws {
         let index = F.makeIndex()
